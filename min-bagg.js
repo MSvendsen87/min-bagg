@@ -15,42 +15,48 @@
     if (!href) return "";
     href = String(href).trim();
     if (href.startsWith("http")) {
-      try { href = new URL(href).pathname; } catch (e) {}
+      try { href = new URL(href).pathname + (new URL(href).search || ""); } catch (e) {}
     }
     return href;
   }
 
+  // ✅ MYE mer tolerant: vi krever bare /shop/..., og filtrerer eksplisitt bort “ikke-produkt”
   function looksLikeProductUrl(path) {
     if (!path) return false;
-    // Typisk produkt: /shop/<slug> (ikke /shop/search, /shop/wishlist osv)
-    if (!path.startsWith("/shop/")) return false;
-    if (path.startsWith("/shop/search")) return false;
-    if (path === "/shop" || path === "/shop/") return false;
+    path = String(path).trim();
 
-    var low = path.toLowerCase();
+    // Fjern query/hash for sjekk
+    var pure = path.split("#")[0];
+    var pureNoQ = pure.split("?")[0];
 
-    // Filtrer bort "ikke-produkter"
-    var bad = [
-      "wishlist", "onskeliste",
-      "cart", "kasse", "checkout",
-      "account", "konto", "login", "logg",
-      "category", "kategori", "brands", "merker",
-      "pages", "sider"
+    if (!pureNoQ.startsWith("/shop/")) return false;
+
+    var low = pureNoQ.toLowerCase();
+
+    // Blokker typiske ikke-produkt-sider
+    var blockedPrefixes = [
+      "/shop/search",
+      "/shop/wishlist",
+      "/shop/onskeliste",
+      "/shop/cart",
+      "/shop/kasse",
+      "/shop/checkout",
+      "/shop/account",
+      "/shop/konto",
+      "/shop/login",
+      "/shop/logg",
+      "/shop/categories",
+      "/shop/kategorier",
+      "/shop/brands",
+      "/shop/merker"
     ];
-    for (var i = 0; i < bad.length; i++) {
-      if (low.indexOf("/shop/" + bad[i]) !== -1) return false;
-      if (low.indexOf(bad[i]) !== -1 && low.indexOf("/shop/") !== -1 && low.split("/").length <= 4) {
-        // ekstra sikkerhet for korte "system-lenker"
-        if (bad[i] === "wishlist" || bad[i] === "onskeliste") return false;
-      }
+    for (var i = 0; i < blockedPrefixes.length; i++) {
+      if (low.indexOf(blockedPrefixes[i]) === 0) return false;
     }
 
-    // Må være “slug” (1 nivå etter /shop/)
-    // /shop/slug  -> OK
-    // /shop/slug/xxx -> ofte ikke produkt
-    var parts = path.split("?")[0].split("#")[0].split("/").filter(Boolean);
-    if (parts.length !== 2) return false; // ["shop","slug"]
-    if (!parts[1] || parts[1].length < 2) return false;
+    // Må ha noe etter /shop/
+    var rest = pureNoQ.slice("/shop/".length);
+    if (!rest || rest === "/" || rest.length < 2) return false;
 
     return true;
   }
@@ -114,31 +120,44 @@
       .then(function (html) {
         var doc = new DOMParser().parseFromString(html, "text/html");
 
-        // 1) Prøv å finne “produktområdet” først (grid/liste) for å unngå header/meny-lenker
+        // Finn et scope som mest sannsynlig inneholder produkter
         var scope =
-          doc.querySelector(".product-list, .products, .product-grid, .productList, [data-products], main") ||
+          doc.querySelector(".product-list, .products, .product-grid, .productList, [data-products], main, body") ||
           doc;
 
-        var anchors = scope.querySelectorAll("a[href^='/shop/'], a[href*='://golfkongen.no/shop/']");
+        // Finn alle shop-lenker
+        var anchors = scope.querySelectorAll("a[href]");
         var out = [];
         var seen = {};
 
         anchors.forEach(function (a) {
-          var href = normHref(a.getAttribute("href") || "");
+          var hrefRaw = a.getAttribute("href") || "";
+          if (!hrefRaw) return;
+
+          // kun shop-lenker (relative eller absolute)
+          if (hrefRaw.indexOf("/shop/") === -1 && hrefRaw.indexOf("://golfkongen.no/shop/") === -1) return;
+
+          var href = normHref(hrefRaw);
           if (!looksLikeProductUrl(href)) return;
 
-          if (seen[href]) return;
-          seen[href] = 1;
+          // Unngå duplikater
+          var key = href.split("#")[0];
+          if (seen[key]) return;
+          seen[key] = 1;
 
-          // Må “se ut som” et produktkort: har bilde eller ligger i element med product-klasse
+          // Krev at lenken ser ut som et produktkort: bilde ELLER ligger i en produkt-container
           var hasImg = !!a.querySelector("img");
-          var inProductThing = !!(a.closest && a.closest(".product, .product-card, .product-item, .productCard, li, article"));
+          var inProductThing = !!(a.closest && a.closest(".product, .product-card, .product-item, .productCard, li, article, .card"));
           if (!hasImg && !inProductThing) return;
 
           var title = pickTitleFromAnchor(a);
-          if (!title || title.toLowerCase() === "ønskeliste" || title.toLowerCase() === "onskeliste") return;
+          if (!title) return;
 
-          out.push({ title: title, href: href });
+          // Filtrer bort tydelige ikke-produkt-tekster
+          var tLow = title.toLowerCase();
+          if (tLow === "ønskeliste" || tLow === "onskeliste" || tLow === "logg inn") return;
+
+          out.push({ title: title, href: href.split("?")[0] }); // vi trenger ikke query på produktlink
         });
 
         debug.textContent = "Fant " + out.length + " produkter (etter filtrering).";
@@ -181,5 +200,5 @@
     if (e.key === "Enter") fetchSearch(input.value.trim());
   });
 
-  console.log("[MINBAGG] Search parser loaded");
+  console.log("[MINBAGG] Search parser loaded (v2)");
 })();
