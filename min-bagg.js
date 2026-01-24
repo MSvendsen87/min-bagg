@@ -120,7 +120,7 @@
 
       <div class="gk-mb-card">
         <h3 style="margin:0 0 6px 0;">Topp 3 globalt</h3>
-        <div id="gk-mb-top3" class="gk-mb-muted">Topp 3 lastes når global lagring er aktiv.</div>
+        <div id="gk-mb-top3" class="gk-mb-muted">Laster topp 3 fra global statistikk…</div>
       </div>
     `;
 
@@ -283,24 +283,65 @@
     }
 
     if (state.supa) {
-      state.supa.from('mybag_popularity')
-        .select('product_id,title,url,image,count')
+      // Ny kilde: public.popular_discs (type, name, count, last_seen)
+      // Vi henter en "stor nok" liste, og plukker topp 3 per type.
+      state.supa.from('popular_discs')
+        .select('type,name,count,last_seen')
         .order('count', { ascending: false })
-        .limit(3)
+        .limit(200)
         .then(function (res) {
           var rows = (res && res.data) ? res.data : [];
           if (!rows.length) { el.textContent = 'Ingen data ennå.'; return; }
-          el.innerHTML = rows.map(function (x, i) {
-            var href = normHref(x.url || '');
-            var img = normalizeImgUrl(x.image || '');
-            return `
-              <div class="gk-mb-item">
-                <div class="gk-mb-left">
-                  <span class="gk-mb-pill">#${i + 1}</span>
-                  ${img ? `<img class="gk-mb-img" src="${esc(img)}" alt="" />` : `<span class="gk-mb-img"></span>`}
-                  <a class="gk-mb-title" href="${esc(href)}" target="_blank" rel="noopener">${esc(x.title || '')}</a>
+
+          var TYPES = [
+            { key: 'putter', label: 'Puttere' },
+            { key: 'midrange', label: 'Midrange' },
+            { key: 'fairway', label: 'Fairway drivers' },
+            { key: 'distance', label: 'Distance drivers' }
+          ];
+
+          function topForType(t) {
+            var out = [];
+            for (var i = 0; i < rows.length; i++) {
+              var r = rows[i];
+              if (String(r.type || '').toLowerCase() !== t) continue;
+              out.push(r);
+              if (out.length >= 3) break;
+            }
+            return out;
+          }
+
+          el.innerHTML = TYPES.map(function (t) {
+            var top = topForType(t.key);
+            if (!top.length) {
+              return `
+                <div style="margin:10px 0 14px 0;">
+                  <div class="gk-mb-row" style="justify-content:space-between;">
+                    <strong>${esc(t.label)}</strong>
+                    <span class="gk-mb-muted">Ingen data ennå</span>
+                  </div>
                 </div>
-                <span class="gk-mb-muted">${esc(x.count || '')}</span>
+              `;
+            }
+            return `
+              <div style="margin:10px 0 14px 0;">
+                <div class="gk-mb-row" style="justify-content:space-between;">
+                  <strong>${esc(t.label)}</strong>
+                  <span class="gk-mb-muted">Topp 3</span>
+                </div>
+                <div class="gk-mb-list" style="margin-top:6px;">
+                  ${top.map(function (x, i) {
+                    return `
+                      <div class="gk-mb-item">
+                        <div class="gk-mb-left">
+                          <span class="gk-mb-pill">#${i + 1}</span>
+                          <span class="gk-mb-title">${esc(x.name || '')}</span>
+                        </div>
+                        <span class="gk-mb-muted">${esc(x.count || '')}</span>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
               </div>
             `;
           }).join('');
