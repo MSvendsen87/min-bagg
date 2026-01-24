@@ -238,7 +238,7 @@ function bumpPopularity(item) {
       var t = inferPopularType(item);
       var n = (item && item.title) ? String(item.title) : '';
       if (t && n) {
-        rpcIncrementPopularDisc(t, n).catch(function(){});
+        rpcIncrementPopularDisc(t, n, item && item.href, item && item.image).catch(function(){});
       }
     } catch (e) {}
   }
@@ -271,7 +271,7 @@ function bumpPopularity(item) {
     return '';
   }
 
-  function rpcIncrementPopularDisc(type, name) {
+  function rpcIncrementPopularDisc(type, name, productUrl, imageUrl) {
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return Promise.reject(new Error('Supabase not configured'));
     var base = String(SUPABASE_URL).replace(/\/+$/, '');
     var url = base + '/rest/v1/rpc/increment_popular_disc';
@@ -283,7 +283,7 @@ function bumpPopularity(item) {
         apikey: SUPABASE_ANON_KEY,
         Authorization: 'Bearer ' + SUPABASE_ANON_KEY
       },
-      body: JSON.stringify({ p_type: String(type), p_name: String(name) })
+      body: JSON.stringify({ p_type: String(type), p_name: String(name), p_url: productUrl ? String(productUrl) : null, p_image: imageUrl ? String(imageUrl) : null })
     }).then(function (r) {
       if (!r.ok && r.status !== 204) throw new Error('RPC failed: ' + r.status);
       return true;
@@ -327,7 +327,7 @@ function bumpPopularity(item) {
       // Ny kilde: public.popular_discs (type, name, count, last_seen)
       // Vi henter en "stor nok" liste, og plukker topp 3 per type.
       state.supa.from('popular_discs')
-        .select('type,name,count,last_seen')
+        .select('type,name,count,last_seen,product_url,image_url')
         .order('count', { ascending: false })
         .limit(200)
         .then(function (res) {
@@ -376,7 +376,8 @@ function bumpPopularity(item) {
                       <div class="gk-mb-item">
                         <div class="gk-mb-left">
                           <span class="gk-mb-pill">#${i + 1}</span>
-                          <span class="gk-mb-title">${esc(x.name || '')}</span>
+                          ${x.image_url ? `<img class="gk-mb-img" src="${esc(normalizeImgUrl(x.image_url))}" alt="" />` : `<span class="gk-mb-img"></span>`}
+                          ${(x.product_url ? `<a class="gk-mb-title" href="${esc(normHref(x.product_url))}" target="_blank" rel="noopener">${esc(x.name || '')}</a>` : `<span class="gk-mb-title">${esc(x.name || '')}</span>`)}
                         </div>
                         <span class="gk-mb-muted">${esc(x.count || '')}</span>
                       </div>
