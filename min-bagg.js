@@ -1,86 +1,171 @@
 /* =========================================================
-   GOLFKONGEN – MIN BAGG
-   Guest vs Logged-in via Quickbutik marker
-   Topp 3 globalt med lenker/bilder
-   Bevarer RPC / increment_popular_disc som før
+   GOLFKONGEN – MIN BAGG (FIX: ekte Supabase user før DB-kall)
+   - Kjør kun på /sider/min-bagg
+   - Guest: viser CTA + topp 3 globalt
+   - Innlogget i butikk:
+       - Hvis Supabase-session finnes: last/lagre bag i Supabase
+       - Hvis ingen Supabase-session: vis “koble Min Bagg” (magic link)
    ========================================================= */
 
 (function () {
   'use strict';
 
   // Kjør kun på /sider/min-bagg
-  var path = (location && location.pathname || '')
-    .replace(/\/+$/, '')
-    .toLowerCase();
-
+  var path = ((location && location.pathname) ? location.pathname : '').replace(/\/+$/, '').toLowerCase();
   if (path !== '/sider/min-bagg') return;
 
-  if (window.__MINBAGG_LOADED__) return;
-  window.__MINBAGG_LOADED__ = true;
+  if (window.__MINBAGG_APP_RUNNING__) return;
+  window.__MINBAGG_APP_RUNNING__ = true;
 
   /* ------------------------------
-     KONFIG
+     Konfig (fra loader / global)
   ------------------------------ */
-  var SUPA_URL = window.GK_SUPABASE_URL;
-  var SUPA_KEY = window.GK_SUPABASE_ANON_KEY;
+  var SUPA_URL = (window.GK_SUPABASE_URL || '').trim();
+  var SUPA_ANON = (window.GK_SUPABASE_ANON_KEY || '').trim();
 
-  if (!SUPA_URL || !SUPA_KEY) {
-    console.warn('[MINBAGG] Missing Supabase config');
+  /* ------------------------------
+     Utils
+  ------------------------------ */
+  function log() {
+    try { console.log.apply(console, arguments); } catch (_) {}
   }
 
-  var root = document.getElementById('min-bagg-root');
-  if (!root) {
-    console.log('[MINBAGG] root not found on page');
-    return;
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function qs(sel, root) {
+    return (root || document).querySelector(sel);
+  }
+
+  function getLoginMarker() {
+    // Bruker din nye fasit-marker i Theme:
+    // <span id="gk-login-marker" style="display:none"
+    //   data-logged-in="1/0"
+    //   data-firstname="..."
+    //   data-email="... (kan være tom)">
+    var m = document.getElementById('gk-login-marker');
+    if (!m) return { loggedIn: false, firstname: '', email: '' };
+
+    var ds = m.dataset || {};
+    var li = (ds.loggedIn || ds.loggedin || '0') + '';
+    return {
+      loggedIn: li === '1',
+      firstname: ds.firstname || '',
+      email: ds.email || ''
+    };
+  }
+
+  function ensureRoot() {
+    var root = document.getElementById('min-bagg-root');
+    if (!root) {
+      log('[MINBAGG] root not found');
+      return null;
+    }
+    return root;
+  }
+
+  function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function btn(cls, text, onClick) {
+    var b = el('button', cls, text);
+    b.type = 'button';
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function linkBtn(cls, text, href) {
+    var a = el('a', cls, text);
+    a.href = href;
+    return a;
+  }
+
+  function looksLikeEmail(s) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || '').trim());
+  }
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = function () { resolve(); };
+      s.onerror = function () { reject(new Error('Failed to load: ' + src)); };
+      document.head.appendChild(s);
+    });
   }
 
   /* ------------------------------
-     HJELPERE
+     Supabase client
   ------------------------------ */
-  function el(tag, cls, html) {
-    var e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (html !== undefined) e.innerHTML = html;
-    return e;
+  function ensureSupabaseClient() {
+    if (!SUPA_URL || !SUPA_ANON) {
+      return Promise.reject(new Error('Mangler GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY'));
+    }
+
+    // Hvis supabase-js allerede finnes, bruk den
+    if (window.supabase && window.supabase.createClient) {
+      return Promise.resolve(window.supabase.createClient(SUPA_URL, SUPA_ANON));
+    }
+
+    // Last supabase-js fra CDN
+    return loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js')
+      .then(function () {
+        if (!window.supabase || !window.supabase.createClient) {
+          throw new Error('Supabase library loaded, but createClient missing');
+        }
+        return window.supabase.createClient(SUPA_URL, SUPA_ANON);
+      });
   }
 
-  function fetchJson(url) {
+  /* ------------------------------
+     Data: mybag_bags
+     Forutsetter tabell med:
+       - user_id (uuid) PK / unique
+       - bag (jsonb)
+       - updated_at (timestamp) default now()
+     RLS: tillat SELECT/UPSERT for auth.uid() = user_id
+  ------------------------------ */
+  function dbLoadBag(supa, userId) {
+    // VIKTIG: ikke kall dette uten gyldig userId
+    return supa.from('mybag_bags')
+      .select('bag')
+      .eq('user_id', userId)
+      .maybeSingle()
+      .then(function (res) {
+        if (res.error) throw res.error;
+        return (res.data && res.data.bag) ? res.data.bag : null;
+      });
+  }
+
+  function dbSaveBag(supa, userId, bag) {
+    return supa.from('mybag_bags')
+      .upsert({ user_id: userId, bag: bag, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
+      .then(function (res) {
+        if (res.error) throw res.error;
+        return true;
+      });
+  }
+
+  /* ------------------------------
+     Global topp 3 (popular_discs)
+     (Hvis du bruker dette allerede, beholdes)
+  ------------------------------ */
+  function fetchJson(url, headers) {
     return fetch(url, {
-      headers: {
-        apikey: SUPA_KEY,
-        Authorization: 'Bearer ' + SUPA_KEY
-      }
+      method: 'GET',
+      headers: headers || {}
     }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
   }
 
-  /* ------------------------------
-     LOGIN-DETEKSJON (FAKTA, IKKE GJETTING)
-     Leser fra Quickbutik:
-     <span id="gk-login-marker"
-       data-logged-in="1"
-       data-firstname="Kristoffer">
-  ------------------------------ */
-  function getLoginState() {
-    var marker = document.getElementById('gk-login-marker');
-    if (!marker || !marker.dataset) {
-      return {
-        loggedIn: false,
-        firstname: null
-      };
-    }
-
-    return {
-      loggedIn: marker.dataset.loggedIn === '1',
-      firstname: marker.dataset.firstname || null
-    };
-  }
-
-  /* ------------------------------
-     TOPP 3 GLOBALT
-  ------------------------------ */
   function loadTop3() {
     var base = SUPA_URL.replace(/\/$/, '');
     var url =
@@ -90,22 +175,19 @@
       "&order=count.desc" +
       "&limit=50";
 
-    return fetchJson(url).then(function (rows) {
-      var grouped = {
-        putter: [],
-        midrange: [],
-        fairway: [],
-        distance: []
-      };
+    var headers = {
+      apikey: SUPA_ANON,
+      Authorization: 'Bearer ' + SUPA_ANON
+    };
 
+    return fetchJson(url, headers).then(function (rows) {
+      var grouped = { putter: [], midrange: [], fairway: [], distance: [] };
       rows.forEach(function (r) {
         if (grouped[r.type]) grouped[r.type].push(r);
       });
-
       Object.keys(grouped).forEach(function (k) {
         grouped[k] = grouped[k].slice(0, 3);
       });
-
       return grouped;
     });
   }
@@ -118,130 +200,279 @@
     box.appendChild(loading);
     container.appendChild(box);
 
-    loadTop3()
-      .then(function (groups) {
-        loading.remove();
+    loadTop3().then(function (grouped) {
+      clear(loading);
+      var wrap = el('div', 'minbagg-top3-wrap');
 
-        Object.keys(groups).forEach(function (cat) {
-          var list = groups[cat];
-          if (!list.length) return;
+      function renderGroup(title, items) {
+        var g = el('div', 'minbagg-top3-group');
+        g.appendChild(el('h3', '', title));
+        if (!items || !items.length) {
+          g.appendChild(el('div', 'minbagg-muted', 'Ingen data enda.'));
+          return g;
+        }
+        items.forEach(function (it) {
+          var row = el('a', 'minbagg-top3-row');
+          row.href = it.product_url || '#';
+          row.target = '_self';
 
-          var section = el('div', 'minbagg-top3-section');
-          section.appendChild(
-            el('h3', '', cat.charAt(0).toUpperCase() + cat.slice(1))
-          );
+          if (it.image_url) {
+            var img = document.createElement('img');
+            img.className = 'minbagg-top3-img';
+            img.alt = it.name || '';
+            img.src = it.image_url;
+            row.appendChild(img);
+          }
 
-          list.forEach(function (d, i) {
-            var row = el('div', 'minbagg-top3-row');
+          var txt = el('div', 'minbagg-top3-txt');
+          txt.appendChild(el('div', 'minbagg-top3-name', it.name || 'Ukjent'));
+          txt.appendChild(el('div', 'minbagg-top3-count', 'Valgt ' + (it.count || 0) + ' ganger'));
+          row.appendChild(txt);
 
-            var left = el('div', 'minbagg-top3-left');
-            var right = el(
-              'div',
-              'minbagg-top3-right',
-              String(d.count || 0)
-            );
-
-            if (d.image_url) {
-              var img = document.createElement('img');
-              img.src = d.image_url;
-              img.className = 'minbagg-top3-img';
-              left.appendChild(img);
-            }
-
-            var name = el(
-              'span',
-              'minbagg-top3-name',
-              (i + 1) + '. ' + d.name
-            );
-
-            if (d.product_url) {
-              var a = document.createElement('a');
-              a.href = d.product_url;
-              a.appendChild(name);
-              left.appendChild(a);
-            } else {
-              left.appendChild(name);
-            }
-
-            row.appendChild(left);
-            row.appendChild(right);
-            section.appendChild(row);
-          });
-
-          box.appendChild(section);
+          g.appendChild(row);
         });
-      })
-      .catch(function (e) {
-        loading.innerHTML = 'Kunne ikke laste toppliste';
-        console.warn('[MINBAGG] top3 error', e);
-      });
+        return g;
+      }
+
+      wrap.appendChild(renderGroup('Putter', grouped.putter));
+      wrap.appendChild(renderGroup('Midrange', grouped.midrange));
+      wrap.appendChild(renderGroup('Fairway', grouped.fairway));
+      wrap.appendChild(renderGroup('Distance', grouped.distance));
+
+      box.appendChild(wrap);
+    }).catch(function (e) {
+      loading.textContent = 'Kunne ikke laste toppliste (' + (e && e.message ? e.message : 'feil') + ').';
+    });
   }
 
   /* ------------------------------
-     GJESTEVISNING
+     UI: Guest
   ------------------------------ */
-  function renderGuestView() {
-    root.innerHTML = '';
+  function renderGuestView(root) {
+    clear(root);
 
-    var wrap = el('div', 'minbagg-guest-wrap');
+    var wrap = el('div', 'minbagg-guest');
+    wrap.appendChild(el('h2', '', 'Min Bagg'));
+    wrap.appendChild(el('div', 'minbagg-muted',
+      'For å bruke Min Bagg og lagre baggen din må du være innlogget.'
+    ));
 
-    var cta = el(
-      'div',
-      'minbagg-guest-cta',
-      '<h2>Bygg baggen din med GolfKongen</h2>' +
-        '<p>For å lagre baggen din på tvers av enheter og få personlige anbefalinger må du være innlogget.</p>' +
-        '<p><small>Du trenger bare å logge inn én gang – så husker vi deg neste gang.</small></p>'
-    );
-
-    var actions = el('div', 'minbagg-guest-actions');
-
-    var loginBtn = el('a', 'minbagg-btn', 'Logg inn');
-    loginBtn.href = '/customer/login';
-
-    var regBtn = el('a', 'minbagg-btn secondary', 'Opprett konto');
-    regBtn.href = '/customer/register';
-
-    actions.appendChild(loginBtn);
-    actions.appendChild(regBtn);
-
-    cta.appendChild(actions);
-    wrap.appendChild(cta);
+    var actions = el('div', 'minbagg-actions');
+    actions.appendChild(linkBtn('minbagg-btn minbagg-btn-primary', 'Logg inn', '/customer/login'));
+    actions.appendChild(linkBtn('minbagg-btn minbagg-btn-ghost', 'Opprett konto', '/customer/register'));
+    wrap.appendChild(actions);
 
     renderTop3(wrap);
     root.appendChild(wrap);
+
+    log('[MINBAGG] guest detected — app will NOT load');
   }
 
   /* ------------------------------
-     INNLOGGET VISNING
-     (Laster app fra GitHub)
+     UI: “Koble Min Bagg” (Supabase magic link)
   ------------------------------ */
-  function renderLoggedInView(user) {
-    if (user && user.firstname) {
-      console.log('[MINBAGG] logged in as:', user.firstname);
-    }
+  function renderConnectView(root, marker, supa) {
+    clear(root);
 
-    var s = document.createElement('script');
-    s.src =
-      'https://cdn.jsdelivr.net/gh/MSvendsen87/min-bagg@main/min-bagg.js?v=' +
-      Date.now();
-    s.defer = true;
-    document.body.appendChild(s);
+    var wrap = el('div', 'minbagg-connect');
+    wrap.appendChild(el('h2', '', 'Min Bagg'));
 
-    console.log('[MINBAGG] logged-in app loaded');
+    // Viktig: forklar “to steg” på en enkel måte
+    wrap.appendChild(el('div', 'minbagg-muted',
+      'Du er innlogget i nettbutikken. ' +
+      'For å lagre “Min Bagg” på tvers av enheter trenger du å koble den til én gang med en engangslink på e-post. ' +
+      'Etterpå huskes dette normalt av nettleseren, så du slipper å gjøre det hver gang.'
+    ));
+
+    var form = el('div', 'minbagg-connect-form');
+
+    var email = (marker.email || '').trim();
+    var emailRow = el('div', 'minbagg-row');
+
+    var emailLabel = el('div', 'minbagg-label', 'E-post (for engangslink)');
+    emailRow.appendChild(emailLabel);
+
+    var emailInput = document.createElement('input');
+    emailInput.type = 'email';
+    emailInput.className = 'minbagg-input';
+    emailInput.placeholder = 'din@epost.no';
+    emailInput.value = email;
+    emailRow.appendChild(emailInput);
+
+    form.appendChild(emailRow);
+
+    var msg = el('div', 'minbagg-muted', '');
+    form.appendChild(msg);
+
+    var actions = el('div', 'minbagg-actions');
+
+    actions.appendChild(btn('minbagg-btn minbagg-btn-primary', 'Send engangslink', function () {
+      var em = (emailInput.value || '').trim();
+      if (!looksLikeEmail(em)) {
+        msg.textContent = 'Skriv inn en gyldig e-postadresse.';
+        return;
+      }
+      msg.textContent = 'Sender…';
+
+      supa.auth.signInWithOtp({
+        email: em,
+        options: {
+          emailRedirectTo: location.origin + '/sider/min-bagg'
+        }
+      }).then(function (res) {
+        if (res.error) throw res.error;
+        msg.textContent = 'Sjekk e-posten din og trykk på linken. Du blir sendt tilbake hit.';
+      }).catch(function (e) {
+        msg.textContent = 'Feil ved sending: ' + (e && e.message ? e.message : 'ukjent feil');
+      });
+    }));
+
+    actions.appendChild(linkBtn('minbagg-btn minbagg-btn-ghost', 'Logg ut av butikk', '/customer/logout'));
+    form.appendChild(actions);
+
+    wrap.appendChild(form);
+    renderTop3(wrap);
+
+    root.appendChild(wrap);
+
+    log('[MINBAGG] shop logged-in, but no Supabase session — showing connect view');
   }
 
   /* ------------------------------
-     START
+     UI: App (minimal bag + lagring)
   ------------------------------ */
-  try {
-    var user = getLoginState();
+  function renderApp(root, marker, supa, userId) {
+    clear(root);
 
-    if (user.loggedIn) {
-      renderLoggedInView(user);
-    } else {
-      renderGuestView();
+    var wrap = el('div', 'minbagg-app');
+
+    var h = el('div', 'minbagg-header');
+    h.appendChild(el('h2', '', 'Min Bagg'));
+    h.appendChild(el('div', 'minbagg-muted',
+      'Hei ' + (marker.firstname || 'der') + ' 👋 Baggen din lagres på kontoen din.'
+    ));
+    wrap.appendChild(h);
+
+    // Status + actions
+    var topActions = el('div', 'minbagg-actions');
+    topActions.appendChild(btn('minbagg-btn minbagg-btn-ghost', 'Koble fra (logg ut Min Bagg)', function () {
+      supa.auth.signOut().then(function () {
+        location.reload();
+      });
+    }));
+    wrap.appendChild(topActions);
+
+    // Bag UI
+    var bagBox = el('div', 'minbagg-box');
+    bagBox.appendChild(el('h3', '', 'Baggen din'));
+
+    var bagList = el('div', 'minbagg-list');
+    bagBox.appendChild(bagList);
+
+    var saveMsg = el('div', 'minbagg-muted', '');
+    bagBox.appendChild(saveMsg);
+
+    wrap.appendChild(bagBox);
+
+    // Topp 3 globalt nederst
+    renderTop3(wrap);
+
+    root.appendChild(wrap);
+
+    var state = {
+      bag: [] // enkel liste: {name, url, image}
+    };
+
+    function renderBag() {
+      clear(bagList);
+      if (!state.bag.length) {
+        bagList.appendChild(el('div', 'minbagg-muted', 'Ingen disker lagt til enda.'));
+        return;
+      }
+
+      state.bag.forEach(function (d, idx) {
+        var row = el('div', 'minbagg-item');
+
+        if (d.image) {
+          var img = document.createElement('img');
+          img.className = 'minbagg-item-img';
+          img.src = d.image;
+          img.alt = d.name || '';
+          row.appendChild(img);
+        }
+
+        var mid = el('div', 'minbagg-item-mid');
+        var a = el('a', 'minbagg-item-name', d.name || 'Ukjent disk');
+        a.href = d.url || '#';
+        a.target = '_self';
+        mid.appendChild(a);
+        row.appendChild(mid);
+
+        row.appendChild(btn('minbagg-btn minbagg-btn-danger', 'Fjern', function () {
+          state.bag.splice(idx, 1);
+          renderBag();
+          save();
+        }));
+
+        bagList.appendChild(row);
+      });
     }
-  } catch (e) {
-    console.warn('[MINBAGG] init error', e);
+
+    function save() {
+      saveMsg.textContent = 'Lagrer…';
+      dbSaveBag(supa, userId, state.bag).then(function () {
+        saveMsg.textContent = 'Lagret ✅';
+        setTimeout(function () { saveMsg.textContent = ''; }, 1200);
+      }).catch(function (e) {
+        saveMsg.textContent = 'Kunne ikke lagre: ' + (e && e.message ? e.message : 'ukjent feil');
+      });
+    }
+
+    // Load
+    saveMsg.textContent = 'Laster…';
+    dbLoadBag(supa, userId).then(function (bag) {
+      state.bag = Array.isArray(bag) ? bag : [];
+      renderBag();
+      saveMsg.textContent = '';
+    }).catch(function (e) {
+      saveMsg.textContent = 'Kunne ikke laste: ' + (e && e.message ? e.message : 'ukjent feil');
+    });
   }
+
+  /* ------------------------------
+     Start
+  ------------------------------ */
+  var root = ensureRoot();
+  if (!root) return;
+
+  var marker = getLoginMarker();
+
+  // 1) Ikke innlogget i butikken → guest view
+  if (!marker.loggedIn) {
+    renderGuestView(root);
+    return;
+  }
+
+  // 2) Innlogget i butikken → Supabase “connect” eller app
+  ensureSupabaseClient().then(function (supa) {
+    return supa.auth.getSession().then(function (res) {
+      var session = res && res.data ? res.data.session : null;
+      var user = session && session.user ? session.user : null;
+
+      // VIKTIG: Ingen DB-kall før user.id finnes
+      if (!user || !user.id) {
+        renderConnectView(root, marker, supa);
+        return;
+      }
+
+      renderApp(root, marker, supa, user.id);
+    });
+  }).catch(function (e) {
+    clear(root);
+    root.appendChild(el('div', 'minbagg-muted',
+      'Min Bagg feilet å starte: ' + (e && e.message ? e.message : 'ukjent feil')
+    ));
+    log('[MINBAGG] init error', e);
+  });
+
 })();
