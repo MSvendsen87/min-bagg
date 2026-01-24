@@ -1,377 +1,628 @@
 (function () {
+  'use strict';
+
   // =========================
-  // Min Bagg – full script
-  // (patched: search.json -> search?out=json, trim() fix)
+  // GolfKongen – Min Bagg
+  // - Kjører på /sider/min-bagg
+  // - Krever kun: <div id="min-bagg-root"></div>
+  // - Valgfritt: <span id="gk-auth" data-logged-in="1" data-user-id="..."></span>
   // =========================
 
-  // Kjør kun om root finnes
-  var root = document.getElementById("min-bagg-root");
+  var ROOT_ID = 'min-bagg-root';
+  var root = document.getElementById(ROOT_ID);
   if (!root) return;
 
-  // -------------------------------------------------------------------
-  // Utils
-  // -------------------------------------------------------------------
-  function esc(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
+  // ---- Config (kan settes i theme/qs_functions.js før denne fila lastes) ----
+  var SUPABASE_URL = window.GK_SUPABASE_URL || '';
+  var SUPABASE_ANON_KEY = window.GK_SUPABASE_ANON_KEY || '';
+  var POP_API_URL = window.GK_POP_API_URL || ''; // Google Apps Script / popular discs endpoint (valgfritt)
 
-  function safeJsonParse(s) {
-    try { return JSON.parse(s); } catch (e) { return null; }
-  }
-
-  function sleep(ms) {
-    return new Promise(function (r) { setTimeout(r, ms); });
-  }
-
-  function nowIso() {
-    try { return new Date().toISOString(); } catch (e) { return "" + Date.now(); }
-  }
-
-  // -------------------------------------------------------------------
-  // (Resten av originalkoden din – UI, bag, bagmap, recos, lagring, osv.)
-  // -------------------------------------------------------------------
-
-  // ---------- BEGIN ORIGINAL (patched) ----------
-  // NB: Jeg limer inn hele innholdet slik det lå i fungerende versjon, men
-  // med patch i qbSearchJson URL (out=json) + trim() og uten search.json.
-
-  // =========================
-  // CONFIG / MARKERS
-  // =========================
-
-  // Skjult marker (om du bruker den i HTML):
-  // <span id="mybag-login-marker" style="display:none" data-logged-in="..." data-email="..." data-firstname="..."></span>
-
-  var marker = document.getElementById("mybag-login-marker");
-  function markerAttr(name) { return marker ? (marker.getAttribute(name) || "") : ""; }
-
-  function isLoggedInByMarker() {
-    var v = markerAttr("data-logged-in");
-    return v === "true" || v === "1" || v === "yes";
-  }
-
-  function markerEmail() {
-    return markerAttr("data-email") || "";
-  }
-
-  function markerFirstname() {
-    return markerAttr("data-firstname") || "";
-  }
-
-  // =========================
-  // SUPABASE (hvis aktivert i koden din)
-  // =========================
-
-  // (Hvis du har globale variabler i qs_functions.js / theme js, vil de brukes)
-  var SUPABASE_URL = (window.GK_SUPABASE_URL || window.SUPABASE_URL || "").trim();
-  var SUPABASE_ANON_KEY = (window.GK_SUPABASE_ANON_KEY || window.SUPABASE_ANON_KEY || "").trim();
-
-  // =========================
-  // UI
-  // =========================
-
-  root.innerHTML = `
-    <div class="mybagg">
-      <div class="mybagg-header">
-        <h2 class="mybagg-title">Min Bagg</h2>
-        <div class="mybagg-sub" id="mybagg-sub"></div>
-      </div>
-
-      <div class="mybagg-search">
-        <input id="mybagg-search-input" type="text" placeholder="Søk etter disk..." />
-        <button id="mybagg-search-btn" type="button">Søk</button>
-      </div>
-
-      <div class="mybagg-debug" id="mybagg-debug"></div>
-      <div class="mybagg-results" id="mybagg-results"></div>
-
-      <div class="mybagg-bag">
-        <h3>Baggen din</h3>
-        <div id="mybagg-baglist"></div>
-      </div>
-
-      <div class="mybagg-recos">
-        <h3>Anbefalt for deg</h3>
-        <div id="mybagg-recos"></div>
-      </div>
-
-      <div class="mybagg-map">
-        <h3>Bag-map</h3>
-        <div id="mybagg-map"></div>
-      </div>
-
-      <div class="mybagg-global">
-        <h3>Topp 3 globalt</h3>
-        <div id="mybagg-top3"></div>
-      </div>
-    </div>
-  `;
-
-  var sub = document.getElementById("mybagg-sub");
-  var input = document.getElementById("mybagg-search-input");
-  var btn = document.getElementById("mybagg-search-btn");
-  var debug = document.getElementById("mybagg-debug");
-  var results = document.getElementById("mybagg-results");
-  var baglist = document.getElementById("mybagg-baglist");
-  var recosEl = document.getElementById("mybagg-recos");
-  var mapEl = document.getElementById("mybagg-map");
-  var top3El = document.getElementById("mybagg-top3");
-
-  function showMsg(msg) {
-    results.innerHTML = `<div style="opacity:.85;padding:8px 0;">${esc(msg)}</div>`;
-  }
-
-  // =========================
-  // STATE
-  // =========================
-
+  // ---- State ----
   var state = {
+    q: '',
+    searchItems: [],
     bag: [],
-    recos: [],
-    top3: [],
-    user: {
-      loggedIn: isLoggedInByMarker(),
-      email: markerEmail(),
-      firstname: markerFirstname()
-    }
+    bagKey: 'gk_min_bagg_v1',
+    isLoggedIn: false,
+    userId: null,
+    supa: null
   };
 
-  if (state.user.loggedIn) {
-    sub.textContent = state.user.firstname ? ("Logget inn som " + state.user.firstname) : "Logget inn";
-  } else {
-    sub.textContent = "Ikke logget inn (lagres lokalt dersom Supabase ikke brukes)";
+  // ---- Helpers ----
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  function normHref(hrefRaw) {
+    var href = String(hrefRaw || '').trim();
+    if (!href) return '';
+    if (/^https?:\/\//i.test(href)) return href;
+    if (href[0] !== '/') href = '/' + href;
+    return href;
+  }
+  function normalizeImgUrl(u) {
+    if (!u) return '';
+    u = String(u);
+    if (u.indexOf('http') === 0) return u;
+    if (u.indexOf('//') === 0) return 'https:' + u;
+    if (u[0] !== '/') u = '/' + u;
+    return location.origin + u;
   }
 
-  // =========================
-  // SEARCH (PATCHET)
-  // =========================
-
-  async function qbSearchJson(q, limit) {
-    limit = limit || 12;
-
-    // ✅ PATCH: riktig endpoint (ikke /shop/search.json)
-    var url = "/shop/search?s=" + encodeURIComponent(q) + "&out=json&limit=" + limit;
-
-    console.log("[MINBAGG] Search URL:", url);
-
-    var res = await fetch(url, { credentials: "same-origin" });
-    if (!res.ok) {
-      throw new Error("Search failed HTTP " + res.status);
-    }
-
-    // Quickbutik kan svare text/json – vi håndterer begge
-    var txt = await res.text();
-    var json = safeJsonParse(txt);
-    if (!json) {
-      // hvis det likevel var JSON, men parse feilet, logg litt
-      console.warn("[MINBAGG] Search response not JSON, first chars:", txt.slice(0, 80));
-      throw new Error("Search response is not valid JSON");
-    }
-    return json;
+  // ---- Auth marker ----
+  function readAuthMarker() {
+    var el = document.getElementById('gk-auth');
+    if (!el) return { isLoggedIn: false, userId: null };
+    var logged = (el.getAttribute('data-logged-in') || '').toString() === '1';
+    var uid = el.getAttribute('data-user-id') || null;
+    return { isLoggedIn: !!logged, userId: uid };
   }
 
-  function pickFirstText(el, patterns) {
-    if (!el) return "";
-    var txt = (el.textContent || "").replace(/\s+/g, " ").trim();
-    if (!patterns || !patterns.length) return txt;
-    for (var i = 0; i < patterns.length; i++) {
-      if (patterns[i].test(txt)) return txt;
-    }
-    return "";
+  // ---- UI ----
+  function injectCssOnce() {
+    if (document.getElementById('gk-minbagg-style')) return;
+    var style = document.createElement('style');
+    style.id = 'gk-minbagg-style';
+    style.textContent = `
+      .gk-mb-card{background:#1f1f1f;border:1px solid #333;border-radius:12px;padding:14px;margin:12px 0}
+      .gk-mb-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+      .gk-mb-input{flex:1;min-width:220px;background:#111;border:1px solid #444;color:#fff;border-radius:10px;padding:10px 12px}
+      .gk-mb-btn{background:#2f7d32;border:1px solid #3f9b43;color:#fff;border-radius:10px;padding:10px 14px;cursor:pointer}
+      .gk-mb-btn.secondary{background:#333;border-color:#555}
+      .gk-mb-muted{color:#aaa;font-size:13px}
+      .gk-mb-list{margin-top:10px}
+      .gk-mb-item{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #2a2a2a}
+      .gk-mb-left{display:flex;gap:10px;align-items:center}
+      .gk-mb-img{width:42px;height:42px;border-radius:10px;object-fit:cover;background:#111;border:1px solid #333}
+      .gk-mb-title{color:#d7e7ff;text-decoration:none}
+      .gk-mb-pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #444;font-size:12px;color:#bbb}
+      .gk-mb-map{height:260px;border:1px dashed #444;border-radius:12px;position:relative;background:linear-gradient(180deg,#161616,#101010)}
+      .gk-mb-dot{position:absolute;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#8ab4ff;border:1px solid #1b2b44}
+      .gk-mb-dot:hover{filter:brightness(1.2)}
+      .gk-mb-tooltip{position:absolute;pointer-events:none;background:#111;border:1px solid #444;color:#fff;padding:8px 10px;border-radius:10px;font-size:12px;max-width:260px;z-index:50;display:none}
+    `;
+    document.head.appendChild(style);
   }
 
-  function parseSearchResultsFromJson(json) {
-    // Dette kan variere litt – derfor robust parsing.
-    // Vi prøver flere "kjente" former.
-    var items = [];
+  function renderShell() {
+    injectCssOnce();
+    root.innerHTML = `
+      <div class="gk-mb-card">
+        <h2 style="margin:0 0 10px 0;">Min Bagg</h2>
+        <div class="gk-mb-row">
+          <input id="gk-mb-q" class="gk-mb-input" placeholder="Søk disk (f.eks. buzzz)" />
+          <button id="gk-mb-search" class="gk-mb-btn">Søk</button>
+        </div>
+        <div id="gk-mb-msg" class="gk-mb-muted" style="margin-top:8px;"></div>
+        <div id="gk-mb-results" class="gk-mb-list"></div>
+      </div>
 
-    // Variant A: { products: [...] }
-    if (json && Array.isArray(json.products)) items = json.products;
+      <div class="gk-mb-card">
+        <h3 style="margin:0 0 6px 0;">Baggen din</h3>
+        <div id="gk-mb-bag" class="gk-mb-list"></div>
+      </div>
 
-    // Variant B: { searchresults: [...] }
-    if (!items.length && json && Array.isArray(json.searchresults)) items = json.searchresults;
+      <div class="gk-mb-card">
+        <h3 style="margin:0 0 6px 0;">Anbefalt for deg</h3>
+        <div id="gk-mb-recos" class="gk-mb-muted">Anbefalinger kommer når baggen er aktiv.</div>
+      </div>
 
-    // Variant C: { results: [...] }
-    if (!items.length && json && Array.isArray(json.results)) items = json.results;
+      <div class="gk-mb-card">
+        <h3 style="margin:0 0 6px 0;">Bag-map</h3>
+        <div class="gk-mb-muted">Understabil (venstre) → Overstabil (høyre) • Slow (nede) → Fast (oppe)</div>
+        <div id="gk-mb-map" class="gk-mb-map" style="margin-top:10px;"></div>
+        <div id="gk-mb-tip" class="gk-mb-tooltip"></div>
+      </div>
 
-    // Variant D: { items: [...] }
-    if (!items.length && json && Array.isArray(json.items)) items = json.items;
+      <div class="gk-mb-card">
+        <h3 style="margin:0 0 6px 0;">Topp 3 globalt</h3>
+        <div id="gk-mb-top3" class="gk-mb-muted">Topp 3 lastes når global lagring er aktiv.</div>
+      </div>
+    `;
 
-    // Hvis fortsatt tomt, prøv å finne første array i objektet
-    if (!items.length && json && typeof json === "object") {
-      for (var k in json) {
-        if (Array.isArray(json[k]) && json[k].length) {
-          items = json[k];
-          break;
+    var input = document.getElementById('gk-mb-q');
+    var btn = document.getElementById('gk-mb-search');
+
+    btn.addEventListener('click', function () {
+      doSearch(input.value.trim());
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doSearch(input.value.trim());
+    });
+  }
+
+  function setMsg(s) {
+    var el = document.getElementById('gk-mb-msg');
+    if (el) el.textContent = s || '';
+  }
+
+  // ---- Storage (local) ----
+  function loadLocalBag() {
+    try {
+      var raw = localStorage.getItem(state.bagKey);
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return [];
+      return arr;
+    } catch (e) {
+      return [];
+    }
+  }
+  function saveLocalBag(arr) {
+    try {
+      localStorage.setItem(state.bagKey, JSON.stringify(arr || []));
+    } catch (e) {}
+  }
+
+  // ---- Supabase init + save/load (valgfritt) ----
+  function ensureSupabaseLoaded() {
+    return new Promise(function (resolve) {
+      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return resolve(null);
+      if (window.supabase && window.supabase.createClient) {
+        state.supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        return resolve(state.supa);
+      }
+      var existing = document.getElementById('gk-supabase-js');
+      if (existing) {
+        existing.addEventListener('load', function () {
+          if (window.supabase && window.supabase.createClient) {
+            state.supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            resolve(state.supa);
+          } else resolve(null);
+        });
+        return;
+      }
+      var s = document.createElement('script');
+      s.id = 'gk-supabase-js';
+      s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+      s.onload = function () {
+        try {
+          if (window.supabase && window.supabase.createClient) {
+            state.supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            resolve(state.supa);
+          } else resolve(null);
+        } catch (e) {
+          resolve(null);
         }
-      }
+      };
+      s.onerror = function () { resolve(null); };
+      document.head.appendChild(s);
+    });
+  }
+
+  // Forventede tabeller:
+  // - mybag_bags (user_id text pk, bag jsonb, updated_at timestamptz)
+  // - mybag_popularity (product_id text pk, title text, url text, image text, count int)
+  function loadRemoteBag() {
+    if (!state.supa || !state.userId) return Promise.resolve(null);
+    return state.supa
+      .from('mybag_bags')
+      .select('bag')
+      .eq('user_id', state.userId)
+      .maybeSingle()
+      .then(function (res) {
+        if (res && res.data && Array.isArray(res.data.bag)) return res.data.bag;
+        return null;
+      })
+      .catch(function () { return null; });
+  }
+  function saveRemoteBag(arr) {
+    if (!state.supa || !state.userId) return Promise.resolve(false);
+    return state.supa
+      .from('mybag_bags')
+      .upsert({ user_id: state.userId, bag: arr, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
+      .then(function () { return true; })
+      .catch(function () { return false; });
+  }
+
+  function bumpPopularity(item) {
+    if (POP_API_URL) {
+      try {
+        var u = POP_API_URL + '?op=increment'
+          + '&id=' + encodeURIComponent(item.id || '')
+          + '&title=' + encodeURIComponent(item.title || '')
+          + '&url=' + encodeURIComponent(item.href || '')
+          + '&image=' + encodeURIComponent(item.image || '');
+        fetch(u, { mode: 'no-cors' }).catch(function () {});
+      } catch (e) {}
+    }
+    if (state.supa && item && item.id) {
+      state.supa.rpc('mybag_increment_popularity', {
+        p_product_id: String(item.id),
+        p_title: String(item.title || ''),
+        p_url: String(item.href || ''),
+        p_image: String(item.image || '')
+      }).catch(function () {
+        state.supa.from('mybag_popularity').upsert({
+          product_id: String(item.id),
+          title: String(item.title || ''),
+          url: String(item.href || ''),
+          image: String(item.image || '')
+        }, { onConflict: 'product_id' }).then(function () {
+          state.supa.rpc('mybag_popularity_add_one', { p_product_id: String(item.id) }).catch(function () {});
+        }).catch(function () {});
+      });
+    }
+  }
+
+  function loadTop3() {
+    var el = document.getElementById('gk-mb-top3');
+    if (!el) return;
+
+    if (POP_API_URL) {
+      var url = POP_API_URL + '?op=top3';
+      fetch(url).then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!Array.isArray(data) || !data.length) {
+            el.textContent = 'Ingen data ennå.';
+            return;
+          }
+          el.innerHTML = data.slice(0, 3).map(function (x, i) {
+            var href = normHref(x.url || '');
+            var img = normalizeImgUrl(x.image || '');
+            return `
+              <div class="gk-mb-item">
+                <div class="gk-mb-left">
+                  <span class="gk-mb-pill">#${i + 1}</span>
+                  ${img ? `<img class="gk-mb-img" src="${esc(img)}" alt="" />` : `<span class="gk-mb-img"></span>`}
+                  <a class="gk-mb-title" href="${esc(href)}" target="_blank" rel="noopener">${esc(x.title || '')}</a>
+                </div>
+                <span class="gk-mb-muted">${esc(x.count || '')}</span>
+              </div>
+            `;
+          }).join('');
+        })
+        .catch(function () {
+          el.textContent = 'Kunne ikke laste topp 3 (API).';
+        });
+      return;
     }
 
-    // Normaliser til {title, href}
+    if (state.supa) {
+      state.supa.from('mybag_popularity')
+        .select('product_id,title,url,image,count')
+        .order('count', { ascending: false })
+        .limit(3)
+        .then(function (res) {
+          var rows = (res && res.data) ? res.data : [];
+          if (!rows.length) { el.textContent = 'Ingen data ennå.'; return; }
+          el.innerHTML = rows.map(function (x, i) {
+            var href = normHref(x.url || '');
+            var img = normalizeImgUrl(x.image || '');
+            return `
+              <div class="gk-mb-item">
+                <div class="gk-mb-left">
+                  <span class="gk-mb-pill">#${i + 1}</span>
+                  ${img ? `<img class="gk-mb-img" src="${esc(img)}" alt="" />` : `<span class="gk-mb-img"></span>`}
+                  <a class="gk-mb-title" href="${esc(href)}" target="_blank" rel="noopener">${esc(x.title || '')}</a>
+                </div>
+                <span class="gk-mb-muted">${esc(x.count || '')}</span>
+              </div>
+            `;
+          }).join('');
+        })
+        .catch(function () { el.textContent = 'Kunne ikke laste topp 3 (Supabase).'; });
+      return;
+    }
+
+    el.textContent = 'Topp 3 krever GK_POP_API_URL eller Supabase.';
+  }
+
+  // ---- Search ----
+  function parseSearchResultsFromJson(json) {
+    var sr = json && (json.searchresults || json.searchResults || json.results);
+    if (!Array.isArray(sr)) return [];
     var out = [];
-    for (var i = 0; i < items.length; i++) {
-      var it = items[i] || {};
-      var title =
-        (it.title || it.name || it.product_name || it.productTitle || it.text || "").toString().trim();
+    for (var i = 0; i < sr.length; i++) {
+      var prod = sr[i] && (sr[i].product || sr[i]);
+      if (!prod) continue;
+      var title = prod.title || prod.name || '';
+      var href = prod.url || prod.href || '';
+      if (!title || !href) continue;
 
-      // noen ganger ligger tittel som html i "label"
-      if (!title && it.label) {
-        title = String(it.label).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-      }
+      var tLow = String(title).toLowerCase();
+      if (tLow === 'ønskeliste' || tLow === 'onskeliste' || tLow === 'logg inn') continue;
 
-      var href =
-        (it.url || it.href || it.link || it.product_url || it.productUrl || "").toString().trim();
-
-      // hvis url er relativ uten /shop/
-      if (href && href.indexOf("/shop/") !== 0 && href.indexOf("http") !== 0) {
-        if (href[0] !== "/") href = "/" + href;
-      }
-
-      // filtrer bort ønskeliste osv
-      var tLow = (title || "").toLowerCase();
-      if (!title || tLow === "ønskeliste" || tLow === "onskeliste" || tLow === "logg inn") continue;
-
-      if (href && href.indexOf("/shop/") !== -1) {
-        out.push({ title: title, href: href.split("?")[0] });
-      }
+      out.push({
+        id: String(prod.id || prod.product_id || ''),
+        title: String(title),
+        href: normHref(href),
+        image: normalizeImgUrl(prod.firstimage || prod.image || ''),
+        raw: prod
+      });
     }
-
     return out;
   }
 
-  async function fetchSearch(q) {
-    if (!q || q.length < 2) {
-      showMsg("Skriv minst 2 tegn…");
-      debug.textContent = "";
+  // HTML fallback (fra din fungerende parser)
+  function parseSearchResultsFromHtml(html) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var scope = doc.querySelector('.product-list, .products, .product-grid, .productList, [data-products], main, body') || doc;
+    var anchors = scope.querySelectorAll('a[href]');
+    var out = [];
+    var seen = {};
+    anchors.forEach(function (a) {
+      var hrefRaw = a.getAttribute('href') || '';
+      if (!hrefRaw) return;
+      if (hrefRaw.indexOf('/shop/') === -1 && hrefRaw.indexOf('/discgolf/') === -1 && hrefRaw.indexOf('/golf/') === -1 && hrefRaw.indexOf('/frisbee/') === -1) return;
+
+      var href = normHref(hrefRaw);
+      var key = href.split('#')[0];
+      if (seen[key]) return;
+      seen[key] = 1;
+
+      var hasImg = !!a.querySelector('img');
+      var inProductThing = !!(a.closest && a.closest('.product, .product-card, .product-item, .productCard, li, article, .card'));
+      if (!hasImg && !inProductThing) return;
+
+      var title = (a.getAttribute('title') || a.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!title) return;
+
+      var tLow = title.toLowerCase();
+      if (tLow === 'ønskeliste' || tLow === 'onskeliste' || tLow === 'logg inn') return;
+
+      var imgEl = a.querySelector('img');
+      var img = imgEl ? (imgEl.getAttribute('src') || '') : '';
+
+      out.push({
+        id: '',
+        title: title,
+        href: href.split('?')[0],
+        image: normalizeImgUrl(img)
+      });
+    });
+    return out;
+  }
+
+  function fetchSearch(q) {
+    var urlJson = '/shop/search?s=' + encodeURIComponent(q) + '&out=json&limit=12';
+    return fetch(urlJson, { credentials: 'same-origin' })
+      .then(function (r) {
+        var ct = (r.headers.get('content-type') || '').toLowerCase();
+        if (ct.indexOf('application/json') >= 0) return r.json();
+        return r.text().then(function (t) {
+          try { return JSON.parse(t); } catch (e) { return null; }
+        });
+      })
+      .then(function (json) {
+        var items = parseSearchResultsFromJson(json || {});
+        if (items && items.length) return items;
+
+        var urlHtml = '/shop/search?s=' + encodeURIComponent(q);
+        return fetch(urlHtml, { credentials: 'same-origin' })
+          .then(function (r) { return r.text(); })
+          .then(function (html) { return parseSearchResultsFromHtml(html); });
+      })
+      .catch(function () {
+        return [];
+      });
+  }
+
+  function renderSearch(items) {
+    var box = document.getElementById('gk-mb-results');
+    if (!box) return;
+
+    if (!items.length) {
+      box.innerHTML = `<div class="gk-mb-muted">Ingen treff (eller siden endret HTML).</div>`;
       return;
     }
 
-    showMsg("Søker…");
-    debug.textContent = "";
-
-    try {
-      var json = await qbSearchJson(q, 24);
-      var out = parseSearchResultsFromJson(json);
-
-      debug.textContent = "Fant " + out.length + " produkter (etter filtrering).";
-
-      if (!out.length) {
-        showMsg("Ingen treff (søk-JSON ga 0).");
-        return;
-      }
-
-      results.innerHTML = out.slice(0, 12).map(function (p) {
-        return `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #333;">
-            <a href="${esc(p.href)}" target="_blank" style="color:#9ad; text-decoration:none;">
-              ${esc(p.title)}
-            </a>
-            <button data-href="${esc(p.href)}" data-title="${esc(p.title)}"
-                    style="padding:4px 8px;border-radius:6px;border:1px solid #555;background:#333;color:#fff;cursor:pointer;">
-              Legg til
-            </button>
+    box.innerHTML = items.slice(0, 12).map(function (p) {
+      return `
+        <div class="gk-mb-item">
+          <div class="gk-mb-left">
+            ${p.image ? `<img class="gk-mb-img" src="${esc(p.image)}" alt="" />` : `<span class="gk-mb-img"></span>`}
+            <a class="gk-mb-title" href="${esc(p.href)}" target="_blank" rel="noopener">${esc(p.title)}</a>
           </div>
-        `;
-      }).join("");
+          <button class="gk-mb-btn secondary" data-add="${esc(p.href)}">Legg til</button>
+        </div>
+      `;
+    }).join('');
 
-      results.querySelectorAll("button").forEach(function (b) {
-        b.addEventListener("click", function () {
-          var title = b.getAttribute("data-title") || "";
-          var href = b.getAttribute("data-href") || "";
-          addDiscFromSearch(title, href);
-        });
+    box.querySelectorAll('button[data-add]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var href = b.getAttribute('data-add');
+        var item = items.find(function (x) { return x.href === href; });
+        if (item) addToBag(item);
       });
-
-    } catch (e) {
-      console.error("[MINBAGG] Search failed:", e);
-      showMsg("Feil ved søk (endpoint/format).");
-      debug.textContent = "Search error: " + (e && e.message ? e.message : String(e));
-    }
+    });
   }
 
-  btn.addEventListener("click", function () {
-    fetchSearch(input.value.trim());
-  });
+  function doSearch(q) {
+    if (!q || q.length < 2) { setMsg('Skriv minst 2 tegn…'); return; }
+    state.q = q;
+    setMsg('Søker…');
+    fetchSearch(q).then(function (items) {
+      state.searchItems = items || [];
+      setMsg('Fant ' + (state.searchItems.length || 0) + ' produkter.');
+      renderSearch(state.searchItems);
+    });
+  }
 
-  input.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") fetchSearch(input.value.trim());
-  });
+  // ---- Bag logic ----
+  function addToBag(item) {
+    var exists = state.bag.some(function (x) { return x.href === item.href; });
+    if (exists) return;
 
-  // =========================
-  // ADD DISC (placeholder – behold din eksisterende logikk her)
-  // =========================
-
-  function addDiscFromSearch(title, href) {
-    // Her skal du bruke den eksisterende flyt-en din:
-    // - hente produkt-side HTML
-    // - hente flight numbers
-    // - legge i bag (lokal + supabase)
-    // - trigge recos + map + top3
-    // Nedenfor er en trygg fallback som i det minste legger inn tittel/href.
-
-    var item = {
-      id: "d_" + Date.now(),
-      title: title,
-      href: href,
-      added_at: nowIso()
+    var entry = {
+      id: item.id || '',
+      title: item.title,
+      href: item.href,
+      image: item.image || '',
+      added_at: new Date().toISOString(),
+      flight: item.flight || null
     };
 
-    state.bag.push(item);
+    state.bag.unshift(entry);
+    saveLocalBag(state.bag);
     renderBag();
+    computeRecos();
     renderMap();
-    renderRecos();
+    bumpPopularity(entry);
 
-    // her kaller du din globale lagring (supabase) om det finnes i koden din
-    if (typeof saveBagGlobal === "function") {
-      try { saveBagGlobal(); } catch (e) { console.warn("saveBagGlobal failed", e); }
+    if (state.isLoggedIn) {
+      saveRemoteBag(state.bag).then(function () {
+        loadTop3();
+      });
     }
   }
 
-  // =========================
-  // RENDERERS (enkle – din fulle kode kan ha mer)
-  // =========================
+  function removeFromBag(href) {
+    state.bag = state.bag.filter(function (x) { return x.href !== href; });
+    saveLocalBag(state.bag);
+    renderBag();
+    computeRecos();
+    renderMap();
+    if (state.isLoggedIn) saveRemoteBag(state.bag);
+  }
 
   function renderBag() {
+    var box = document.getElementById('gk-mb-bag');
+    if (!box) return;
+
     if (!state.bag.length) {
-      baglist.innerHTML = `<div style="opacity:.75">Ingen discer lagt til enda.</div>`;
+      box.innerHTML = `<div class="gk-mb-muted">Ingen discer lagt til enda.</div>`;
       return;
     }
-    baglist.innerHTML = state.bag.map(function (d) {
-      return `<div style="padding:6px 0;border-bottom:1px solid #333;">
-        <a href="${esc(d.href || "#")}" target="_blank" style="color:#9ad;text-decoration:none;">
-          ${esc(d.title || "Ukjent disk")}
-        </a>
-      </div>`;
-    }).join("");
+
+    box.innerHTML = state.bag.map(function (p) {
+      return `
+        <div class="gk-mb-item">
+          <div class="gk-mb-left">
+            ${p.image ? `<img class="gk-mb-img" src="${esc(p.image)}" alt="" />` : `<span class="gk-mb-img"></span>`}
+            <a class="gk-mb-title" href="${esc(p.href)}" target="_blank" rel="noopener">${esc(p.title)}</a>
+            ${p.flight ? `<span class="gk-mb-pill">${esc(p.flight)}</span>` : ``}
+          </div>
+          <button class="gk-mb-btn secondary" data-remove="${esc(p.href)}">Fjern</button>
+        </div>
+      `;
+    }).join('');
+
+    box.querySelectorAll('button[data-remove]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        removeFromBag(b.getAttribute('data-remove'));
+      });
+    });
   }
 
-  function renderRecos() {
-    // placeholder – behold din eksisterende recos-logikk
-    recosEl.innerHTML = `<div style="opacity:.75">Anbefalinger kommer når baggen er aktiv.</div>`;
+  // ---- Recommendations (enkelt regelsett – kan bygges videre) ----
+  function computeRecos() {
+    var el = document.getElementById('gk-mb-recos');
+    if (!el) return;
+
+    if (state.bag.length < 2) {
+      el.textContent = 'Legg til noen discer så kan jeg foreslå hull i baggen din.';
+      return;
+    }
+
+    var txt = state.bag.map(function (x) { return (x.title || '').toLowerCase(); }).join(' ');
+    var hasPutter = /putter|p2|aviar|judge|pure|pa-/.test(txt);
+    var hasMid = /mid|buzzz|roc|md|truth|hex|origin|fuse/.test(txt);
+    var hasFair = /fairway|teebird|fd|essence|leopard|river|explorer/.test(txt);
+    var hasDist = /destroyer|wraith|dd3|shryke|distance|ballista|nuke/.test(txt);
+
+    var recos = [];
+    if (!hasPutter) recos.push('Mangler en putter du stoler på (rett/lett understabil).');
+    if (!hasMid) recos.push('Mangler en stabil midrange (typ Buzzz/Hex-rollen).');
+    if (!hasFair) recos.push('Mangler en kontrollerbar fairway (rett til litt understabil).');
+    if (!hasDist) recos.push('Mangler en distance-driver (kun om du har farten til det).');
+
+    el.innerHTML = recos.length
+      ? '<ul style="margin:8px 0 0 18px;">' + recos.map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('') + '</ul>'
+      : '<div class="gk-mb-muted">Ser ganske komplett ut! 🔥 (vi kan fin-tune med flight-data)</div>';
   }
 
+  // ---- Bag-map ----
   function renderMap() {
-    // placeholder – behold din eksisterende bag-map med understabil/overstabil
-    mapEl.innerHTML = `<div style="opacity:.75">Bag-map kommer når discer har flight-data.</div>`;
+    var map = document.getElementById('gk-mb-map');
+    var tip = document.getElementById('gk-mb-tip');
+    if (!map || !tip) return;
+
+    map.innerHTML = '';
+    tip.style.display = 'none';
+
+    if (!state.bag.length) return;
+
+    state.bag.forEach(function (d) {
+      var xy = flightToXY(d.flight);
+      var dot = document.createElement('div');
+      dot.className = 'gk-mb-dot';
+      dot.style.left = (xy.x * 100) + '%';
+      dot.style.top = (xy.y * 100) + '%';
+      map.appendChild(dot);
+
+      dot.addEventListener('mouseenter', function () {
+        tip.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">' + esc(d.title || '') + '</div>'
+          + (d.flight ? '<div class="gk-mb-muted">Flight: ' + esc(d.flight) + '</div>' : '<div class="gk-mb-muted">Flight-data ikke satt</div>');
+        tip.style.display = 'block';
+      });
+      dot.addEventListener('mousemove', function (e) {
+        var rect = map.getBoundingClientRect();
+        tip.style.left = (e.clientX - rect.left + 12) + 'px';
+        tip.style.top = (e.clientY - rect.top + 12) + 'px';
+      });
+      dot.addEventListener('mouseleave', function () {
+        tip.style.display = 'none';
+      });
+      dot.addEventListener('click', function () {
+        window.open(d.href, '_blank', 'noopener');
+      });
+    });
   }
 
-  function renderTop3() {
-    // placeholder – behold din eksisterende globale topp-3
-    top3El.innerHTML = `<div style="opacity:.75">Topp 3 lastes når global lagring er aktiv.</div>`;
+  function flightToXY(f) {
+    if (!f) return { x: 0.5, y: 0.55 };
+    var m = String(f).match(/(-?\d+(\.\d+)?)/g);
+    if (!m || m.length < 4) return { x: 0.5, y: 0.55 };
+    var speed = parseFloat(m[0]);
+    var turn = parseFloat(m[2]);
+    var fade = parseFloat(m[3]);
+
+    var stability = (-turn) + fade;
+    var x = (stability - 0) / (8 - 0);
+    x = Math.max(0.05, Math.min(0.95, x));
+
+    var y = 1 - ((speed - 1) / (14 - 1));
+    y = Math.max(0.05, Math.min(0.95, y));
+    return { x: x, y: y };
   }
 
-  renderBag();
-  renderRecos();
-  renderMap();
-  renderTop3();
+  // ---- Boot ----
+  function boot() {
+    renderShell();
 
-  console.log("[MINBAGG] Script loaded OK (patched search endpoint)");
+    var a = readAuthMarker();
+    state.isLoggedIn = a.isLoggedIn;
+    state.userId = a.userId;
 
-  // ---------- END ORIGINAL (patched) ----------
+    state.bag = loadLocalBag();
+    renderBag();
+    computeRecos();
+    renderMap();
+
+    ensureSupabaseLoaded().then(function () {
+      if (state.isLoggedIn && state.supa && state.userId) {
+        loadRemoteBag().then(function (remoteBag) {
+          if (Array.isArray(remoteBag) && remoteBag.length) {
+            state.bag = remoteBag;
+            saveLocalBag(state.bag);
+            renderBag();
+            computeRecos();
+            renderMap();
+          }
+          loadTop3();
+        });
+      } else {
+        loadTop3();
+      }
+    });
+
+    console.log('[MINBAGG] loaded OK');
+  }
+
+  boot();
 })();
-
