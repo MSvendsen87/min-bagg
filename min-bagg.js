@@ -1,6 +1,7 @@
 /* =========================================================
    GOLFKONGEN – MIN BAGG
-   Steg 4: Guest vs Logged-in + Topp 3 globalt med lenker/bilder
+   Guest vs Logged-in via Quickbutik marker
+   Topp 3 globalt med lenker/bilder
    Bevarer RPC / increment_popular_disc som før
    ========================================================= */
 
@@ -8,7 +9,10 @@
   'use strict';
 
   // Kjør kun på /sider/min-bagg
-  var path = (location && location.pathname || '').replace(/\/+$/, '').toLowerCase();
+  var path = (location && location.pathname || '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+
   if (path !== '/sider/min-bagg') return;
 
   if (window.__MINBAGG_LOADED__) return;
@@ -53,21 +57,29 @@
   }
 
   /* ------------------------------
-     LOGIN-DETEKSJON (Quickbutik)
+     LOGIN-DETEKSJON (FAKTA, IKKE GJETTING)
+     Leser fra Quickbutik:
+     <span id="gk-login-marker"
+       data-logged-in="1"
+       data-firstname="Kristoffer">
   ------------------------------ */
-  function detectLogin() {
-    // 1) DOM-signal: konto-ikon / "Kontoen din"
-    var headerText = document.body.innerText || '';
-    if (headerText.toLowerCase().indexOf('kontoen din') !== -1) return true;
+  function getLoginState() {
+    var marker = document.getElementById('gk-login-marker');
+    if (!marker || !marker.dataset) {
+      return {
+        loggedIn: false,
+        firstname: null
+      };
+    }
 
-    // 2) Cookie fallback
-    if (document.cookie && document.cookie.match(/qb_session|quickbutik/i)) return true;
-
-    return false;
+    return {
+      loggedIn: marker.dataset.loggedIn === '1',
+      firstname: marker.dataset.firstname || null
+    };
   }
 
   /* ------------------------------
-     Topp 3 GLOBALT
+     TOPP 3 GLOBALT
   ------------------------------ */
   function loadTop3() {
     var base = SUPA_URL.replace(/\/$/, '');
@@ -115,13 +127,19 @@
           if (!list.length) return;
 
           var section = el('div', 'minbagg-top3-section');
-          section.appendChild(el('h3', '', cat.charAt(0).toUpperCase() + cat.slice(1)));
+          section.appendChild(
+            el('h3', '', cat.charAt(0).toUpperCase() + cat.slice(1))
+          );
 
           list.forEach(function (d, i) {
             var row = el('div', 'minbagg-top3-row');
 
             var left = el('div', 'minbagg-top3-left');
-            var right = el('div', 'minbagg-top3-right', String(d.count || 0));
+            var right = el(
+              'div',
+              'minbagg-top3-right',
+              String(d.count || 0)
+            );
 
             if (d.image_url) {
               var img = document.createElement('img');
@@ -130,7 +148,11 @@
               left.appendChild(img);
             }
 
-            var name = el('span', 'minbagg-top3-name', (i + 1) + '. ' + d.name);
+            var name = el(
+              'span',
+              'minbagg-top3-name',
+              (i + 1) + '. ' + d.name
+            );
 
             if (d.product_url) {
               var a = document.createElement('a');
@@ -167,14 +189,17 @@
       'div',
       'minbagg-guest-cta',
       '<h2>Bygg baggen din med GolfKongen</h2>' +
-        '<p>For å starte å bygge baggen sammen med GolfKongen må du være innlogget.</p>'
+        '<p>For å lagre baggen din på tvers av enheter og få personlige anbefalinger må du være innlogget.</p>' +
+        '<p><small>Du trenger bare å logge inn én gang – så husker vi deg neste gang.</small></p>'
     );
 
     var actions = el('div', 'minbagg-guest-actions');
+
     var loginBtn = el('a', 'minbagg-btn', 'Logg inn');
-    loginBtn.href = '/kunde/login';
+    loginBtn.href = '/customer/login';
+
     var regBtn = el('a', 'minbagg-btn secondary', 'Opprett konto');
-    regBtn.href = '/kunde/registrer';
+    regBtn.href = '/customer/register';
 
     actions.appendChild(loginBtn);
     actions.appendChild(regBtn);
@@ -188,10 +213,13 @@
 
   /* ------------------------------
      INNLOGGET VISNING
-     (Beholder eksisterende app)
+     (Laster app fra GitHub)
   ------------------------------ */
-  function renderLoggedInView() {
-    // Her laster vi selve appen fra GitHub (slik du allerede har)
+  function renderLoggedInView(user) {
+    if (user && user.firstname) {
+      console.log('[MINBAGG] logged in as:', user.firstname);
+    }
+
     var s = document.createElement('script');
     s.src =
       'https://cdn.jsdelivr.net/gh/MSvendsen87/min-bagg@main/min-bagg.js?v=' +
@@ -206,10 +234,10 @@
      START
   ------------------------------ */
   try {
-    var loggedIn = detectLogin();
+    var user = getLoginState();
 
-    if (loggedIn) {
-      renderLoggedInView();
+    if (user.loggedIn) {
+      renderLoggedInView(user);
     } else {
       renderGuestView();
     }
