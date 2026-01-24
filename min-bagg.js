@@ -219,7 +219,9 @@
       .catch(function () { return false; });
   }
 
-  function bumpPopularity(item) {
+  
+function bumpPopularity(item) {
+    // Legacy (valgfritt): Apps Script tracker
     if (POP_API_URL) {
       try {
         var u = POP_API_URL + '?op=increment'
@@ -230,23 +232,62 @@
         fetch(u, { mode: 'no-cors' }).catch(function () {});
       } catch (e) {}
     }
-    if (state.supa && item && item.id) {
-      state.supa.rpc('mybag_increment_popularity', {
-        p_product_id: String(item.id),
-        p_title: String(item.title || ''),
-        p_url: String(item.href || ''),
-        p_image: String(item.image || '')
-      }).catch(function () {
-        state.supa.from('mybag_popularity').upsert({
-          product_id: String(item.id),
-          title: String(item.title || ''),
-          url: String(item.href || ''),
-          image: String(item.image || '')
-        }, { onConflict: 'product_id' }).then(function () {
-          state.supa.rpc('mybag_popularity_add_one', { p_product_id: String(item.id) }).catch(function () {});
-        }).catch(function () {});
-      });
+
+    // Ny: Supabase RPC → increment_popular_disc(type,name) i public.popular_discs
+    try {
+      var t = inferPopularType(item);
+      var n = (item && item.title) ? String(item.title) : '';
+      if (t && n) {
+        rpcIncrementPopularDisc(t, n).catch(function(){});
+      }
+    } catch (e) {}
+  }
+
+  function inferPopularType(item) {
+    // 1) Hvis vi har flight -> speed avgjør kategori
+    var speed = null;
+    try {
+      if (item && item.flight) {
+        var m = String(item.flight).match(/(-?\d+(?:\.\d+)?)/g);
+        if (m && m.length >= 1) speed = parseFloat(m[0]);
+      }
+    } catch (e) {}
+
+    if (typeof speed === 'number' && !isNaN(speed)) {
+      if (speed <= 3) return 'putter';
+      if (speed <= 6) return 'midrange';
+      if (speed <= 9) return 'fairway';
+      return 'distance';
     }
+
+    // 2) Fallback: heuristikk på tittel
+    var txt = ((item && item.title) ? String(item.title) : '').toLowerCase();
+    if (/(putter|p2|aviar|judge|pure|luna|pa-\d)/.test(txt)) return 'putter';
+    if (/(mid|midrange|buzzz|roc|md\d|mako|truth|hex|fuse|tursas)/.test(txt)) return 'midrange';
+    if (/(fairway|teebird|fd|essence|leopard|river|explorer|stalker|passion)/.test(txt)) return 'fairway';
+    if (/(distance|destroyer|wraith|shryke|force|nuke|ballista|trace|photon|octane|wave|hades)/.test(txt)) return 'distance';
+
+    // 3) Ukjent → ikke logg popularitet
+    return '';
+  }
+
+  function rpcIncrementPopularDisc(type, name) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return Promise.reject(new Error('Supabase not configured'));
+    var base = String(SUPABASE_URL).replace(/\/+$/, '');
+    var url = base + '/rest/v1/rpc/increment_popular_disc';
+
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: 'Bearer ' + SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({ p_type: String(type), p_name: String(name) })
+    }).then(function (r) {
+      if (!r.ok && r.status !== 204) throw new Error('RPC failed: ' + r.status);
+      return true;
+    });
   }
 
   function loadTop3() {
