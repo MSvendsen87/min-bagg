@@ -202,14 +202,31 @@
   }
 
   function renderNeedShopLogin(root) {
-    clear(root);
-    var app = el('div', 'minbagg-app');
-    app.appendChild(elHtml('div', 'minbagg-banner', bannerHtml()));
-    app.appendChild(el('h2', '', 'Min Bagg'));
-    app.appendChild(el('div', 'minbagg-muted',
-      'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.'));
-    root.appendChild(app);
-  }
+  clear(root);
+
+  var wrap = el('div', 'minbagg-wrap');
+
+  // Tittel
+  wrap.appendChild(el('h2', 'minbagg-h2', 'Min Bagg'));
+
+  // Info
+  var p = el('div', 'minbagg-muted',
+    'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.'
+  );
+  wrap.appendChild(p);
+
+  // Top 3 container (read-only)
+  var top = el('div', 'minbagg-card');
+  top.appendChild(el('h3', 'minbagg-h3', 'Topp 3 globalt'));
+
+  var inner = el('div', 'minbagg-top3');
+  inner.appendChild(el('div', 'minbagg-muted', 'Laster toppliste...'));
+  top.appendChild(inner);
+
+  wrap.appendChild(top);
+  root.appendChild(wrap);
+}
+
 
   function renderConnectView(root, marker, supa) {
     clear(root);
