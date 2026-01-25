@@ -74,6 +74,7 @@
       + '.minbagg-item .sub{opacity:.85;font-size:12px;margin-top:2px}'
       + '.minbagg-split{display:grid;grid-template-columns:1fr;gap:10px}'
       + '@media(min-width:900px){.minbagg-split{grid-template-columns:1fr 1fr}}'
+      + '.minbagg-top3-row{display:flex;align-items:center;gap:10px;margin:6px 0}'      + '.minbagg-top3-img{width:34px;height:34px;border-radius:8px;object-fit:cover;border:1px solid rgba(255,255,255,.18)}'      + '.minbagg-top3-link{color:#7fd3ff;text-decoration:none;font-weight:600}'      + '.minbagg-top3-link:hover{text-decoration:underline}'      + '.minbagg-top3-name{font-weight:600}'      + '.minbagg-top3-count{opacity:.85;margin-left:auto;white-space:nowrap}'
       ;
     var st = document.createElement('style');
     st.id = 'minbagg-style';
@@ -202,31 +203,25 @@
   }
 
   function renderNeedShopLogin(root) {
-  clear(root);
+    clear(root);
 
-  var wrap = el('div', 'minbagg-wrap');
+    var app = el('div', 'minbagg-app');
+    app.appendChild(elHtml('div', 'minbagg-banner', bannerHtml()));
+    app.appendChild(el('h2', '', 'Min Bagg'));
+    app.appendChild(el('div', 'minbagg-muted',
+      'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.'));
 
-  // Tittel
-  wrap.appendChild(el('h2', 'minbagg-h2', 'Min Bagg'));
+    // Read-only toppliste for gjester
+    var topCard = el('div', 'minbagg-card');
+    topCard.appendChild(el('h3', '', 'Topp 3 globalt'));
+    var topInner = el('div', 'minbagg-top3');
+    topInner.id = 'minbagg-top3-guest';
+    topInner.appendChild(el('div', 'minbagg-muted', 'Laster toppliste...'));
+    topCard.appendChild(topInner);
+    app.appendChild(topCard);
 
-  // Info
-  var p = el('div', 'minbagg-muted',
-    'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.'
-  );
-  wrap.appendChild(p);
-
-  // Top 3 container (read-only)
-  var top = el('div', 'minbagg-card');
-  top.appendChild(el('h3', 'minbagg-h3', 'Topp 3 globalt'));
-
-  var inner = el('div', 'minbagg-top3');
-  inner.appendChild(el('div', 'minbagg-muted', 'Laster toppliste...'));
-  top.appendChild(inner);
-
-  wrap.appendChild(top);
-  root.appendChild(wrap);
-}
-
+    root.appendChild(app);
+  }
 
   function renderConnectView(root, marker, supa) {
     clear(root);
@@ -289,10 +284,47 @@
 
   function renderTop3Into(container, top3) {
     clear(container);
+
     if (!top3 || !top3.length) {
       container.appendChild(el('div', 'minbagg-muted', 'Ingen globale data enda.'));
       return;
     }
+
+    for (var i = 0; i < top3.length; i++) {
+      var g = top3[i];
+      var box = el('div', 'minbagg-card');
+      box.appendChild(el('h4', '', g.group || ''));
+      var list = el('div', '');
+
+      for (var j = 0; j < (g.items || []).length; j++) {
+        var it = g.items[j] || {};
+        var row = el('div', 'minbagg-top3-row');
+
+        if (it.image) {
+          var img = el('img', 'minbagg-top3-img');
+          img.src = it.image;
+          img.alt = it.name || '';
+          row.appendChild(img);
+        }
+
+        if (it.url) {
+          var a = el('a', 'minbagg-top3-link', it.name || '');
+          a.href = it.url;
+          a.target = '_self';
+          a.rel = 'nofollow';
+          row.appendChild(a);
+        } else {
+          row.appendChild(el('div', 'minbagg-top3-name', it.name || ''));
+        }
+
+        row.appendChild(el('div', 'minbagg-top3-count', 'Valgt ' + (it.count || 0) + ' ganger'));
+        list.appendChild(row);
+      }
+
+      box.appendChild(list);
+      container.appendChild(box);
+    }
+  }
     for (var i = 0; i < top3.length; i++) {
       var g = top3[i];
       var box = el('div', 'minbagg-card');
@@ -473,38 +505,44 @@
       };
     }
 
-    async function addDisc(p) {
-  var it = normalizeBagItem(p);
-  if (!it) return;
+    function addDisc(p) {
+      var it = normalizeBagItem(p);
+      if (!it) return;
 
-  // Duplikatsjekk
-  for (var i = 0; i < state.bag.length; i++) {
-    var ex = state.bag[i];
-    if (it.url && ex.url && it.url === ex.url) return;
-    if (!it.url && ex.name && ex.name.toLowerCase() === it.name.toLowerCase()) return;
-  }
+      for (var i = 0; i < state.bag.length; i++) {
+        var ex = state.bag[i];
+        if (it.url && ex.url && it.url === ex.url) return;
+        if (!it.url && ex.name && ex.name.toLowerCase() === it.name.toLowerCase()) return;
+      }
 
-  // Legg i lokal bag først (UI føles responsiv)
-  state.bag.unshift(it);
-  lsSave(state.bag);
-  renderBag();
-  scheduleSave();
+      state.bag.unshift(it);
+      lsSave(state.bag);
+      renderBag();
+      scheduleSave();
 
-  // --- Popular tracking (Supabase) ---
-  try {
-    // Foreløpig: alt går som "global"
-    // Neste steg: vi legger på valg av putter/midrange/fairway/distance
-    await supa.rpc('increment_popular_disc', {
-      p_type: 'global',
-      p_name: it.name,
-      p_url: it.url || null,
-      p_image: it.image || null
-    });
-  } catch (err) {
-    log('[MINBAGG] popular increment failed', err);
-  }
-}
-
+      // Best-effort: tell global popular (type brukes senere når vi får 4 bokser)
+      try {
+        supa.rpc('increment_popular_disc', {
+          p_type: 'global',
+          p_name: it.name || '',
+          p_url: it.url || null,
+          p_image: it.image || null
+        }).then(function () {
+          return fetchTop3(supa);
+        }).then(function (top3) {
+          if (app && app.__renderTop3) app.__renderTop3(top3);
+        }).catch(function (e) {
+          log('[MINBAGG] popular update failed', e);
+        });
+      } catch (e2) {
+        log('[MINBAGG] popular update failed', e2);
+      }
+    }
+      state.bag.unshift(it);
+      lsSave(state.bag);
+      renderBag();
+      scheduleSave();
+    }
 
     manBtn.addEventListener('click', function () {
       var n = (manName.value || '').trim();
@@ -612,90 +650,101 @@
 
   // --- Global top3 data ------------------------------------------------------
   async function fetchTop3(supa) {
-  try {
-    var res = await supa.rpc('get_mybag_top3', { limit_per_group: 3 });
-    if (res && res.error) throw res.error;
-    var rows = (res && res.data) ? res.data : [];
+    // Forventet view/table: mybag_popular (group, name, url, count)
+    try {
+      var res = await supa.from('mybag_popular').select('*').limit(200);
+      if (res && res.error) throw res.error;
+      var rows = (res && res.data) ? res.data : [];
 
-    // Vi bygger samme struktur UI forventer: [{ group, items:[{name,url,image,count}...] }]
-    var out = [];
-    var by = {};
+      var by = {};
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i] || {};
+        var g = r.group || r.disc_group || r.category || 'Discs';
+        if (!by[g]) by[g] = [];
+        by[g].push({
+          name: r.name || r.disc_name || r.disc || '',
+          url: r.url || '',
+          count: r.count || r.total || 0
+        });
+      }
 
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i] || {};
-      var g = r.group || 'Global';
-      if (!by[g]) by[g] = [];
-      by[g].push({
-        name: r.name || '',
-        url: r.url || '',
-        image: r.image || '',
-        count: r.count || 0
-      });
+      var out = [];
+      var groups = Object.keys(by);
+      for (var j = 0; j < groups.length; j++) {
+        var gk = groups[j];
+        var arr = by[gk].slice().sort(function (a, b) { return (b.count || 0) - (a.count || 0); }).slice(0, 3);
+        out.push({ group: gk, items: arr });
+      }
+      out.sort(function (a, b) { return a.group.localeCompare(b.group); });
+      return out;
+    } catch (err) {
+      log('[MINBAGG] top3 fetch failed', err);
+      return [];
     }
-
-    var groups = Object.keys(by);
-    for (var j = 0; j < groups.length; j++) {
-      var gk = groups[j];
-      var arr = by[gk].slice().sort(function (a, b) { return (b.count || 0) - (a.count || 0); }).slice(0, 3);
-      out.push({ group: gk, items: arr });
-    }
-    out.sort(function (a, b) { return a.group.localeCompare(b.group); });
-    return out;
-  } catch (err) {
-    log('[MINBAGG] top3 fetch failed', err);
-    return [];
   }
-}
 
-  // --- MAIN init -------------------------------------------------------------
-async function __minbaggInit() {
-  injectStyles();
-  var root = ensureRoot();
-  var marker = getLoginMarker();
+    // --- MAIN init -------------------------------------------------------------
+  async function __minbaggInit() {
+    injectStyles();
+    var root = ensureRoot();
+    var marker = getLoginMarker();
 
-  try {
-    var supa = await ensureSupabaseClient();
-    var top3Promise = fetchTop3(supa);
+    try {
+      var supa = await ensureSupabaseClient();
+      var top3Promise = fetchTop3(supa);
 
-    if (!marker.loggedIn) {
-      renderNeedShopLogin(root);
-      return;
+      // GUEST: vis read-only + topp3
+      if (!marker.loggedIn) {
+        renderNeedShopLogin(root);
+        try {
+          var top3Guest = await top3Promise;
+          var guestEl = document.getElementById('minbagg-top3-guest');
+          if (guestEl) renderTop3Into(guestEl, top3Guest);
+        } catch (e1) {
+          log('[MINBAGG] guest top3 failed', e1);
+        }
+        return;
+      }
+
+      var sess = await supa.auth.getSession();
+      var session = (sess && sess.data) ? sess.data.session : null;
+
+      if (!session || !session.user) {
+        renderConnectView(root, marker, supa);
+        return;
+      }
+
+      var gu = await supa.auth.getUser();
+      var user = (gu && gu.data) ? gu.data.user : (session.user || null);
+      if (!user) {
+        renderConnectView(root, marker, supa);
+        return;
+      }
+
+      renderApp(root, marker, supa, user);
+
+      // Render topp3 inn i appen (høyre kolonne)
+      try {
+        var top3 = await top3Promise;
+        var appRoot = root.firstChild;
+        if (appRoot && appRoot.__renderTop3) appRoot.__renderTop3(top3);
+      } catch (e2) {
+        log('[MINBAGG] top3 render failed', e2);
+      }
+
+      log('[MINBAGG] app loaded OK');
+    } catch (err) {
+      clear(root);
+      root.appendChild(el('div', 'minbagg-muted',
+        'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
+      log('[MINBAGG] fatal', err);
     }
-
-    var sess = await supa.auth.getSession();
-    var session = (sess && sess.data) ? sess.data.session : null;
-
-    if (!session || !session.user) {
-      renderConnectView(root, marker, supa);
-      return;
-    }
-
-    var gu = await supa.auth.getUser();
-    var user = (gu && gu.data) ? gu.data.user : (session.user || null);
-    if (!user) {
-      renderConnectView(root, marker, supa);
-      return;
-    }
-
-    renderApp(root, marker, supa, user);
-
-    var top3 = await top3Promise;
-    var appRoot = root.firstChild;
-    if (appRoot && appRoot.__renderTop3) appRoot.__renderTop3(top3);
-
-    log('[MINBAGG] app loaded OK');
-  } catch (err) {
-    clear(root);
-    root.appendChild(el('div', 'minbagg-muted',
-      'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
-    log('[MINBAGG] fatal', err);
   }
-}
-// Kjør init både før/etter DOMContentLoaded (så den aldri “mister” eventen)
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', __minbaggInit);
-} else {
-  setTimeout(__minbaggInit, 0);
-}
 
+  // Kjør init både før/etter DOMContentLoaded (så den aldri “mister” eventen)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', __minbaggInit);
+  } else {
+    setTimeout(__minbaggInit, 0);
+  }
 })();
