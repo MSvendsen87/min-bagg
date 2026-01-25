@@ -576,38 +576,40 @@
 
   // --- Global top3 data ------------------------------------------------------
   async function fetchTop3(supa) {
-    // Forventet view/table: mybag_popular (group, name, url, count)
-    try {
-      var res = await supa.from('mybag_popular').select('*').limit(200);
-      if (res && res.error) throw res.error;
-      var rows = (res && res.data) ? res.data : [];
+  try {
+    var res = await supa.rpc('get_mybag_top3', { limit_per_group: 3 });
+    if (res && res.error) throw res.error;
+    var rows = (res && res.data) ? res.data : [];
 
-      var by = {};
-      for (var i = 0; i < rows.length; i++) {
-        var r = rows[i] || {};
-        var g = r.group || r.disc_group || r.category || 'Discs';
-        if (!by[g]) by[g] = [];
-        by[g].push({
-          name: r.name || r.disc_name || r.disc || '',
-          url: r.url || '',
-          count: r.count || r.total || 0
-        });
-      }
+    // Vi bygger samme struktur UI forventer: [{ group, items:[{name,url,image,count}...] }]
+    var out = [];
+    var by = {};
 
-      var out = [];
-      var groups = Object.keys(by);
-      for (var j = 0; j < groups.length; j++) {
-        var gk = groups[j];
-        var arr = by[gk].slice().sort(function (a, b) { return (b.count || 0) - (a.count || 0); }).slice(0, 3);
-        out.push({ group: gk, items: arr });
-      }
-      out.sort(function (a, b) { return a.group.localeCompare(b.group); });
-      return out;
-    } catch (err) {
-      log('[MINBAGG] top3 fetch failed', err);
-      return [];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i] || {};
+      var g = r.group || 'Global';
+      if (!by[g]) by[g] = [];
+      by[g].push({
+        name: r.name || '',
+        url: r.url || '',
+        image: r.image || '',
+        count: r.count || 0
+      });
     }
+
+    var groups = Object.keys(by);
+    for (var j = 0; j < groups.length; j++) {
+      var gk = groups[j];
+      var arr = by[gk].slice().sort(function (a, b) { return (b.count || 0) - (a.count || 0); }).slice(0, 3);
+      out.push({ group: gk, items: arr });
+    }
+    out.sort(function (a, b) { return a.group.localeCompare(b.group); });
+    return out;
+  } catch (err) {
+    log('[MINBAGG] top3 fetch failed', err);
+    return [];
   }
+}
 
   // --- MAIN init -------------------------------------------------------------
   document.addEventListener('DOMContentLoaded', async function () {
