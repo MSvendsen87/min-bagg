@@ -37,6 +37,14 @@
     return n;
   }
 
+  // Når vi faktisk vil ha HTML (p/ul/strong etc)
+  function elHtml(tag, cls, html) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (html != null) n.innerHTML = html;
+    return n;
+  }
+
   function qs(sel, root) {
     return (root || document).querySelector(sel);
   }
@@ -152,24 +160,23 @@
       });
   }
 
-function loadMyDiscs(client, userId) {
-  log('[MINBAGG] loading my discs for user:', userId);
+  function loadMyDiscs(client, userId) {
+    log('[MINBAGG] loading my discs for user:', userId);
 
-  return client
-    .from('mybag_user_discs')
-    .select('id,type,name,product_url,image_url,created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true })
-    .then(function (res) {
-      if (res.error) throw res.error;
-      log('[MINBAGG] my discs result:', res.data);
-      return res.data || [];
-    });
-}   
-   
+    return client
+      .from('mybag_user_discs')
+      .select('id,type,name,product_url,image_url,created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+      .then(function (res) {
+        if (res.error) throw res.error;
+        log('[MINBAGG] my discs result:', res.data);
+        return res.data || [];
+      });
+  }
+
   /* ------------------------------
      Global topp 3 (popular_discs)
-     (Hvis du bruker dette allerede, beholdes)
   ------------------------------ */
   function fetchJson(url, headers) {
     return fetch(url, {
@@ -292,24 +299,23 @@ function loadMyDiscs(client, userId) {
     var wrap = el('div', 'minbagg-connect');
     wrap.appendChild(el('h2', '', 'Min Bagg'));
 
-    // Viktig: forklar “to steg” på en enkel måte
-    wrap.appendChild(el('div', 'minbagg-muted',
-  '<p>' +
-  'Du er innlogget i nettbutikken. ' +
-  'For å kunne lagre <strong>Min Bagg</strong> på tvers av enheter bruker vi en egen “kobling” mot lagringen (Supabase). ' +
-  'Derfor kan du bli bedt om én ekstra innlogging med <strong>engangslink på e-post</strong>.' +
-  '</p>' +
-  '<ul>' +
-  '<li>Dette gjøres normalt <strong>bare én gang per enhet/nettleser</strong>.</li>' +
-  '<li>Etterpå blir du husket automatisk (så lenge du ikke bruker inkognito / sletter cookies/lagring).</li>' +
-  '<li>Hvis du bytter mobil/PC eller nettleser, må du koble til på nytt der.</li>' +
-  '</ul>' +
-  '<p style="margin-top:10px; opacity:.9;">' +
-  'Tips: Bruk samme e-post som kontoen din i nettbutikken.' +
-  '</p>'
-));
+    // Viktig: forklar “to steg” på en enkel måte (HTML i streng)
+    var infoHtml =
+      '<p>' +
+        'Du er innlogget i nettbutikken. ' +
+        'For å kunne lagre <strong>Min Bagg</strong> på tvers av enheter bruker vi en egen “kobling” mot lagringen (Supabase). ' +
+        'Derfor kan du bli bedt om én ekstra innlogging med <strong>engangslink på e-post</strong>.' +
+      '</p>' +
+      '<ul>' +
+        '<li>Dette gjøres normalt <strong>bare én gang per enhet/nettleser</strong>.</li>' +
+        '<li>Etterpå blir du husket automatisk (så lenge du ikke bruker inkognito / sletter cookies/lagring).</li>' +
+        '<li>Hvis du bytter mobil/PC eller nettleser, må du koble til på nytt der.</li>' +
+      '</ul>' +
+      '<p style="margin-top:10px; opacity:.9;">' +
+        'Tips: Bruk samme e-post som kontoen din i nettbutikken.' +
+      '</p>';
 
-    ));
+    wrap.appendChild(elHtml('div', 'minbagg-muted', infoHtml));
 
     var form = el('div', 'minbagg-connect-form');
 
