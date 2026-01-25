@@ -1,63 +1,91 @@
-/* =========================================================
-   GOLFKONGEN – MIN BAGG (FIX: ekte Supabase user før DB-kall)
+/* ============================================================================
+   GOLFKONGEN – MIN BAGG (v2026-01-25)
    - Kjør kun på /sider/min-bagg
-   - Guest: viser CTA + topp 3 globalt
+   - Guest: viser CTA + Topp 3 globalt (fra Supabase)
    - Innlogget i butikk:
-       - Hvis Supabase-session finnes: last/lagre bag i Supabase
-       - Hvis ingen Supabase-session: vis “koble Min Bagg” (magic link)
-   ========================================================= */
-
+       - Hvis Supabase-session finnes: last/lagre bag i Supabase (mybag_bags)
+       - Hvis ingen Supabase-session: vis “Koble Min Bagg” (magic link)
+   - DB (forventet):
+       table: mybag_bags
+       columns: email (text, PK/unique), bag (jsonb), updated_at (timestamptz)
+   ============================================================================ */
 (function () {
   'use strict';
 
   // Kjør kun på /sider/min-bagg
   var path = ((location && location.pathname) ? location.pathname : '').replace(/\/+$/, '').toLowerCase();
   if (path !== '/sider/min-bagg') return;
-
   if (window.__MINBAGG_APP_RUNNING__) return;
   window.__MINBAGG_APP_RUNNING__ = true;
 
-  /* ------------------------------
-     Konfig (fra loader / global)
-  ------------------------------ */
+  // Konfig (fra loader / global)
   var SUPA_URL = (window.GK_SUPABASE_URL || '').trim();
-  var SUPA_ANON = (window.GK_SUPABASE_ANON_KEY || '').trim();
+  var SUPA_ANON = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
 
-  /* ------------------------------
-     Utils
-  ------------------------------ */
-  function log() {
-    try { console.log.apply(console, arguments); } catch (_) {}
-  }
+  function log() { try { console.log.apply(console, arguments); } catch (_) {} }
 
+  // --- DOM helpers -----------------------------------------------------------
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
     if (text != null) n.textContent = text;
     return n;
   }
-
-  // Når vi faktisk vil ha HTML (p/ul/strong etc)
   function elHtml(tag, cls, html) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
     if (html != null) n.innerHTML = html;
     return n;
   }
+  function qs(sel, root) { return (root || document).querySelector(sel); }
+  function qsa(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function clear(node) { while (node && node.firstChild) node.removeChild(node.firstChild); }
 
-  function qs(sel, root) {
-    return (root || document).querySelector(sel);
+  // --- Styles (selvstendig, så du slipper å styre custom.css først) ----------
+  function injectStyles() {
+    if (document.getElementById('minbagg-style')) return;
+    var css = ''
+      + '.minbagg-app{max-width:980px}'
+      + '.minbagg-banner{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);padding:10px 12px;border-radius:10px;margin:8px 0 14px}'
+      + '.minbagg-banner strong{display:inline-block;margin-right:8px}'
+      + '.minbagg-muted{opacity:.85}'
+      + '.minbagg-card{border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.10);border-radius:12px;padding:12px;margin:10px 0}'
+      + '.minbagg-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}'
+      + '.minbagg-row > *{flex:0 0 auto}'
+      + '.minbagg-input{min-width:240px;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.20);color:#fff;outline:none}'
+      + '.minbagg-input:focus{border-color:rgba(255,255,255,.35)}'
+      + '.minbagg-btn{cursor:pointer;user-select:none;border-radius:10px;padding:8px 10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff}'
+      + '.minbagg-btn:hover{background:rgba(255,255,255,.10)}'
+      + '.minbagg-btn.primary{border-color:rgba(44,174,96,.55);background:rgba(44,174,96,.14)}'
+      + '.minbagg-btn.primary:hover{background:rgba(44,174,96,.20)}'
+      + '.minbagg-btn.danger{border-color:rgba(220,53,69,.55);background:rgba(220,53,69,.14)}'
+      + '.minbagg-btn.danger:hover{background:rgba(220,53,69,.20)}'
+      + '.minbagg-results{margin-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}'
+      + '.minbagg-res{border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:10px;display:flex;gap:10px;align-items:center;background:rgba(0,0,0,.10)}'
+      + '.minbagg-res img{width:44px;height:44px;object-fit:cover;border-radius:10px;flex:0 0 auto}'
+      + '.minbagg-res .t{font-weight:600;line-height:1.2}'
+      + '.minbagg-res .a{margin-top:4px}'
+      + '.minbagg-baglist{display:flex;flex-direction:column;gap:8px}'
+      + '.minbagg-item{display:flex;align-items:center;gap:10px;border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:10px;background:rgba(0,0,0,.10)}'
+      + '.minbagg-item img{width:48px;height:48px;object-fit:cover;border-radius:10px}'
+      + '.minbagg-item .meta{flex:1 1 auto;min-width:140px}'
+      + '.minbagg-item .meta a{color:inherit;text-decoration:none}'
+      + '.minbagg-item .meta a:hover{text-decoration:underline}'
+      + '.minbagg-item .sub{opacity:.85;font-size:12px;margin-top:2px}'
+      + '.minbagg-split{display:grid;grid-template-columns:1fr;gap:10px}'
+      + '@media(min-width:900px){.minbagg-split{grid-template-columns:1fr 1fr}}'
+      ;
+    var st = document.createElement('style');
+    st.id = 'minbagg-style';
+    st.type = 'text/css';
+    st.appendChild(document.createTextNode(css));
+    document.head.appendChild(st);
   }
 
+  // --- Login marker fra theme ------------------------------------------------
   function getLoginMarker() {
-    // Bruker din nye fasit-marker i Theme:
-    // <span id="gk-login-marker" style="display:none"
-    //   data-logged-in="1/0"
-    //   data-firstname="..."
-    //   data-email="... (kan være tom)">
     var m = document.getElementById('gk-login-marker');
     if (!m) return { loggedIn: false, firstname: '', email: '' };
-
     var ds = m.dataset || {};
     var li = (ds.loggedIn || ds.loggedin || '0') + '';
     return {
@@ -67,354 +95,307 @@
     };
   }
 
+  // --- Root element ----------------------------------------------------------
   function ensureRoot() {
     var root = document.getElementById('min-bagg-root');
-    if (!root) {
-      log('[MINBAGG] root not found');
-      return null;
-    }
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'min-bagg-root';
+    // fallback: legg i page-content-area hvis den finnes
+    var host = document.getElementById('page-content-area') || document.body;
+    host.appendChild(root);
     return root;
   }
 
-  function clear(node) {
-    while (node.firstChild) node.removeChild(node.firstChild);
-  }
-
-  function btn(cls, text, onClick) {
-    var b = el('button', cls, text);
-    b.type = 'button';
-    b.addEventListener('click', onClick);
-    return b;
-  }
-
-  function linkBtn(cls, text, href) {
-    var a = el('a', cls, text);
-    a.href = href;
-    return a;
-  }
-
-  function looksLikeEmail(s) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || '').trim());
-  }
-
+  // --- Supabase loader/client ------------------------------------------------
   function loadScript(src) {
     return new Promise(function (resolve, reject) {
       var s = document.createElement('script');
       s.src = src;
-      s.async = true;
-      s.onload = function () { resolve(); };
-      s.onerror = function () { reject(new Error('Failed to load: ' + src)); };
+      s.defer = true;
+      s.onload = resolve;
+      s.onerror = reject;
       document.head.appendChild(s);
     });
   }
 
-  /* ------------------------------
-     Supabase client
-  ------------------------------ */
-  function ensureSupabaseClient() {
+  async function ensureSupabaseClient() {
     if (!SUPA_URL || !SUPA_ANON) {
-      return Promise.reject(new Error('Mangler GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY'));
+      throw new Error('Manglende Supabase config (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).');
     }
-
-    // Hvis supabase-js allerede finnes, bruk den
-    if (window.supabase && window.supabase.createClient) {
-      return Promise.resolve(window.supabase.createClient(SUPA_URL, SUPA_ANON));
+    if (!window.supabase || !window.supabase.createClient) {
+      // UMD build
+      await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js');
     }
-
-    // Last supabase-js fra CDN
-    return loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js')
-      .then(function () {
-        if (!window.supabase || !window.supabase.createClient) {
-          throw new Error('Supabase library loaded, but createClient missing');
-        }
-        return window.supabase.createClient(SUPA_URL, SUPA_ANON);
-      });
+    return window.supabase.createClient(SUPA_URL, SUPA_ANON);
   }
 
-  /* ------------------------------
-     Data: mybag_bags
-     Forutsetter tabell med:
-       - user_id (uuid) PK / unique
-       - bag (jsonb)
-       - updated_at (timestamp) default now()
-     RLS: tillat SELECT/UPSERT for auth.uid() = user_id
-  ------------------------------ */
-  function dbLoadBag(supa, userId) {
-    // VIKTIG: ikke kall dette uten gyldig userId
-    return supa.from('mybag_bags')
-  .select('bag')
-  .eq('email', marker.email)
-  .maybeSingle()
-      .then(function (res) {
-        if (res.error) throw res.error;
-        return (res.data && res.data.bag) ? res.data.bag : null;
-      });
+  // --- Storage helpers (fallback) -------------------------------------------
+  var LS_KEY = 'GK_MINBAGG_BAG_V1';
+  function lsLoad() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]') || []; } catch (_) { return []; }
+  }
+  function lsSave(bag) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(bag || [])); } catch (_) {}
   }
 
-  function dbSaveBag(supa, userId, bag) {
-    return supa.from('mybag_bags')
-      .upsert({ email: marker.email, bag: bag, updated_at: new Date().toISOString() }, { onConflict: 'email' })
-      .then(function (res) {
-        if (res.error) throw res.error;
-        return true;
-      });
+  // --- DB: load/save bag via Supabase ---------------------------------------
+  async function dbLoadBag(supa, email) {
+    if (!email) return null;
+    var res = await supa.from('mybag_bags').select('bag').eq('email', email).maybeSingle();
+    if (res && res.error) throw res.error;
+    if (!res || !res.data) return null;
+    return res.data.bag || null;
   }
 
-  function loadMyDiscs(client, userId) {
-    log('[MINBAGG] loading my discs for user:', userId);
-
-    return client
-      .from('mybag_user_discs')
-      .select('id,type,name,product_url,image_url,created_at')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true })
-      .then(function (res) {
-        if (res.error) throw res.error;
-        log('[MINBAGG] my discs result:', res.data);
-        return res.data || [];
-      });
+  async function dbSaveBag(supa, email, bag) {
+    if (!email) throw new Error('Mangler e-post på Supabase-bruker.');
+    var payload = { email: email, bag: bag || [], updated_at: new Date().toISOString() };
+    var res = await supa.from('mybag_bags').upsert(payload, { onConflict: 'email' }).select('email').maybeSingle();
+    if (res && res.error) throw res.error;
+    return true;
   }
 
-  /* ------------------------------
-     Global topp 3 (popular_discs)
-  ------------------------------ */
-  function fetchJson(url, headers) {
-    return fetch(url, {
-      method: 'GET',
-      headers: headers || {}
-    }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    });
-  }
+  // --- Quickbutik search -----------------------------------------------------
+  function safeStr(x) { return (x == null) ? '' : String(x); }
 
-  function loadTop3() {
-    var base = SUPA_URL.replace(/\/$/, '');
-    var url =
-      base +
-      "/rest/v1/popular_discs" +
-      "?select=type,name,count,product_url,image_url" +
-      "&order=count.desc" +
-      "&limit=50";
-
-    var headers = {
-      apikey: SUPA_ANON,
-      Authorization: 'Bearer ' + SUPA_ANON
+  function pickProduct(p) {
+    // Prøv å være robust på felt-navn i Quickbutik JSON
+    var name = p.name || p.title || p.product_name || p.producttitle || p.productTitle || p.heading || '';
+    var url  = p.url || p.producturl || p.link || p.href || p.uri || '';
+    var img  = p.firstimage || p.image || p.first_image || p.firstImage || '';
+    if (!url && p.id) url = '/shop/product/' + p.id;
+    return {
+      name: safeStr(name).trim(),
+      url: safeStr(url).trim(),
+      image: safeStr(img).trim()
     };
-
-    return fetchJson(url, headers).then(function (rows) {
-      var grouped = { putter: [], midrange: [], fairway: [], distance: [] };
-      rows.forEach(function (r) {
-        if (grouped[r.type]) grouped[r.type].push(r);
-      });
-      Object.keys(grouped).forEach(function (k) {
-        grouped[k] = grouped[k].slice(0, 3);
-      });
-      return grouped;
-    });
   }
 
-  function renderTop3(container) {
-    var box = el('div', 'minbagg-top3-box');
-    box.appendChild(el('h2', '', 'Topp 3 globalt'));
+  async function qbSearch(query) {
+    var q = (query || '').trim();
+    if (!q) return [];
+    var url = '/shop/search?s=' + encodeURIComponent(q) + '&out=json&limit=12';
+    var r = await fetch(url, { credentials: 'same-origin' });
+    var t = await r.text();
 
-    var loading = el('div', 'minbagg-loading', 'Laster toppliste…');
-    box.appendChild(loading);
-    container.appendChild(box);
-
-    loadTop3().then(function (grouped) {
-      clear(loading);
-      var wrap = el('div', 'minbagg-top3-wrap');
-
-      function renderGroup(title, items) {
-        var g = el('div', 'minbagg-top3-group');
-        g.appendChild(el('h3', '', title));
-        if (!items || !items.length) {
-          g.appendChild(el('div', 'minbagg-muted', 'Ingen data enda.'));
-          return g;
-        }
-        items.forEach(function (it) {
-          var row = el('a', 'minbagg-top3-row');
-          row.href = it.product_url || '#';
-          row.target = '_self';
-
-          if (it.image_url) {
-            var img = document.createElement('img');
-            img.className = 'minbagg-top3-img';
-            img.alt = it.name || '';
-            img.src = it.image_url;
-            row.appendChild(img);
-          }
-
-          var txt = el('div', 'minbagg-top3-txt');
-          txt.appendChild(el('div', 'minbagg-top3-name', it.name || 'Ukjent'));
-          txt.appendChild(el('div', 'minbagg-top3-count', 'Valgt ' + (it.count || 0) + ' ganger'));
-          row.appendChild(txt);
-
-          g.appendChild(row);
-        });
-        return g;
-      }
-
-      wrap.appendChild(renderGroup('Putter', grouped.putter));
-      wrap.appendChild(renderGroup('Midrange', grouped.midrange));
-      wrap.appendChild(renderGroup('Fairway', grouped.fairway));
-      wrap.appendChild(renderGroup('Distance', grouped.distance));
-
-      box.appendChild(wrap);
-    }).catch(function (e) {
-      loading.textContent = 'Kunne ikke laste toppliste (' + (e && e.message ? e.message : 'feil') + ').';
-    });
+    // Quickbutik svarer JSON som tekst
+    var j;
+    try { j = JSON.parse(t); } catch (_) { return []; }
+    var arr = (j && j.searchresults) ? j.searchresults : [];
+    var out = [];
+    for (var i = 0; i < arr.length; i++) {
+      var prod = arr[i] && (arr[i].product || arr[i]);
+      if (!prod) continue;
+      var p = pickProduct(prod);
+      if (!p.name) continue;
+      out.push(p);
+    }
+    return out;
   }
 
-  /* ------------------------------
-     UI: Guest
-  ------------------------------ */
-  function renderGuestView(root) {
+  // --- UI --------------------------------------------------------------------
+  function bannerHtml() {
+    return '<strong>🚧 Under konstruksjon</strong>'
+      + 'Denne siden er under utvikling og kan endre seg fra dag til dag. '
+      + 'Takk for tålmodigheten – full versjon kommer snart.';
+  }
+
+  function renderNeedShopLogin(root) {
     clear(root);
-
-    var wrap = el('div', 'minbagg-guest');
-    wrap.appendChild(el('h2', '', 'Min Bagg'));
-    wrap.appendChild(el('div', 'minbagg-muted',
-      'For å bruke Min Bagg og lagre baggen din må du være innlogget.'
-    ));
-
-    var actions = el('div', 'minbagg-actions');
-    actions.appendChild(linkBtn('minbagg-btn minbagg-btn-primary', 'Logg inn', '/customer/login'));
-    actions.appendChild(linkBtn('minbagg-btn minbagg-btn-ghost', 'Opprett konto', '/customer/register'));
-    wrap.appendChild(actions);
-
-    renderTop3(wrap);
-    root.appendChild(wrap);
-
-    log('[MINBAGG] guest detected — app will NOT load');
+    var app = el('div', 'minbagg-app');
+    app.appendChild(elHtml('div', 'minbagg-banner', bannerHtml()));
+    app.appendChild(el('h2', '', 'Min Bagg'));
+    app.appendChild(el('div', 'minbagg-muted',
+      'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.'));
+    root.appendChild(app);
   }
 
-  /* ------------------------------
-     UI: “Koble Min Bagg” (Supabase magic link)
-  ------------------------------ */
   function renderConnectView(root, marker, supa) {
     clear(root);
 
-    var wrap = el('div', 'minbagg-connect');
-    wrap.appendChild(el('h2', '', 'Min Bagg'));
+    var app = el('div', 'minbagg-app');
+    app.appendChild(elHtml('div', 'minbagg-banner', bannerHtml()));
+    app.appendChild(el('h2', '', 'Min Bagg'));
 
-    // Viktig: forklar “to steg” på en enkel måte (HTML i streng)
-    var infoHtml =
-      '<p>' +
-        'Du er innlogget i nettbutikken. ' +
-        'For å kunne lagre <strong>Min Bagg</strong> på tvers av enheter bruker vi en egen “kobling” mot lagringen (Supabase). ' +
-        'Derfor kan du bli bedt om én ekstra innlogging med <strong>engangslink på e-post</strong>.' +
-      '</p>' +
-      '<ul>' +
-        '<li>Dette gjøres normalt <strong>bare én gang per enhet/nettleser</strong>.</li>' +
-        '<li>Etterpå blir du husket automatisk (så lenge du ikke bruker inkognito / sletter cookies/lagring).</li>' +
-        '<li>Hvis du bytter mobil/PC eller nettleser, må du koble til på nytt der.</li>' +
-      '</ul>' +
-      '<p style="margin-top:10px; opacity:.9;">' +
-        'Tips: Bruk samme e-post som kontoen din i nettbutikken.' +
-      '</p>';
+    var card = el('div', 'minbagg-card');
+    card.appendChild(el('div', 'minbagg-muted',
+      'Du er innlogget i nettbutikken. For å kunne lagre Min Bagg på tvers av enheter kobler vi deg til lagringen (Supabase) via en engangslink på e-post.'));
 
-    wrap.appendChild(elHtml('div', 'minbagg-muted', infoHtml));
+    var ul = el('ul', '');
+    ul.appendChild(el('li', '', 'Dette gjøres normalt bare én gang per enhet/nettleser.'));
+    ul.appendChild(el('li', '', 'Etterpå blir du husket automatisk (så lenge du ikke bruker inkognito / sletter cookies/lagring).'));
+    ul.appendChild(el('li', '', 'Bytter du mobil/PC/nettleser, må du koble til på nytt der.'));
+    card.appendChild(ul);
 
-    var form = el('div', 'minbagg-connect-form');
-
+    var form = el('div', 'minbagg-row');
     var email = (marker.email || '').trim();
-    var emailRow = el('div', 'minbagg-row');
+    var inp = document.createElement('input');
+    inp.className = 'minbagg-input';
+    inp.type = 'email';
+    inp.placeholder = 'E-post (for engangslink)';
+    inp.value = email || '';
+    form.appendChild(inp);
 
-    var emailLabel = el('div', 'minbagg-label', 'E-post (for engangslink)');
-    emailRow.appendChild(emailLabel);
+    var btn = el('button', 'minbagg-btn primary', 'Send engangslink');
+    form.appendChild(btn);
 
-    var emailInput = document.createElement('input');
-    emailInput.type = 'email';
-    emailInput.className = 'minbagg-input';
-    emailInput.placeholder = 'din@epost.no';
-    emailInput.value = email;
-    emailRow.appendChild(emailInput);
+    var msg = el('div', 'minbagg-muted');
+    msg.style.marginTop = '8px';
+    msg.textContent = 'Tips: bruk samme e-post som kontoen din i nettbutikken.';
+    card.appendChild(form);
+    card.appendChild(msg);
 
-    form.appendChild(emailRow);
-
-    var msg = el('div', 'minbagg-muted', '');
-    form.appendChild(msg);
-
-    var actions = el('div', 'minbagg-actions');
-
-    actions.appendChild(btn('minbagg-btn minbagg-btn-primary', 'Send engangslink', function () {
-      var em = (emailInput.value || '').trim();
-      if (!looksLikeEmail(em)) {
-        msg.textContent = 'Skriv inn en gyldig e-postadresse.';
+    btn.addEventListener('click', async function () {
+      var e = (inp.value || '').trim();
+      if (!e || e.indexOf('@') === -1) {
+        msg.textContent = 'Skriv inn en gyldig e-post først.';
         return;
       }
-      msg.textContent = 'Sender…';
-
-      supa.auth.signInWithOtp({
-        email: em,
-        options: {
-          emailRedirectTo: location.origin + '/sider/min-bagg'
-        }
-      }).then(function (res) {
-        if (res.error) throw res.error;
+      btn.disabled = true;
+      msg.textContent = 'Sender engangslink…';
+      try {
+        var redirectTo = location.origin + location.pathname; // tilbake til samme side
+        var res = await supa.auth.signInWithOtp({ email: e, options: { emailRedirectTo: redirectTo } });
+        if (res && res.error) throw res.error;
         msg.textContent = 'Sjekk e-posten din og trykk på linken. Du blir sendt tilbake hit.';
-      }).catch(function (e) {
-        msg.textContent = 'Feil ved sending: ' + (e && e.message ? e.message : 'ukjent feil');
-      });
-    }));
+      } catch (err) {
+        msg.textContent = 'Kunne ikke sende engangslink: ' + (err && err.message ? err.message : String(err));
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
-    actions.appendChild(linkBtn('minbagg-btn minbagg-btn-ghost', 'Logg ut av butikk', '/customer/logout'));
-    form.appendChild(actions);
-
-    wrap.appendChild(form);
-    renderTop3(wrap);
-
-    root.appendChild(wrap);
-
-    log('[MINBAGG] shop logged-in, but no Supabase session — showing connect view');
+    app.appendChild(card);
+    root.appendChild(app);
   }
 
-  /* ------------------------------
-     UI: App (minimal bag + lagring)
-  ------------------------------ */
-  function renderApp(root, marker, supa, userId) {
+  function renderTop3Into(container, top3) {
+    clear(container);
+    if (!top3 || !top3.length) {
+      container.appendChild(el('div', 'minbagg-muted', 'Ingen globale data enda.'));
+      return;
+    }
+    for (var i = 0; i < top3.length; i++) {
+      var g = top3[i];
+      var box = el('div', 'minbagg-card');
+      box.appendChild(el('h4', '', g.group || ''));
+      var list = el('div', '');
+      for (var j = 0; j < (g.items || []).length; j++) {
+        var it = g.items[j];
+        var a = el('a', '');
+        a.href = it.url || '#';
+        a.target = '_self';
+        a.rel = 'nofollow';
+        a.textContent = it.name || '';
+        a.style.display = 'inline-block';
+        a.style.marginRight = '10px';
+        list.appendChild(a);
+
+        var c = el('div', 'minbagg-muted', 'Valgt ' + (it.count || 0) + ' ganger');
+        c.style.marginBottom = '6px';
+        list.appendChild(c);
+      }
+      box.appendChild(list);
+      container.appendChild(box);
+    }
+  }
+
+  function renderApp(root, marker, supa, supaUser) {
     clear(root);
 
-    var wrap = el('div', 'minbagg-app');
-
-    var h = el('div', 'minbagg-header');
-    h.appendChild(el('h2', '', 'Min Bagg'));
-    h.appendChild(el('div', 'minbagg-muted',
-      'Hei ' + (marker.firstname || 'der') + ' 👋 Baggen din lagres på kontoen din.'
-    ));
-    wrap.appendChild(h);
-
-    // Status + actions
-    var topActions = el('div', 'minbagg-actions');
-    topActions.appendChild(btn('minbagg-btn minbagg-btn-ghost', 'Koble fra (logg ut Min Bagg)', function () {
-      supa.auth.signOut().then(function () {
-        location.reload();
-      });
-    }));
-    wrap.appendChild(topActions);
-
-    // Bag UI
-    var bagBox = el('div', 'minbagg-box');
-    bagBox.appendChild(el('h3', '', 'Baggen din'));
-
-    var bagList = el('div', 'minbagg-list');
-    bagBox.appendChild(bagList);
-
-    var saveMsg = el('div', 'minbagg-muted', '');
-    bagBox.appendChild(saveMsg);
-
-    wrap.appendChild(bagBox);
-
-    // Topp 3 globalt nederst
-    renderTop3(wrap);
-
-    root.appendChild(wrap);
-
     var state = {
-      bag: [] // enkel liste: {name, url, image}
+      bag: [],
+      lastSavedAt: null
     };
+
+    var app = el('div', 'minbagg-app');
+    app.appendChild(elHtml('div', 'minbagg-banner', bannerHtml()));
+    app.appendChild(el('h2', '', 'Min Bagg'));
+
+    var hello = el('div', 'minbagg-muted', 'Hei ' + (marker.firstname || 'der') + ' 👋  Baggen din lagres på kontoen din.');
+    app.appendChild(hello);
+
+    var actions = el('div', 'minbagg-row');
+    var btnLogout = el('button', 'minbagg-btn', 'Koble fra (logg ut Min Bagg)');
+    actions.appendChild(btnLogout);
+    app.appendChild(actions);
+
+    btnLogout.addEventListener('click', async function () {
+      btnLogout.disabled = true;
+      try { await supa.auth.signOut(); } catch (_) {}
+      location.reload();
+    });
+
+    // Split layout: venstre = bag/add, høyre = topp 3
+    var split = el('div', 'minbagg-split');
+
+    // --- VENSTRE
+    var left = el('div', '');
+
+    var addCard = el('div', 'minbagg-card');
+    addCard.appendChild(el('h3', '', 'Legg til disk'));
+
+    var addRow = el('div', 'minbagg-row');
+
+    var searchInput = document.createElement('input');
+    searchInput.className = 'minbagg-input';
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Søk i nettbutikken (f.eks. buzzz, luna, md3)…';
+    addRow.appendChild(searchInput);
+
+    var addHint = el('div', 'minbagg-muted', 'Søk for å få forslag. Trykk “Legg til” på riktig disk.');
+    addHint.style.flex = '1 1 260px';
+    addRow.appendChild(addHint);
+
+    addCard.appendChild(addRow);
+
+    var results = el('div', 'minbagg-results');
+    addCard.appendChild(results);
+
+    // Manuell add
+    var manual = el('div', 'minbagg-card');
+    manual.appendChild(el('h4', '', 'Legg til manuelt'));
+    var manRow = el('div', 'minbagg-row');
+
+    var manName = document.createElement('input');
+    manName.className = 'minbagg-input';
+    manName.type = 'text';
+    manName.placeholder = 'Navn (f.eks. Buzzz)';
+    manRow.appendChild(manName);
+
+    var manUrl = document.createElement('input');
+    manUrl.className = 'minbagg-input';
+    manUrl.type = 'text';
+    manUrl.placeholder = 'URL (valgfritt)';
+    manRow.appendChild(manUrl);
+
+    var manBtn = el('button', 'minbagg-btn primary', 'Legg til');
+    manRow.appendChild(manBtn);
+    manual.appendChild(manRow);
+
+    // BAG
+    var bagCard = el('div', 'minbagg-card');
+    bagCard.appendChild(el('h3', '', 'Baggen din'));
+    var bagList = el('div', 'minbagg-baglist');
+    bagCard.appendChild(bagList);
+
+    left.appendChild(addCard);
+    left.appendChild(manual);
+    left.appendChild(bagCard);
+
+    // --- HØYRE
+    var right = el('div', '');
+    var topCard = el('div', 'minbagg-card');
+    topCard.appendChild(el('h3', '', 'Topp 3 globalt'));
+    var topInner = el('div', 'minbagg-muted', 'Laster…');
+    topCard.appendChild(topInner);
+    right.appendChild(topCard);
+
+    split.appendChild(left);
+    split.appendChild(right);
+    app.appendChild(split);
+    root.appendChild(app);
 
     function renderBag() {
       clear(bagList);
@@ -422,90 +403,254 @@
         bagList.appendChild(el('div', 'minbagg-muted', 'Ingen disker lagt til enda.'));
         return;
       }
+      for (var i = 0; i < state.bag.length; i++) {
+        (function (idx) {
+          var it = state.bag[idx] || {};
+          var row = el('div', 'minbagg-item');
 
-      state.bag.forEach(function (d, idx) {
-        var row = el('div', 'minbagg-item');
+          if (it.image) {
+            var img = document.createElement('img');
+            img.src = it.image;
+            img.alt = it.name || '';
+            row.appendChild(img);
+          } else {
+            row.appendChild(el('div', 'minbagg-muted', ''));
+          }
 
-        if (d.image) {
-          var img = document.createElement('img');
-          img.className = 'minbagg-item-img';
-          img.src = d.image;
-          img.alt = d.name || '';
-          row.appendChild(img);
-        }
+          var meta = el('div', 'meta');
+          var title = document.createElement(it.url ? 'a' : 'div');
+          if (it.url) {
+            title.href = it.url;
+            title.target = '_self';
+            title.rel = 'nofollow';
+          }
+          title.textContent = it.name || '(uten navn)';
+          meta.appendChild(title);
 
-        var mid = el('div', 'minbagg-item-mid');
-        var a = el('a', 'minbagg-item-name', d.name || 'Ukjent disk');
-        a.href = d.url || '#';
-        a.target = '_self';
-        mid.appendChild(a);
-        row.appendChild(mid);
+          var sub = el('div', 'sub', it.addedAt ? ('Lagt til: ' + it.addedAt) : '');
+          meta.appendChild(sub);
+          row.appendChild(meta);
 
-        row.appendChild(btn('minbagg-btn minbagg-btn-danger', 'Fjern', function () {
-          state.bag.splice(idx, 1);
-          renderBag();
-          save();
-        }));
+          var rm = el('button', 'minbagg-btn danger', 'Fjern');
+          rm.addEventListener('click', function () {
+            state.bag.splice(idx, 1);
+            lsSave(state.bag);
+            renderBag();
+            scheduleSave();
+          });
+          row.appendChild(rm);
 
-        bagList.appendChild(row);
-      });
+          bagList.appendChild(row);
+        })(i);
+      }
     }
 
-    function save() {
-      saveMsg.textContent = 'Lagrer…';
-      dbSaveBag(supa, userId, state.bag).then(function () {
-        saveMsg.textContent = 'Lagret ✅';
-        setTimeout(function () { saveMsg.textContent = ''; }, 1200);
-      }).catch(function (e) {
-        saveMsg.textContent = 'Kunne ikke lagre: ' + (e && e.message ? e.message : 'ukjent feil');
-      });
+    function normalizeBagItem(p) {
+      var n = (p && p.name ? String(p.name) : '').trim();
+      if (!n) return null;
+      return {
+        name: n,
+        url: (p.url ? String(p.url) : '').trim(),
+        image: (p.image ? String(p.image) : '').trim(),
+        addedAt: new Date().toISOString().slice(0, 10)
+      };
     }
 
-    // Load
-    saveMsg.textContent = 'Laster…';
-    dbLoadBag(supa, userId).then(function (bag) {
-      state.bag = Array.isArray(bag) ? bag : [];
+    function addDisc(p) {
+      var it = normalizeBagItem(p);
+      if (!it) return;
+      for (var i = 0; i < state.bag.length; i++) {
+        var ex = state.bag[i];
+        if (it.url && ex.url && it.url === ex.url) return;
+        if (!it.url && ex.name && ex.name.toLowerCase() === it.name.toLowerCase()) return;
+      }
+      state.bag.unshift(it);
+      lsSave(state.bag);
       renderBag();
-      saveMsg.textContent = '';
-    }).catch(function (e) {
-      saveMsg.textContent = 'Kunne ikke laste: ' + (e && e.message ? e.message : 'ukjent feil');
+      scheduleSave();
+    }
+
+    manBtn.addEventListener('click', function () {
+      var n = (manName.value || '').trim();
+      if (!n) return;
+      addDisc({ name: n, url: (manUrl.value || '').trim(), image: '' });
+      manName.value = '';
+      manUrl.value = '';
     });
+
+    // Search UX
+    var searchTimer = null;
+    function setResultsLoading() {
+      clear(results);
+      results.appendChild(el('div', 'minbagg-muted', 'Søker…'));
+    }
+    function setResultsEmpty(msg) {
+      clear(results);
+      results.appendChild(el('div', 'minbagg-muted', msg || 'Ingen treff.'));
+    }
+    function renderResults(items) {
+      clear(results);
+      if (!items || !items.length) { setResultsEmpty('Ingen treff. Prøv annet søk, eller legg til manuelt.'); return; }
+
+      for (var i = 0; i < items.length; i++) {
+        (function (p) {
+          var box = el('div', 'minbagg-res');
+          if (p.image) {
+            var im = document.createElement('img');
+            im.src = p.image;
+            im.alt = p.name || '';
+            box.appendChild(im);
+          } else {
+            box.appendChild(el('div', 'minbagg-muted', ''));
+          }
+          var mid = el('div', '');
+          mid.style.flex = '1 1 auto';
+          mid.appendChild(el('div', 't', p.name || ''));
+          var act = el('div', 'a');
+          var b = el('button', 'minbagg-btn primary', 'Legg til');
+          b.addEventListener('click', function () { addDisc(p); });
+          act.appendChild(b);
+          mid.appendChild(act);
+          box.appendChild(mid);
+          results.appendChild(box);
+        })(items[i]);
+      }
+    }
+
+    searchInput.addEventListener('input', function () {
+      var q = (searchInput.value || '').trim();
+      if (searchTimer) clearTimeout(searchTimer);
+      if (!q) { clear(results); return; }
+      searchTimer = setTimeout(async function () {
+        setResultsLoading();
+        try {
+          var items = await qbSearch(q);
+          renderResults(items);
+        } catch (err) {
+          setResultsEmpty('Kunne ikke søke akkurat nå.');
+          log('[MINBAGG] search error', err);
+        }
+      }, 250);
+    });
+
+    // Save debounce
+    var saveTimer = null;
+    var savingNow = false;
+
+    async function doSaveNow() {
+      if (savingNow) return;
+      savingNow = true;
+      try {
+        await dbSaveBag(supa, supaUser.email, state.bag);
+        state.lastSavedAt = new Date();
+      } catch (err) {
+        log('[MINBAGG] save failed', err);
+      } finally {
+        savingNow = false;
+      }
+    }
+    function scheduleSave() {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(doSaveNow, 600);
+    }
+
+    // Init load: LS først, så DB
+    (async function initBag() {
+      state.bag = lsLoad();
+      renderBag();
+      try {
+        var dbBag = await dbLoadBag(supa, supaUser.email);
+        if (dbBag && Array.isArray(dbBag)) {
+          state.bag = dbBag;
+          lsSave(state.bag);
+          renderBag();
+        }
+      } catch (err) {
+        log('[MINBAGG] load failed', err);
+      }
+    })();
+
+    // Hook for Top 3
+    app.__renderTop3 = function (top3) { renderTop3Into(topInner, top3); };
   }
 
-  /* ------------------------------
-     Start
-  ------------------------------ */
-  var root = ensureRoot();
-  if (!root) return;
+  // --- Global top3 data ------------------------------------------------------
+  async function fetchTop3(supa) {
+    // Forventet view/table: mybag_popular (group, name, url, count)
+    try {
+      var res = await supa.from('mybag_popular').select('*').limit(200);
+      if (res && res.error) throw res.error;
+      var rows = (res && res.data) ? res.data : [];
 
-  var marker = getLoginMarker();
+      var by = {};
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i] || {};
+        var g = r.group || r.disc_group || r.category || 'Discs';
+        if (!by[g]) by[g] = [];
+        by[g].push({
+          name: r.name || r.disc_name || r.disc || '',
+          url: r.url || '',
+          count: r.count || r.total || 0
+        });
+      }
 
-  // 1) Ikke innlogget i butikken → guest view
-  if (!marker.loggedIn) {
-    renderGuestView(root);
-    return;
+      var out = [];
+      var groups = Object.keys(by);
+      for (var j = 0; j < groups.length; j++) {
+        var gk = groups[j];
+        var arr = by[gk].slice().sort(function (a, b) { return (b.count || 0) - (a.count || 0); }).slice(0, 3);
+        out.push({ group: gk, items: arr });
+      }
+      out.sort(function (a, b) { return a.group.localeCompare(b.group); });
+      return out;
+    } catch (err) {
+      log('[MINBAGG] top3 fetch failed', err);
+      return [];
+    }
   }
 
-  // 2) Innlogget i butikken → Supabase “connect” eller app
-  ensureSupabaseClient().then(function (supa) {
-    return supa.auth.getSession().then(function (res) {
-      var session = res && res.data ? res.data.session : null;
-      var user = session && session.user ? session.user : null;
+  // --- MAIN init -------------------------------------------------------------
+  document.addEventListener('DOMContentLoaded', async function () {
+    injectStyles();
+    var root = ensureRoot();
+    var marker = getLoginMarker();
 
-      // VIKTIG: Ingen DB-kall før user.id finnes
-      if (!user || !user.id) {
+    try {
+      var supa = await ensureSupabaseClient();
+      var top3Promise = fetchTop3(supa);
+
+      if (!marker.loggedIn) {
+        renderNeedShopLogin(root);
+        return;
+      }
+
+      var sess = await supa.auth.getSession();
+      var session = (sess && sess.data) ? sess.data.session : null;
+
+      if (!session || !session.user) {
         renderConnectView(root, marker, supa);
         return;
       }
 
-      renderApp(root, marker, supa, user.id);
-    });
-  }).catch(function (e) {
-    clear(root);
-    root.appendChild(el('div', 'minbagg-muted',
-      'Min Bagg feilet å starte: ' + (e && e.message ? e.message : 'ukjent feil')
-    ));
-    log('[MINBAGG] init error', e);
-  });
+      var gu = await supa.auth.getUser();
+      var user = (gu && gu.data) ? gu.data.user : (session.user || null);
+      if (!user) {
+        renderConnectView(root, marker, supa);
+        return;
+      }
 
+      renderApp(root, marker, supa, user);
+
+      var top3 = await top3Promise;
+      var appRoot = root.firstChild;
+      if (appRoot && appRoot.__renderTop3) appRoot.__renderTop3(top3);
+
+      log('[MINBAGG] app loaded OK');
+    } catch (err) {
+      clear(root);
+      root.appendChild(el('div', 'minbagg-muted',
+        'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
+      log('[MINBAGG] fatal', err);
+    }
+  });
 })();
