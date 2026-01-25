@@ -142,9 +142,9 @@
   function dbLoadBag(supa, userId) {
     // VIKTIG: ikke kall dette uten gyldig userId
     return supa.from('mybag_bags')
-      .select('bag')
-      .eq('user_id', userId)
-      .maybeSingle()
+  .select('bag')
+  .eq('email', marker.email)
+  .maybeSingle()
       .then(function (res) {
         if (res.error) throw res.error;
         return (res.data && res.data.bag) ? res.data.bag : null;
