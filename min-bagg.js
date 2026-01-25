@@ -152,6 +152,21 @@
       });
   }
 
+function loadMyDiscs(client, userId) {
+  log('[MINBAGG] loading my discs for user:', userId);
+
+  return client
+    .from('mybag_user_discs')
+    .select('id,type,name,product_url,image_url,created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+    .then(function (res) {
+      if (res.error) throw res.error;
+      log('[MINBAGG] my discs result:', res.data);
+      return res.data || [];
+    });
+}   
+   
   /* ------------------------------
      Global topp 3 (popular_discs)
      (Hvis du bruker dette allerede, beholdes)
