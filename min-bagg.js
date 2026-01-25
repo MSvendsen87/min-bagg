@@ -456,19 +456,38 @@
       };
     }
 
-    function addDisc(p) {
-      var it = normalizeBagItem(p);
-      if (!it) return;
-      for (var i = 0; i < state.bag.length; i++) {
-        var ex = state.bag[i];
-        if (it.url && ex.url && it.url === ex.url) return;
-        if (!it.url && ex.name && ex.name.toLowerCase() === it.name.toLowerCase()) return;
-      }
-      state.bag.unshift(it);
-      lsSave(state.bag);
-      renderBag();
-      scheduleSave();
-    }
+    async function addDisc(p) {
+  var it = normalizeBagItem(p);
+  if (!it) return;
+
+  // Duplikatsjekk
+  for (var i = 0; i < state.bag.length; i++) {
+    var ex = state.bag[i];
+    if (it.url && ex.url && it.url === ex.url) return;
+    if (!it.url && ex.name && ex.name.toLowerCase() === it.name.toLowerCase()) return;
+  }
+
+  // Legg i lokal bag først (UI føles responsiv)
+  state.bag.unshift(it);
+  lsSave(state.bag);
+  renderBag();
+  scheduleSave();
+
+  // --- Popular tracking (Supabase) ---
+  try {
+    // Foreløpig: alt går som "global"
+    // Neste steg: vi legger på valg av putter/midrange/fairway/distance
+    await supa.rpc('increment_popular_disc', {
+      p_type: 'global',
+      p_name: it.name,
+      p_url: it.url || null,
+      p_image: it.image || null
+    });
+  } catch (err) {
+    log('[MINBAGG] popular increment failed', err);
+  }
+}
+
 
     manBtn.addEventListener('click', function () {
       var n = (manName.value || '').trim();
