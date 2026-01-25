@@ -279,9 +279,20 @@
 
     // Viktig: forklar “to steg” på en enkel måte
     wrap.appendChild(el('div', 'minbagg-muted',
-      'Du er innlogget i nettbutikken. ' +
-      'For å lagre “Min Bagg” på tvers av enheter trenger du å koble den til én gang med en engangslink på e-post. ' +
-      'Etterpå huskes dette normalt av nettleseren, så du slipper å gjøre det hver gang.'
+      <p>
+  Du er innlogget i nettbutikken.
+  For å kunne lagre <strong>Min Bagg</strong> på tvers av enheter bruker vi en egen “kobling” mot lagringen (Supabase).
+  Derfor kan du bli bedt om én ekstra innlogging med <strong>engangslink på e-post</strong>.
+</p>
+<ul>
+  <li>Dette gjøres normalt <strong>bare én gang per enhet/nettleser</strong>.</li>
+  <li>Etterpå blir du husket automatisk (så lenge du ikke bruker inkognito / sletter cookies/lagring).</li>
+  <li>Hvis du bytter mobil/PC eller nettleser, må du koble til på nytt der.</li>
+</ul>
+<p style="margin-top:10px; opacity:.9;">
+  Tips: Bruk samme e-post som kontoen din i nettbutikken.
+</p>
+
     ));
 
     var form = el('div', 'minbagg-connect-form');
