@@ -674,12 +674,11 @@ async function __minbaggInit() {
     log('[MINBAGG] fatal', err);
   }
 }
-
 // Kjør init både før/etter DOMContentLoaded (så den aldri “mister” eventen)
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', __minbaggInit);
 } else {
   setTimeout(__minbaggInit, 0);
 }
-  });
+
 })();
