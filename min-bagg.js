@@ -612,47 +612,55 @@
 }
 
   // --- MAIN init -------------------------------------------------------------
-  document.addEventListener('DOMContentLoaded', async function () {
-    injectStyles();
-    var root = ensureRoot();
-    var marker = getLoginMarker();
+async function __minbaggInit() {
+  injectStyles();
+  var root = ensureRoot();
+  var marker = getLoginMarker();
 
-    try {
-      var supa = await ensureSupabaseClient();
-      var top3Promise = fetchTop3(supa);
+  try {
+    var supa = await ensureSupabaseClient();
+    var top3Promise = fetchTop3(supa);
 
-      if (!marker.loggedIn) {
-        renderNeedShopLogin(root);
-        return;
-      }
-
-      var sess = await supa.auth.getSession();
-      var session = (sess && sess.data) ? sess.data.session : null;
-
-      if (!session || !session.user) {
-        renderConnectView(root, marker, supa);
-        return;
-      }
-
-      var gu = await supa.auth.getUser();
-      var user = (gu && gu.data) ? gu.data.user : (session.user || null);
-      if (!user) {
-        renderConnectView(root, marker, supa);
-        return;
-      }
-
-      renderApp(root, marker, supa, user);
-
-      var top3 = await top3Promise;
-      var appRoot = root.firstChild;
-      if (appRoot && appRoot.__renderTop3) appRoot.__renderTop3(top3);
-
-      log('[MINBAGG] app loaded OK');
-    } catch (err) {
-      clear(root);
-      root.appendChild(el('div', 'minbagg-muted',
-        'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
-      log('[MINBAGG] fatal', err);
+    if (!marker.loggedIn) {
+      renderNeedShopLogin(root);
+      return;
     }
+
+    var sess = await supa.auth.getSession();
+    var session = (sess && sess.data) ? sess.data.session : null;
+
+    if (!session || !session.user) {
+      renderConnectView(root, marker, supa);
+      return;
+    }
+
+    var gu = await supa.auth.getUser();
+    var user = (gu && gu.data) ? gu.data.user : (session.user || null);
+    if (!user) {
+      renderConnectView(root, marker, supa);
+      return;
+    }
+
+    renderApp(root, marker, supa, user);
+
+    var top3 = await top3Promise;
+    var appRoot = root.firstChild;
+    if (appRoot && appRoot.__renderTop3) appRoot.__renderTop3(top3);
+
+    log('[MINBAGG] app loaded OK');
+  } catch (err) {
+    clear(root);
+    root.appendChild(el('div', 'minbagg-muted',
+      'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
+    log('[MINBAGG] fatal', err);
+  }
+}
+
+// Kjør init både før/etter DOMContentLoaded (så den aldri “mister” eventen)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', __minbaggInit);
+} else {
+  setTimeout(__minbaggInit, 0);
+}
   });
 })();
