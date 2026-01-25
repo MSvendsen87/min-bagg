@@ -153,7 +153,7 @@
 
   function dbSaveBag(supa, userId, bag) {
     return supa.from('mybag_bags')
-      .upsert({ user_id: userId, bag: bag, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
+      .upsert({ email: marker.email, bag: bag, updated_at: new Date().toISOString() }, { onConflict: 'email' })
       .then(function (res) {
         if (res.error) throw res.error;
         return true;
