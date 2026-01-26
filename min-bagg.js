@@ -1,5 +1,5 @@
 /* ============================================================================
-   GOLFKONGEN – MIN BAGG (v2026-01-26)
+   GOLFKONGEN – MIN BAGG (v2026-01-26 16:17)
    - Kjør kun på /sider/min-bagg
    - Guest: viser CTA + Topp 3 globalt (fra Supabase)
    - Innlogget i butikk:
@@ -514,10 +514,6 @@
         log('[MINBAGG] popular update failed', e2);
       }
     }
-      state.bag.unshift(it);
-      lsSave(state.bag);
-      renderBag();
-      scheduleSave();
     
 
   // Bind manual add button robustly (unngå ReferenceError hvis variabelnavn/caching henger igjen)
@@ -632,8 +628,6 @@
     app.__renderTop3 = function (top3) { renderTop3Into(topInner, top3); };
 
   // --- Global top3 data ------------------------------------------------------
-  async 
-  }
 
 async function fetchTop3(supa) {
     // Forventet view/table: mybag_popular (group, name, url, count)
