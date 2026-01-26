@@ -396,6 +396,7 @@
     manRow.appendChild(manUrl);
 
     var manBtn = el('button', 'minbagg-btn primary', 'Legg til');
+    var btnMan = manBtn; // alias (fix for evt. btnMan-referanser)
     manRow.appendChild(manBtn);
     manual.appendChild(manRow);
 
