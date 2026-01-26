@@ -325,30 +325,6 @@
       container.appendChild(box);
     }
   }
-    for (var i = 0; i < top3.length; i++) {
-      var g = top3[i];
-      var box = el('div', 'minbagg-card');
-      box.appendChild(el('h4', '', g.group || ''));
-      var list = el('div', '');
-      for (var j = 0; j < (g.items || []).length; j++) {
-        var it = g.items[j];
-        var a = el('a', '');
-        a.href = it.url || '#';
-        a.target = '_self';
-        a.rel = 'nofollow';
-        a.textContent = it.name || '';
-        a.style.display = 'inline-block';
-        a.style.marginRight = '10px';
-        list.appendChild(a);
-
-        var c = el('div', 'minbagg-muted', 'Valgt ' + (it.count || 0) + ' ganger');
-        c.style.marginBottom = '6px';
-        list.appendChild(c);
-      }
-      box.appendChild(list);
-      container.appendChild(box);
-    }
-  }
 
   function renderApp(root, marker, supa, supaUser) {
     clear(root);
@@ -646,7 +622,6 @@
 
     // Hook for Top 3
     app.__renderTop3 = function (top3) { renderTop3Into(topInner, top3); };
-  }
 
   // --- Global top3 data ------------------------------------------------------
   async function fetchTop3(supa) {
