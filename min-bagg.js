@@ -635,7 +635,7 @@
   async 
   }
 
-function fetchTop3(supa) {
+async function fetchTop3(supa) {
     // Forventet view/table: mybag_popular (group, name, url, count)
     try {
       var res = await supa.from('mybag_popular').select('*').limit(200);
