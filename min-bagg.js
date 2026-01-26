@@ -520,13 +520,21 @@
       scheduleSave();
     }
 
-    manBtn.addEventListener('click', function () {
+  // Bind manual add button robustly (unngå ReferenceError hvis variabelnavn/caching henger igjen)
+  var _manBtn = ((typeof manBtn !== 'undefined') && manBtn) ? manBtn : null;
+  if (!_manBtn) {
+    try { _manBtn = manual && manual.querySelector ? manual.querySelector('button.minbagg-btn.primary') : null; } catch (_) {}
+  }
+  if (_manBtn) {
+    _manBtn.addEventListener('click', function () {
       var n = (manName.value || '').trim();
       if (!n) return;
       addDisc({ name: n, url: (manUrl.value || '').trim(), image: '' });
       manName.value = '';
       manUrl.value = '';
     });
+  }
+
 
     // Search UX
     var searchTimer = null;
