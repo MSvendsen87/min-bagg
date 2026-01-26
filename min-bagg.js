@@ -520,13 +520,19 @@
       scheduleSave();
     }
 
-    btnMan.addEventListener('click', function () {
-      var n = (manName.value || '').trim();
-      if (!n) return;
-      addDisc({ name: n, url: (manUrl.value || '').trim(), image: '' });
-      manName.value = '';
-      manUrl.value = '';
-    });
+    manBtn.addEventListener('click', function () {
+  var n = (manName.value || '').trim();
+  if (!n) return;
+
+  addDisc({
+    name: n,
+    url: (manUrl.value || '').trim(),
+    image: ''
+  });
+
+  manName.value = '';
+  manUrl.value = '';
+});
 
     // Search UX
     var searchTimer = null;
