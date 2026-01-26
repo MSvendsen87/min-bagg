@@ -396,7 +396,6 @@
     manRow.appendChild(manUrl);
 
     var manBtn = el('button', 'minbagg-btn primary', 'Legg til');
-    var btnMan = manBtn; // alias (fix for evt. btnMan-referanser)
     manRow.appendChild(manBtn);
     manual.appendChild(manRow);
 
@@ -522,18 +521,12 @@
     }
 
     manBtn.addEventListener('click', function () {
-  var n = (manName.value || '').trim();
-  if (!n) return;
-
-  addDisc({
-    name: n,
-    url: (manUrl.value || '').trim(),
-    image: ''
-  });
-
-  manName.value = '';
-  manUrl.value = '';
-});
+      var n = (manName.value || '').trim();
+      if (!n) return;
+      addDisc({ name: n, url: (manUrl.value || '').trim(), image: '' });
+      manName.value = '';
+      manUrl.value = '';
+    });
 
     // Search UX
     var searchTimer = null;
