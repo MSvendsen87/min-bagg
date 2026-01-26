@@ -520,7 +520,7 @@
       scheduleSave();
     }
 
-    manBtn.addEventListener('click', function () {
+    btnMan.addEventListener('click', function () {
       var n = (manName.value || '').trim();
       if (!n) return;
       addDisc({ name: n, url: (manUrl.value || '').trim(), image: '' });
