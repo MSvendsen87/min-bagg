@@ -1,9 +1,78 @@
-/* === GOLFKONGEN: MIN BAGG – SAFE (ES5, ingen async/await) ===
+/* === GOLFKONGEN: MIN BAGG LOADER (gatekeeper) – kun /sider/min-bagg === */
+(function () {
+  'use strict';
+
+  try {
+    var path = (location && location.pathname) ? location.pathname : "";
+    path = (path || "").replace(/\/+$/, "").toLowerCase();
+    if (path !== "/sider/min-bagg") return;
+
+    // Unngå dobbeltkjøring
+    if (window.__GK_MINBAGG_LOADER__) return;
+    window.__GK_MINBAGG_LOADER__ = true;
+
+    // Root må finnes
+    var root = document.getElementById("min-bagg-root");
+    if (!root) {
+      console.log("[MINBAGG] root not found on page");
+      return;
+    }
+
+    // Supabase config (settes ALLTID her – før appen lastes)
+    window.GK_SUPABASE_URL = "https://qgfbqkzplagckjwdmepm.supabase.co";
+    window.GK_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnZmJxa3pwbGFnY2tqd2RtZXBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2MjA0NDcsImV4cCI6MjA4NDE5NjQ0N30.yu6VvnA5hIH_hWrcOul_7Gk1s7M3dcLNujlm9Nz2QIY";
+
+    console.log("[MINBAGG] GK_SUPABASE_URL:", window.GK_SUPABASE_URL);
+    console.log("[MINBAGG] GK_SUPABASE_ANON_KEY:", window.GK_SUPABASE_ANON_KEY ? "(set)" : "(missing)");
+
+    // Les login-state fra marker (sett av theme/liquid)
+    // Forventet marker: <div id="gk-login-marker" data-logged-in="1" data-firstname="..." data-email="..."></div>
+    function getLoginState() {
+      var m = document.getElementById("gk-login-marker");
+      var ds = (m && m.dataset) ? m.dataset : {};
+      return {
+        loggedIn: ds.loggedIn === "1" || ds.loggedIn === "true",
+        firstname: ds.firstname || "",
+        email: ds.email || ""   // Viktig for lagring i mybag_bags (PK=email)
+      };
+    }
+
+    var st = getLoginState();
+    window.__GK_LOGIN_STATE__ = st; // appen leser denne
+    console.log("[MINBAGG] login marker:", st.loggedIn ? "LOGGED IN" : "GUEST", st.firstname ? "(" + st.firstname + ")" : "");
+
+    // Guest = read-only
+    window.__MINBAGG_READONLY__ = !st.loggedIn;
+
+    // Last app (kun én gang) – fast script-id
+    var SCRIPT_ID = "gk-minbagg-app-script";
+    if (document.getElementById(SCRIPT_ID)) return;
+
+    // PIN til commit (IKKE @main)
+    var APP_COMMIT = "e182c1d"; // <-- bytt til ønsket commit
+    var APP_URL = "https://cdn.jsdelivr.net/gh/MSvendsen87/min-bagg@" + APP_COMMIT + "/min-bagg.js";
+
+    var s = document.createElement("script");
+    s.id = SCRIPT_ID;
+    s.src = APP_URL;
+    s.defer = true;
+    s.onload = function () { console.log("[MINBAGG] app loaded OK:", APP_URL); };
+    s.onerror = function () { console.log("[MINBAGG] failed to load app:", APP_URL); };
+    document.body.appendChild(s);
+
+    console.log("[MINBAGG] loader appended from theme JS");
+  } catch (e) {
+    console.log("[MINBAGG] loader error", e);
+  }
+})();\n\n\n/* =========================\n   min-bagg.js (GitHub)\n   ========================= */\n\n/* === GOLFKONGEN: MIN BAGG – SAFE (ES5, ingen async/await) ===
  * Kjør kun på /sider/min-bagg
- * - GUEST: viser "Under konstruksjon" + Topp 3 globalt (fra Supabase view)
+ * - GUEST: viser "Under konstruksjon" + Topp 3 globalt (fra Supabase view: mybag_popular)
  * - LOGGET INN: viser bygg bagg + lagring til Supabase (mybag_bags via email)
  *
- * Viktig: Ingen "async/await" i denne fila -> unngår "Unexpected token 'async'"
+ * VIKTIG:
+ * 1) Ingen "async/await" i denne fila -> unngår "Unexpected token 'async'"
+ * 2) Appen må IKKE kreve at supabase-js allerede finnes. Den laster UMD selv.
+ * 3) Hvis du får "mangler Supabase-konfig i loader": sjekk at loader faktisk setter GK_SUPABASE_URL og GK_SUPABASE_ANON_KEY
  */
 (function () {
   'use strict';
@@ -20,59 +89,6 @@
   var SUPA_ANON = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
 
   function log() { try { console.log.apply(console, arguments); } catch (_) {} }
-
-    // Konfig (fra loader/global)
-  var SUPA_URL = (window.GK_SUPABASE_URL || '').trim();
-  var SUPA_ANON = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
-
-  function log() { try { console.log.apply(console, arguments); } catch (_) {} }
-
-  // --- Supabase: last UMD + lag klient (ingen top-level await) ---
-  var __supaClient = null;
-
-  function loadSupabaseUmd(cb) {
-    try {
-      if (window.supabase && typeof window.supabase.createClient === 'function') return cb(null);
-      var s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
-      s.async = true;
-      s.onload = function () { cb(null); };
-      s.onerror = function () { cb(new Error('Kunne ikke laste supabase-js UMD fra jsDelivr')); };
-      document.head.appendChild(s);
-    } catch (e) {
-      cb(e);
-    }
-  }
-
-  function getSupabaseClient(cb) {
-    try {
-      if (__supaClient) return cb(null, __supaClient);
-
-      if (!SUPA_URL || !SUPA_ANON) {
-        // Dette er den du ser på siden nå
-        return cb(new Error('Min Bagg: mangler Supabase-konfig i loader (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).'));
-      }
-
-      loadSupabaseUmd(function (err) {
-        if (err) return cb(err);
-        try {
-          __supaClient = window.supabase.createClient(SUPA_URL, SUPA_ANON, {
-            auth: {
-              persistSession: true,
-              autoRefreshToken: true,
-              detectSessionInUrl: true
-            }
-          });
-          cb(null, __supaClient);
-        } catch (e2) {
-          cb(e2);
-        }
-      });
-    } catch (e3) {
-      cb(e3);
-    }
-  }
-
 
   // ---------------- DOM helpers ----------------
   function el(tag, cls, text) {
@@ -97,14 +113,12 @@
       + '.minbagg-banner{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);padding:10px 12px;border-radius:10px;margin:10px 0;}'
       + '.minbagg-app h2{margin:10px 0 6px 0;}'
       + '.minbagg-muted{opacity:.78;font-size:13px;}'
-      + '.minbagg-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0;}'
       + '.minbagg-split{display:flex;gap:14px;flex-wrap:wrap;}'
       + '.minbagg-col{flex:1;min-width:280px;}'
       + '.minbagg-card{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);border-radius:12px;padding:12px;margin:10px 0;}'
       + '.minbagg-input{width:100%;box-sizing:border-box;padding:10px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.25);color:#fff;outline:none;}'
       + '.minbagg-btn{padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff;cursor:pointer;}'
       + '.minbagg-btn.primary{background:rgba(46, 204, 113,.18);border-color:rgba(46,204,113,.35);}'
-
       + '.minbagg-res{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px;border:1px solid rgba(255,255,255,.10);border-radius:12px;margin:8px 0;background:rgba(255,255,255,.02);}'
       + '.minbagg-res img{width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid rgba(255,255,255,.12);}'
       + '.minbagg-res .t{font-weight:600;margin:0 0 2px 0;}'
@@ -112,7 +126,6 @@
       + '.minbagg-bagitem{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px;border:1px solid rgba(255,255,255,.10);border-radius:12px;margin:8px 0;background:rgba(255,255,255,.02);}'
       + '.minbagg-bagitem .left{display:flex;gap:10px;align-items:center;}'
       + '.minbagg-bagitem img{width:44px;height:44px;border-radius:10px;object-fit:cover;border:1px solid rgba(255,255,255,.12);}';
-
     var st = document.createElement('style');
     st.id = 'minbagg-css';
     st.type = 'text/css';
@@ -120,60 +133,68 @@
     document.head.appendChild(st);
   }
 
-  // ---------------- Supabase loader ----------------
+  // ---------------- Supabase UMD + client (ES5 callbacks) ----------------
+  var __supaClient = null;
+
   function loadSupabaseUmd(cb) {
-  try {
-    if (window.supabase && window.supabase.createClient) return cb(true);
-
-    // last inn UMD hvis ikke finnes
-    var s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
-    s.async = true;
-    s.onload = function () { cb(!!(window.supabase && window.supabase.createClient)); };
-    s.onerror = function () { cb(false); };
-    document.head.appendChild(s);
-  } catch (e) {
-    cb(false);
-  }
-}
-
-function ensureSupabaseClient() {
-  try {
-    // Les config fra flere mulige globale navn (for robusthet)
-    var url =
-      (window.GK_SUPABASE_URL || window.__GK_SUPABASE_URL__ || window.SUPABASE_URL || SUPA_URL || '').trim();
-
-    var key =
-      (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY ||
-       window.__GK_SUPABASE_ANON_KEY__ || window.SUPABASE_ANON_KEY || SUPA_ANON || '').trim();
-
-    if (!url || !key) return null;
-    if (window.supabase && window.supabase.createClient) {
-      return window.supabase.createClient(url, key);
+    try {
+      if (window.supabase && typeof window.supabase.createClient === 'function') return cb(null);
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
+      s.async = true;
+      s.onload = function () { cb(null); };
+      s.onerror = function () { cb(new Error('Kunne ikke laste supabase-js UMD fra jsDelivr')); };
+      document.head.appendChild(s);
+    } catch (e) {
+      cb(e);
     }
-  } catch (e) {}
-  return null;
-}
+  }
 
+  function getSupabaseClient(cb) {
+    try {
+      if (__supaClient) return cb(null, __supaClient);
+
+      // Les nyeste globale verdier (robust mot at andre scripts har skrevet)
+      SUPA_URL = (window.GK_SUPABASE_URL || '').trim();
+      SUPA_ANON = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
+
+      if (!SUPA_URL || !SUPA_ANON) {
+        return cb(new Error('Min Bagg: mangler Supabase-konfig i loader (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).'));
+      }
+
+      loadSupabaseUmd(function (err) {
+        if (err) return cb(err);
+        try {
+          __supaClient = window.supabase.createClient(SUPA_URL, SUPA_ANON, {
+            auth: {
+              persistSession: true,
+              autoRefreshToken: true,
+              detectSessionInUrl: true
+            }
+          });
+          cb(null, __supaClient);
+        } catch (e2) {
+          cb(e2);
+        }
+      });
+    } catch (e3) {
+      cb(e3);
+    }
+  }
 
   // ---------------- DB helpers ----------------
   function dbLoadBag(supa, email) {
-    // mybag_bags: email PK, bag jsonb
-    return supa
-      .from('mybag_bags')
-      .select('bag')
-      .eq('email', email)
-      .maybeSingle();
+    return supa.from('mybag_bags').select('bag').eq('email', email).maybeSingle();
   }
 
   function dbSaveBag(supa, email, bagArr) {
-    return supa
-      .from('mybag_bags')
-      .upsert({ email: email, bag: bagArr, updated_at: new Date().toISOString() }, { onConflict: 'email' });
+    return supa.from('mybag_bags').upsert(
+      { email: email, bag: bagArr, updated_at: new Date().toISOString() },
+      { onConflict: 'email' }
+    );
   }
 
   function fetchTop3(supa) {
-    // view: mybag_popular (forventet)
     return supa
       .from('mybag_popular')
       .select('*')
@@ -218,11 +239,7 @@ function ensureSupabaseClient() {
         for (var i = 0; i < j.searchresults.length; i++) {
           var p = (j.searchresults[i] && j.searchresults[i].product) ? j.searchresults[i].product : null;
           if (!p) continue;
-          out.push({
-            name: p.name || '',
-            url: p.url || '',
-            image: p.firstimage || ''
-          });
+          out.push({ name: p.name || '', url: p.url || '', image: p.firstimage || '' });
         }
         return out;
       });
@@ -246,6 +263,7 @@ function ensureSupabaseClient() {
       for (var j = 0; j < items.length; j++) {
         (function (it) {
           var row = el('div', 'minbagg-res');
+
           var left = el('div', '');
           left.style.display = 'flex';
           left.style.gap = '10px';
@@ -260,11 +278,13 @@ function ensureSupabaseClient() {
 
           var txt = el('div', '');
           txt.appendChild(el('div', 't', it.name || ''));
+
           var a = el('a', 's', (it.url ? 'Se produkt' : ''));
           a.href = it.url || '#';
           a.target = '_self';
           a.rel = 'nofollow';
           txt.appendChild(a);
+
           left.appendChild(txt);
 
           var right = el('div', 'minbagg-muted', 'Valgt ' + (it.count || 0) + ' ganger');
@@ -289,14 +309,12 @@ function ensureSupabaseClient() {
     var app = el('div', 'minbagg-app');
     wrap.appendChild(app);
 
-    // Banner
     app.appendChild(elHtml('div', 'minbagg-banner',
       '🚧 <strong>Under konstruksjon</strong> &nbsp;Denne siden er under utvikling og kan endre seg fra dag til dag. Takk for tålmodigheten – full versjon kommer snart.'
     ));
 
     app.appendChild(el('h2', '', 'Min Bagg'));
 
-    // Split layout
     var split = el('div', 'minbagg-split');
     var left = el('div', 'minbagg-col');
     var right = el('div', 'minbagg-col');
@@ -304,29 +322,25 @@ function ensureSupabaseClient() {
     split.appendChild(right);
     app.appendChild(split);
 
-    // --- Right: Top 3 globalt
+    // Right: Top 3 globalt
     var topCard = el('div', 'minbagg-card');
     topCard.appendChild(el('h3', '', 'Topp 3 globalt'));
     var topInner = el('div', 'minbagg-muted', 'Laster...');
     topCard.appendChild(topInner);
     right.appendChild(topCard);
 
-    // Hook for later update
-    app.__renderTop3 = function (top3) { renderTop3Into(topInner, top3); };
-
-    // --- Guest UI (kun info)
+    // Guest
     if (!supaUser || !supaUser.email) {
       left.appendChild(el('div', 'minbagg-muted',
         'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.'
       ));
-      // last top3 for guest
-      fetchTop3(supa).then(function (top3) { app.__renderTop3(top3); });
+      fetchTop3(supa).then(function (top3) { renderTop3Into(topInner, top3); });
       root.appendChild(wrap);
       return;
     }
 
-    // --- Logged in UI
-    var state = { bag: [], lastSavedAt: null };
+    // Logged in UI
+    var state = { bag: [] };
 
     left.appendChild(el('div', 'minbagg-muted',
       'Hei ' + (marker && marker.firstname ? marker.firstname : 'der') + ' 👋  Baggen din lagres på kontoen din.'
@@ -339,7 +353,6 @@ function ensureSupabaseClient() {
     searchInput.type = 'text';
     searchInput.placeholder = 'Søk i nettbutikken (f.eks. Buzzz, Destroyer…)';
     addCard.appendChild(searchInput);
-
     var results = el('div', '');
     addCard.appendChild(results);
 
@@ -353,10 +366,8 @@ function ensureSupabaseClient() {
     manUrl.type = 'text';
     manUrl.placeholder = 'URL (valgfritt)';
     manUrl.style.marginTop = '8px';
-
     var manBtn = el('button', 'minbagg-btn primary', 'Legg til');
     manBtn.style.marginTop = '8px';
-
     manual.appendChild(manName);
     manual.appendChild(manUrl);
     manual.appendChild(manBtn);
@@ -390,6 +401,7 @@ function ensureSupabaseClient() {
             im.alt = it.name || '';
             l.appendChild(im);
           }
+
           var t = el('div', '');
           var name = el('div', '', it.name || '');
           name.style.fontWeight = '600';
@@ -419,7 +431,6 @@ function ensureSupabaseClient() {
     }
 
     function addDisc(item) {
-      // item: {name,url,image}
       state.bag.unshift({
         name: item.name || '',
         url: item.url || '',
@@ -438,15 +449,8 @@ function ensureSupabaseClient() {
       if (savingNow) return;
       savingNow = true;
       dbSaveBag(supa, supaUser.email, state.bag)
-        .then(function () {
-          state.lastSavedAt = new Date();
-        })
-        .catch(function (err) {
-          log('[MINBAGG] save failed', err);
-        })
-        .finally(function () {
-          savingNow = false;
-        });
+        .catch(function (err) { log('[MINBAGG] save failed', err); })
+        .finally(function () { savingNow = false; });
     }
 
     function scheduleSave() {
@@ -454,7 +458,7 @@ function ensureSupabaseClient() {
       saveTimer = setTimeout(doSaveNow, 600);
     }
 
-    // Search UX (debounce)
+    // Search UX
     var searchTimer = null;
 
     function setResultsLoading() {
@@ -491,6 +495,7 @@ function ensureSupabaseClient() {
 
           var mid = el('div', '');
           mid.appendChild(el('div', 't', it.name || ''));
+
           var act = el('div', '');
           act.style.display = 'flex';
           act.style.gap = '8px';
@@ -507,10 +512,9 @@ function ensureSupabaseClient() {
 
           act.appendChild(a);
           act.appendChild(b);
-
           mid.appendChild(act);
-          left.appendChild(mid);
 
+          left.appendChild(mid);
           box.appendChild(left);
           results.appendChild(box);
         })(items[i]);
@@ -532,7 +536,6 @@ function ensureSupabaseClient() {
       }, 250);
     });
 
-    // Manual add
     manBtn.addEventListener('click', function () {
       var n = (manName.value || '').trim();
       if (!n) return;
@@ -545,42 +548,29 @@ function ensureSupabaseClient() {
     dbLoadBag(supa, supaUser.email)
       .then(function (res) {
         var bag = (res && res.data && res.data.bag) ? res.data.bag : [];
-        if (Object.prototype.toString.call(bag) === '[object Array]') {
-          state.bag = bag;
-        }
+        if (Object.prototype.toString.call(bag) === '[object Array]') state.bag = bag;
       })
-      .catch(function (err) {
-        log('[MINBAGG] load failed', err);
-      })
-      .finally(function () {
-        renderBag();
-      });
+      .catch(function (err) { log('[MINBAGG] load failed', err); })
+      .finally(function () { renderBag(); });
 
-    fetchTop3(supa).then(function (top3) { app.__renderTop3(top3); });
+    fetchTop3(supa).then(function (top3) { renderTop3Into(topInner, top3); });
 
     root.appendChild(wrap);
   }
 
   // ---------------- Boot ----------------
   function boot() {
-    try {
-      var root = document.querySelector('#min-bagg-root') || document.querySelector('main') || document.body;
-      var supa = ensureSupabaseClient();
-      if (!supa) {
+    var root = document.querySelector('#min-bagg-root') || document.querySelector('main') || document.body;
+
+    var st = window.__GK_LOGIN_STATE__ || {};
+    var marker = { firstname: st.firstname || '' };
+
+    getSupabaseClient(function (err, supa) {
+      if (err || !supa) {
         clear(root);
-        root.appendChild(el('div', 'minbagg-muted', 'Min Bagg: mangler Supabase-konfig i loader.'));
+        root.appendChild(el('div', 'minbagg-muted', String((err && err.message) ? err.message : 'Min Bagg: ukjent feil.')));
         return;
       }
-
-      // Finn “login marker” fra loader (Quickbutik)
-      var st = window.__GK_LOGIN_STATE__ || {};
-      // Forventet:
-      // st.loggedIn: true/false
-      // st.email
-      // st.firstname
-      var marker = {
-        firstname: st.firstname || ''
-      };
 
       log('[MINBAGG] login marker:', (st.loggedIn ? 'LOGGED IN' : 'GUEST'), (marker.firstname ? '(' + marker.firstname + ')' : ''));
 
@@ -589,19 +579,11 @@ function ensureSupabaseClient() {
         return;
       }
 
-      // Logged in
       renderApp(root, marker, supa, { email: st.email });
-    } catch (err) {
-      try {
-        console.log('[MINBAGG] fatal', err);
-      } catch (_) {}
-    }
+    });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    setTimeout(boot, 0);
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else setTimeout(boot, 0);
 
-})();
+})();\n
