@@ -21,6 +21,59 @@
 
   function log() { try { console.log.apply(console, arguments); } catch (_) {} }
 
+    // Konfig (fra loader/global)
+  var SUPA_URL = (window.GK_SUPABASE_URL || '').trim();
+  var SUPA_ANON = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
+
+  function log() { try { console.log.apply(console, arguments); } catch (_) {} }
+
+  // --- Supabase: last UMD + lag klient (ingen top-level await) ---
+  var __supaClient = null;
+
+  function loadSupabaseUmd(cb) {
+    try {
+      if (window.supabase && typeof window.supabase.createClient === 'function') return cb(null);
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
+      s.async = true;
+      s.onload = function () { cb(null); };
+      s.onerror = function () { cb(new Error('Kunne ikke laste supabase-js UMD fra jsDelivr')); };
+      document.head.appendChild(s);
+    } catch (e) {
+      cb(e);
+    }
+  }
+
+  function getSupabaseClient(cb) {
+    try {
+      if (__supaClient) return cb(null, __supaClient);
+
+      if (!SUPA_URL || !SUPA_ANON) {
+        // Dette er den du ser på siden nå
+        return cb(new Error('Min Bagg: mangler Supabase-konfig i loader (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).'));
+      }
+
+      loadSupabaseUmd(function (err) {
+        if (err) return cb(err);
+        try {
+          __supaClient = window.supabase.createClient(SUPA_URL, SUPA_ANON, {
+            auth: {
+              persistSession: true,
+              autoRefreshToken: true,
+              detectSessionInUrl: true
+            }
+          });
+          cb(null, __supaClient);
+        } catch (e2) {
+          cb(e2);
+        }
+      });
+    } catch (e3) {
+      cb(e3);
+    }
+  }
+
+
   // ---------------- DOM helpers ----------------
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -68,15 +121,40 @@
   }
 
   // ---------------- Supabase loader ----------------
-  function ensureSupabaseClient() {
-    try {
-      if (!SUPA_URL || !SUPA_ANON) return null;
-      if (window.supabase && window.supabase.createClient) {
-        return window.supabase.createClient(SUPA_URL, SUPA_ANON);
-      }
-    } catch (e) {}
-    return null;
+  function loadSupabaseUmd(cb) {
+  try {
+    if (window.supabase && window.supabase.createClient) return cb(true);
+
+    // last inn UMD hvis ikke finnes
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+    s.async = true;
+    s.onload = function () { cb(!!(window.supabase && window.supabase.createClient)); };
+    s.onerror = function () { cb(false); };
+    document.head.appendChild(s);
+  } catch (e) {
+    cb(false);
   }
+}
+
+function ensureSupabaseClient() {
+  try {
+    // Les config fra flere mulige globale navn (for robusthet)
+    var url =
+      (window.GK_SUPABASE_URL || window.__GK_SUPABASE_URL__ || window.SUPABASE_URL || SUPA_URL || '').trim();
+
+    var key =
+      (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY ||
+       window.__GK_SUPABASE_ANON_KEY__ || window.SUPABASE_ANON_KEY || SUPA_ANON || '').trim();
+
+    if (!url || !key) return null;
+    if (window.supabase && window.supabase.createClient) {
+      return window.supabase.createClient(url, key);
+    }
+  } catch (e) {}
+  return null;
+}
+
 
   // ---------------- DB helpers ----------------
   function dbLoadBag(supa, email) {
