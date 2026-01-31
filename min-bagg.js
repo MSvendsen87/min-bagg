@@ -1,7 +1,7 @@
 /* ============================================================================
-   GOLFKONGEN – MIN BAGG (v2026-01-25)
+   GOLFKONGEN – MIN BAGG (SAFE)
    - Kjør kun på /sider/min-bagg
-   - Guest: viser CTA + Topp 3 globalt (fra Supabase)
+   - Guest: viser CTA + Topp 3 globalt (fra Supabase view mybag_popular)
    - Innlogget i butikk:
        - Hvis Supabase-session finnes: last/lagre bag i Supabase (mybag_bags)
        - Hvis ingen Supabase-session: vis “Koble Min Bagg” (magic link)
@@ -15,26 +15,30 @@
   // Kjør kun på /sider/min-bagg
   var path = ((location && location.pathname) ? location.pathname : '').replace(/\/+$/, '').toLowerCase();
   if (path !== '/sider/min-bagg') return;
+
+  // Unngå dobbel init, men vi tillater pageshow-refresh av toppliste
   if (window.__MINBAGG_APP_RUNNING__) return;
   window.__MINBAGG_APP_RUNNING__ = true;
 
-  // Konfig (fra loader / global)
+  // -------------------- Config (fra loader / global) ------------------------
   function getSupaConfig() {
-  var url = (window.GK_SUPABASE_URL || '').trim();
-  var anon = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
-  return { url: url, anon: anon };
-}
+    var url = (window.GK_SUPABASE_URL || '').trim();
+    var anon = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
+    return { url: url, anon: anon };
+  }
 
-// Fallback (må finnes fordi resten av fila kan referere til SUPA_URL / SUPA_ANON)
-var SUPA_URL = "";
-var SUPA_ANON = "";
+  function log() { try { console.log.apply(console, arguments); } catch (_) {} }
 
-function log() {
-  try { console.log.apply(console, arguments); } catch (_) {}
-}
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
-
-  // --- DOM helpers -----------------------------------------------------------
+  // -------------------- DOM helpers ----------------------------------------
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -47,11 +51,9 @@ function log() {
     if (html != null) n.innerHTML = html;
     return n;
   }
-  function qs(sel, root) { return (root || document).querySelector(sel); }
-  function qsa(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
   function clear(node) { while (node && node.firstChild) node.removeChild(node.firstChild); }
 
-  // --- Styles (selvstendig, så du slipper å styre custom.css først) ----------
+  // -------------------- Styles ---------------------------------------------
   function injectStyles() {
     if (document.getElementById('minbagg-style')) return;
     var css = ''
@@ -83,8 +85,7 @@ function log() {
       + '.minbagg-item .meta a:hover{text-decoration:underline}'
       + '.minbagg-item .sub{opacity:.85;font-size:12px;margin-top:2px}'
       + '.minbagg-split{display:grid;grid-template-columns:1fr;gap:10px}'
-      + '@media(min-width:900px){.minbagg-split{grid-template-columns:1fr 1fr}}'
-      ;
+      + '@media(min-width:900px){.minbagg-split{grid-template-columns:1fr 1fr}}';
     var st = document.createElement('style');
     st.id = 'minbagg-style';
     st.type = 'text/css';
@@ -92,7 +93,7 @@ function log() {
     document.head.appendChild(st);
   }
 
-  // --- Login marker fra theme ------------------------------------------------
+  // -------------------- Login marker fra theme ------------------------------
   function getLoginMarker() {
     var m = document.getElementById('gk-login-marker');
     if (!m) return { loggedIn: false, firstname: '', email: '' };
@@ -105,19 +106,18 @@ function log() {
     };
   }
 
-  // --- Root element ----------------------------------------------------------
+  // -------------------- Root ------------------------------------------------
   function ensureRoot() {
     var root = document.getElementById('min-bagg-root');
     if (root) return root;
     root = document.createElement('div');
     root.id = 'min-bagg-root';
-    // fallback: legg i page-content-area hvis den finnes
     var host = document.getElementById('page-content-area') || document.body;
     host.appendChild(root);
     return root;
   }
 
-  // --- Supabase loader/client ------------------------------------------------
+  // -------------------- Supabase loader/client ------------------------------
   function loadScript(src) {
     return new Promise(function (resolve, reject) {
       var s = document.createElement('script');
@@ -131,17 +131,16 @@ function log() {
 
   async function ensureSupabaseClient() {
     var cfg = getSupaConfig();
-if (!cfg.url || !cfg.anon) {
-  throw new Error('Manglende Supabase config (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).');
-}
+    if (!cfg.url || !cfg.anon) {
+      throw new Error('Manglende Supabase config (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).');
+    }
     if (!window.supabase || !window.supabase.createClient) {
-      // UMD build
       await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js');
     }
     return window.supabase.createClient(cfg.url, cfg.anon);
   }
 
-  // --- Storage helpers (fallback) -------------------------------------------
+  // -------------------- Storage helpers (fallback) --------------------------
   var LS_KEY = 'GK_MINBAGG_BAG_V1';
   function lsLoad() {
     try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]') || []; } catch (_) { return []; }
@@ -150,7 +149,7 @@ if (!cfg.url || !cfg.anon) {
     try { localStorage.setItem(LS_KEY, JSON.stringify(bag || [])); } catch (_) {}
   }
 
-  // --- DB: load/save bag via Supabase ---------------------------------------
+  // -------------------- DB: load/save bag via Supabase ----------------------
   async function dbLoadBag(supa, email) {
     if (!email) return null;
     var res = await supa.from('mybag_bags').select('bag').eq('email', email).maybeSingle();
@@ -167,20 +166,15 @@ if (!cfg.url || !cfg.anon) {
     return true;
   }
 
-  // --- Quickbutik search -----------------------------------------------------
+  // -------------------- Quickbutik search -----------------------------------
   function safeStr(x) { return (x == null) ? '' : String(x); }
 
   function pickProduct(p) {
-    // Prøv å være robust på felt-navn i Quickbutik JSON
     var name = p.name || p.title || p.product_name || p.producttitle || p.productTitle || p.heading || '';
     var url  = p.url || p.producturl || p.link || p.href || p.uri || '';
     var img  = p.firstimage || p.image || p.first_image || p.firstImage || '';
     if (!url && p.id) url = '/shop/product/' + p.id;
-    return {
-      name: safeStr(name).trim(),
-      url: safeStr(url).trim(),
-      image: safeStr(img).trim()
-    };
+    return { name: safeStr(name).trim(), url: safeStr(url).trim(), image: safeStr(img).trim() };
   }
 
   async function qbSearch(query) {
@@ -190,7 +184,6 @@ if (!cfg.url || !cfg.anon) {
     var r = await fetch(url, { credentials: 'same-origin' });
     var t = await r.text();
 
-    // Quickbutik svarer JSON som tekst
     var j;
     try { j = JSON.parse(t); } catch (_) { return []; }
     var arr = (j && j.searchresults) ? j.searchresults : [];
@@ -205,7 +198,7 @@ if (!cfg.url || !cfg.anon) {
     return out;
   }
 
-  // --- UI --------------------------------------------------------------------
+  // -------------------- UI --------------------------------------------------
   function bannerHtml() {
     return '<strong>🚧 Under konstruksjon</strong>'
       + 'Denne siden er under utvikling og kan endre seg fra dag til dag. '
@@ -213,29 +206,28 @@ if (!cfg.url || !cfg.anon) {
   }
 
   function renderNeedShopLogin(root) {
-  root.innerHTML =
-    '<div class="minbagg-wrap">' +
+    root.innerHTML =
+      '<div class="minbagg-wrap">' +
 
-      '<div class="minbagg-card" style="margin:12px 0;padding:16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;">' +
-        '<h2 style="margin:0 0 6px 0;">Min Bagg</h2>' +
-        '<p style="margin:0 0 10px 0;opacity:.9;">' +
-          'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.' +
-          ' Du kan likevel se <strong>Topp 3 globalt</strong> uten innlogging.' +
-        '</p>' +
-
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 0 0;">' +
-          '<a href="/customer/login" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#2e8b57;color:#fff;text-decoration:none;">Logg inn</a>' +
-          '<a href="/customer/register" style="display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.25);color:#fff;text-decoration:none;">Opprett konto</a>' +
+        '<div class="minbagg-card" style="margin:12px 0;padding:16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;">' +
+          '<h2 style="margin:0 0 6px 0;">Min Bagg</h2>' +
+          '<p style="margin:0 0 10px 0;opacity:.9;">' +
+            'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.' +
+            ' Du kan likevel se <strong>Topp 3 globalt</strong> uten innlogging.' +
+          '</p>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 0 0;">' +
+            '<a href="/customer/login" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#2e8b57;color:#fff;text-decoration:none;">Logg inn</a>' +
+            '<a href="/customer/register" style="display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.25);color:#fff;text-decoration:none;">Opprett konto</a>' +
+          '</div>' +
         '</div>' +
-      '</div>' +
 
-      '<div id="minbagg-top3-box" class="minbagg-card" style="margin:12px 0;padding:16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;">' +
-        '<h3 style="margin:0 0 8px 0;">Topp 3 globalt</h3>' +
-        '<div id="minbagg-top3-list" style="opacity:.9;">Laster…</div>' +
-      '</div>' +
+        '<div id="minbagg-top3-box" class="minbagg-card" style="margin:12px 0;padding:16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;">' +
+          '<h3 style="margin:0 0 8px 0;">Topp 3 globalt</h3>' +
+          '<div id="minbagg-top3-list" style="opacity:.9;">Laster…</div>' +
+        '</div>' +
 
-    '</div>';
-}
+      '</div>';
+  }
 
   function renderConnectView(root, marker, supa) {
     clear(root);
@@ -281,7 +273,7 @@ if (!cfg.url || !cfg.anon) {
       btn.disabled = true;
       msg.textContent = 'Sender engangslink…';
       try {
-        var redirectTo = location.origin + location.pathname; // tilbake til samme side
+        var redirectTo = location.origin + location.pathname;
         var res = await supa.auth.signInWithOtp({ email: e, options: { emailRedirectTo: redirectTo } });
         if (res && res.error) throw res.error;
         msg.textContent = 'Sjekk e-posten din og trykk på linken. Du blir sendt tilbake hit.';
@@ -296,44 +288,47 @@ if (!cfg.url || !cfg.anon) {
     root.appendChild(app);
   }
 
-  function renderTop3Into(container, top3) {
-    clear(container);
-    if (!top3 || !top3.length) {
-      container.appendChild(el('div', 'minbagg-muted', 'Ingen globale data enda.'));
-      return;
-    }
-    for (var i = 0; i < top3.length; i++) {
-      var g = top3[i];
-      var box = el('div', 'minbagg-card');
-      box.appendChild(el('h4', '', g.group || ''));
-      var list = el('div', '');
-      for (var j = 0; j < (g.items || []).length; j++) {
-        var it = g.items[j];
-        var a = el('a', '');
-        a.href = it.url || '#';
-        a.target = '_self';
-        a.rel = 'nofollow';
-        a.textContent = it.name || '';
-        a.style.display = 'inline-block';
-        a.style.marginRight = '10px';
-        list.appendChild(a);
-
-        var c = el('div', 'minbagg-muted', 'Valgt ' + (it.count || 0) + ' ganger');
-        c.style.marginBottom = '6px';
-        list.appendChild(c);
-      }
-      box.appendChild(list);
-      container.appendChild(box);
+  // -------------------- Global Top 3 (simple: disc + picks) -----------------
+  async function fetchPopularTop3Rows(supa) {
+    try {
+      var res = await supa.from('mybag_popular').select('*').order('picks', { ascending: false }).limit(3);
+      if (res && res.error) throw res.error;
+      return (res && res.data) ? res.data : [];
+    } catch (err) {
+      log('[MINBAGG] popular top3 fetch failed', err);
+      return [];
     }
   }
 
+  function renderGuestTop3(rows) {
+    var box = document.getElementById('minbagg-top3-list');
+    if (!box) return;
+
+    rows = rows || [];
+    if (!rows.length) {
+      box.innerHTML = '<div style="opacity:.85;">Ingen data ennå. Legg til noen disker (innlogget) så dukker topplista opp her 👑</div>';
+      return;
+    }
+
+    var html = '<ol style="margin:0;padding-left:18px;">';
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i] || {};
+      var name = (r.disc || r.name || r.title || 'Ukjent').toString();
+      var picks = (r.picks != null ? r.picks : (r.count != null ? r.count : ''));
+      html += '<li style="margin:6px 0;">'
+        + '<span style="font-weight:700;">' + escapeHtml(name) + '</span>'
+        + (picks !== '' ? (' <span style="opacity:.75;">(' + escapeHtml(String(picks)) + ')</span>') : '')
+        + '</li>';
+    }
+    html += '</ol>';
+    box.innerHTML = html;
+  }
+
+  // -------------------- App (innlogget + Supabase-session) -------------------
   function renderApp(root, marker, supa, supaUser) {
     clear(root);
 
-    var state = {
-      bag: [],
-      lastSavedAt: null
-    };
+    var state = { bag: [], lastSavedAt: null };
 
     var app = el('div', 'minbagg-app');
     app.appendChild(elHtml('div', 'minbagg-banner', bannerHtml()));
@@ -353,10 +348,9 @@ if (!cfg.url || !cfg.anon) {
       location.reload();
     });
 
-    // Split layout: venstre = bag/add, høyre = topp 3
     var split = el('div', 'minbagg-split');
 
-    // --- VENSTRE
+    // LEFT
     var left = el('div', '');
 
     var addCard = el('div', 'minbagg-card');
@@ -379,7 +373,7 @@ if (!cfg.url || !cfg.anon) {
     var results = el('div', 'minbagg-results');
     addCard.appendChild(results);
 
-    // Manuell add
+    // Manual add
     var manual = el('div', 'minbagg-card');
     manual.appendChild(el('h4', '', 'Legg til manuelt'));
     var manRow = el('div', 'minbagg-row');
@@ -400,7 +394,7 @@ if (!cfg.url || !cfg.anon) {
     manRow.appendChild(manBtn);
     manual.appendChild(manRow);
 
-    // BAG
+    // Bag
     var bagCard = el('div', 'minbagg-card');
     bagCard.appendChild(el('h3', '', 'Baggen din'));
     var bagList = el('div', 'minbagg-baglist');
@@ -410,7 +404,7 @@ if (!cfg.url || !cfg.anon) {
     left.appendChild(manual);
     left.appendChild(bagCard);
 
-    // --- HØYRE
+    // RIGHT
     var right = el('div', '');
     var topCard = el('div', 'minbagg-card');
     topCard.appendChild(el('h3', '', 'Topp 3 globalt'));
@@ -596,46 +590,33 @@ if (!cfg.url || !cfg.anon) {
       }
     })();
 
-    // Hook for Top 3
-    app.__renderTop3 = function (top3) { renderTop3Into(topInner, top3); };
+    // Top3 in logged-in view (samme kilde)
+    (async function initTop3() {
+      try {
+        var rows = await fetchPopularTop3Rows(supa);
+        if (!rows || !rows.length) {
+          topInner.textContent = 'Ingen globale data enda.';
+          return;
+        }
+        var html = '<ol style="margin:0;padding-left:18px;">';
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i] || {};
+          var name = (r.disc || 'Ukjent');
+          var picks = (r.picks != null ? r.picks : '');
+          html += '<li style="margin:6px 0;">'
+            + '<span style="font-weight:700;">' + escapeHtml(name) + '</span>'
+            + (picks !== '' ? (' <span style="opacity:.75;">(' + escapeHtml(String(picks)) + ')</span>') : '')
+            + '</li>';
+        }
+        html += '</ol>';
+        topInner.innerHTML = html;
+      } catch (e) {
+        topInner.textContent = 'Kunne ikke laste toppliste.';
+      }
+    })();
   }
 
-  // --- Global top3 data ------------------------------------------------------
-  async function fetchTop3(supa) {
-    // Forventet view/table: mybag_popular (minst: disc, picks) – evt også group/name/url/count
-    try {
-      var res = await supa.from('mybag_popular').select('*').limit(200);
-      if (res && res.error) throw res.error;
-      var rows = (res && res.data) ? res.data : [];
-
-      var by = {};
-      for (var i = 0; i < rows.length; i++) {
-        var r = rows[i] || {};
-        var g = r.group || r.disc_group || r.category || 'Discs';
-        if (!by[g]) by[g] = [];
-        by[g].push({
-          name: r.name || r.disc_name || r.disc || '',
-          url: r.url || r.product_url || r.link || '',
-          count: (r.count != null ? r.count : (r.picks != null ? r.picks : (r.total != null ? r.total : 0)))
-        });
-      }
-
-      var out = [];
-      var groups = Object.keys(by);
-      for (var j = 0; j < groups.length; j++) {
-        var gk = groups[j];
-        var arr = by[gk].slice().sort(function (a, b) { return (b.count || 0) - (a.count || 0); }).slice(0, 3);
-        out.push({ group: gk, items: arr });
-      }
-      out.sort(function (a, b) { return a.group.localeCompare(b.group); });
-      return out;
-    } catch (err) {
-      log('[MINBAGG] top3 fetch failed', err);
-      return [];
-    }
-  }
-
-  // --- MAIN init -------------------------------------------------------------
+  // -------------------- MAIN init ------------------------------------------
   document.addEventListener('DOMContentLoaded', async function () {
     injectStyles();
     var root = ensureRoot();
@@ -643,120 +624,32 @@ if (!cfg.url || !cfg.anon) {
 
     try {
       var supa = await ensureSupabaseClient();
-      var top3Promise = fetchTop3(supa);
 
-// GJEST: vis topp 3 + login-kort (read-only)
-       function refreshGuestTop3(supa) {
-  var box = document.getElementById("minbagg-top3-list");
-  if (!box) return;
+      // Guest: CTA + top3 (med BFCache-fix)
+      if (!marker.loggedIn) {
+        renderNeedShopLogin(root);
 
-  // Hvis den står og "henger", viser vi i det minste noe raskt
-  box.innerHTML = "Laster…";
+        // Global refresh-funksjon (brukes også på pageshow)
+        window.__MINBAGG_REFRESH_GUEST_TOP3__ = async function () {
+          var box = document.getElementById('minbagg-top3-list');
+          if (!box) return;
+          box.textContent = 'Laster…';
+          var rows = await fetchPopularTop3Rows(supa);
+          renderGuestTop3(rows);
+        };
 
-  fetchTop3(supa).then(function(rows){
-    rows = rows || [];
-    if (!rows.length) {
-      box.innerHTML = '<div style="opacity:.85;">Ingen data ennå. Legg til noen disker (innlogget) så dukker topplista opp her 👑</div>';
-      return;
-    }
+        // Kjør nå
+        window.__MINBAGG_REFRESH_GUEST_TOP3__();
 
-    var html = '<ol style="margin:0;padding-left:18px;">';
-    for (var i = 0; i < Math.min(3, rows.length); i++) {
-      var r = rows[i] || {};
-      var name = (r.disc || r.name || r.title || 'Ukjent').toString();
-      var picks = (r.picks != null ? r.picks : (r.count != null ? r.count : ''));
+        // Kjør igjen ved BFCache (logout/back uten full reload)
+        window.addEventListener('pageshow', function () {
+          try { window.__MINBAGG_REFRESH_GUEST_TOP3__(); } catch (_) {}
+        });
 
-      html += '<li style="margin:6px 0;">' +
-                '<span style="font-weight:700;">' + escapeHtml(name) + '</span>' +
-                (picks !== '' ? (' <span style="opacity:.75;">(' + escapeHtml(String(picks)) + ')</span>') : '') +
-              '</li>';
-    }
-    html += '</ol>';
-    box.innerHTML = html;
-
-  }).catch(function(e){
-    box.innerHTML = '<div style="opacity:.85;">Kunne ikke laste toppliste.</div>';
-    console.log("[MINBAGG] guest top3 fetch fail", e);
-  });
-}
-if (!marker.loggedIn) {
-  renderNeedShopLogin(root);
-
-  function refreshGuestTop3() {
-    var box = document.getElementById("minbagg-top3-list");
-    if (!box) return;
-
-    box.innerHTML = "Laster…";
-
-    fetchTop3(supa).then(function(rows){
-      try {
-        rows = rows || [];
-        if (!rows.length) {
-          box.innerHTML = '<div style="opacity:.85;">Ingen data ennå. Legg til noen disker (innlogget) så dukker topplista opp her 👑</div>';
-          return;
-        }
-
-        var html = '<ol style="margin:0;padding-left:18px;">';
-        for (var i = 0; i < Math.min(3, rows.length); i++) {
-          var r = rows[i] || {};
-          var name = (r.disc || r.name || r.title || 'Ukjent').toString();
-          var picks = (r.picks != null ? r.picks : (r.count != null ? r.count : ''));
-
-          html += '<li style="margin:6px 0;">' +
-                    '<span style="font-weight:700;">' + escapeHtml(name) + '</span>' +
-                    (picks !== '' ? (' <span style="opacity:.75;">(' + escapeHtml(String(picks)) + ')</span>') : '') +
-                  '</li>';
-        }
-        html += '</ol>';
-        box.innerHTML = html;
-
-      } catch(e) {
-        console.log("[MINBAGG] guest top3 render fail", e);
-        box.innerHTML = '<div style="opacity:.85;">Kunne ikke vise toppliste.</div>';
+        return;
       }
-    }).catch(function(e){
-      console.log("[MINBAGG] guest top3 fetch fail", e);
-      box.innerHTML = '<div style="opacity:.85;">Kunne ikke laste toppliste.</div>';
-    });
-  }
 
-  // Kjør nå
-  refreshGuestTop3();
-
-  // Kjør igjen ved BFCache (logout/back uten full reload)
-  window.addEventListener("pageshow", function () {
-    try { refreshGuestTop3(); } catch (_) {}
-  });
-
-  return;
-}
-
-
-    var html = '<ol style="margin:0;padding-left:18px;">';
-    for (var i = 0; i < Math.min(3, rows.length); i++) {
-      var r = rows[i] || {};
-      var name = (r.disc || r.name || r.title || 'Ukjent').toString();
-      var picks = (r.picks != null ? r.picks : (r.count != null ? r.count : ''));
-
-      html += '<li style="margin:6px 0;">' +
-                '<span style="font-weight:700;">' + escapeHtml(name) + '</span>' +
-                (picks !== '' ? (' <span style="opacity:.75;">(' + escapeHtml(String(picks)) + ')</span>') : '') +
-              '</li>';
-    }
-    html += '</ol>';
-    box.innerHTML = html;
-
-  } catch(e){
-    console.log("[MINBAGG] guest top3 render fail", e);
-  }
-}).catch(function(e){
-  var box = document.getElementById("minbagg-top3-list");
-  if (box) box.innerHTML = '<div style="opacity:.85;">Kunne ikke laste toppliste.</div>';
-  console.log("[MINBAGG] guest top3 fetch fail", e);
-});
-  return;
-}
-
+      // Innlogget i butikk: krever Supabase-session for å lagre bag
       var sess = await supa.auth.getSession();
       var session = (sess && sess.data) ? sess.data.session : null;
 
@@ -773,11 +666,6 @@ if (!marker.loggedIn) {
       }
 
       renderApp(root, marker, supa, user);
-
-      var top3 = await top3Promise;
-      var appRoot = root.firstChild;
-      if (appRoot && appRoot.__renderTop3) appRoot.__renderTop3(top3);
-
       log('[MINBAGG] app loaded OK');
     } catch (err) {
       clear(root);
