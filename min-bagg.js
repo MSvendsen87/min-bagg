@@ -649,8 +649,38 @@ if (!cfg.url || !cfg.anon) {
 if (!marker.loggedIn) {
   renderNeedShopLogin(root);
   top3Promise.then(function(rows){
-    try { renderTop3(rows); } catch(e){ console.log("[MINBAGG] guest top3 render fail", e); }
-  });
+  try {
+    var box = document.getElementById("minbagg-top3-list");
+    if (!box) return;
+
+    rows = rows || [];
+    if (!rows.length) {
+      box.innerHTML = '<div style="opacity:.85;">Ingen data ennå. Legg til noen disker (innlogget) så dukker topplista opp her 👑</div>';
+      return;
+    }
+
+    var html = '<ol style="margin:0;padding-left:18px;">';
+    for (var i = 0; i < Math.min(3, rows.length); i++) {
+      var r = rows[i] || {};
+      var name = (r.disc || r.name || r.title || 'Ukjent').toString();
+      var picks = (r.picks != null ? r.picks : (r.count != null ? r.count : ''));
+
+      html += '<li style="margin:6px 0;">' +
+                '<span style="font-weight:700;">' + escapeHtml(name) + '</span>' +
+                (picks !== '' ? (' <span style="opacity:.75;">(' + escapeHtml(String(picks)) + ')</span>') : '') +
+              '</li>';
+    }
+    html += '</ol>';
+    box.innerHTML = html;
+
+  } catch(e){
+    console.log("[MINBAGG] guest top3 render fail", e);
+  }
+}).catch(function(e){
+  var box = document.getElementById("minbagg-top3-list");
+  if (box) box.innerHTML = '<div style="opacity:.85;">Kunne ikke laste toppliste.</div>';
+  console.log("[MINBAGG] guest top3 fetch fail", e);
+});
   return;
 }
 
