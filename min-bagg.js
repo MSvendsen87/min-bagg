@@ -1,10 +1,10 @@
 /* ============================================================================
-   GOLFKONGEN – MIN BAGG (SAFE)
+   GOLFKONGEN – MIN BAGG (v2026-01-31 + TOP3 RPC v1)
    - Kjør kun på /sider/min-bagg
-   - Guest: viser CTA + Topp 3 globalt (fra Supabase view mybag_popular)
+   - Guest: viser CTA + Topp 3 per kategori (fra popular_discs via RPC get_mybag_top3)
    - Innlogget i butikk:
        - Hvis Supabase-session finnes: last/lagre bag i Supabase (mybag_bags)
-       - Hvis ingen Supabase-session: vis “Koble Min Bagg” (magic link)
+       - Hvis ingen Supabase-session: vis “Koble Min Bagg” (magic link) + Topp 3
    - DB (forventet):
        table: mybag_bags
        columns: email (text, PK/unique), bag (jsonb), updated_at (timestamptz)
@@ -12,217 +12,176 @@
 (function () {
   'use strict';
 
-  // Kjør kun på /sider/min-bagg
-  var path = ((location && location.pathname) ? location.pathname : '').replace(/\/+$/, '').toLowerCase();
-  if (path !== '/sider/min-bagg') return;
+  // Kun på denne siden
+  var p = (location && location.pathname) ? String(location.pathname) : '';
+  p = p.replace(/\/+$/, '');
+  if (p !== '/sider/min-bagg') return;
 
-  // -------------------- Config (fra loader / global) ------------------------
+  // Single-run guard
+  if (window.__MINBAGG_APP_RUNNING__) return;
+  window.__MINBAGG_APP_RUNNING__ = true;
+
+  // -------------------- helpers ---------------------------------------------
+  function log() { try { console.log.apply(console, arguments); } catch (_) {} }
+
+  function el(tag, cls, txt) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (txt != null) e.textContent = txt;
+    return e;
+  }
+
+  function elHtml(tag, cls, html) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    e.innerHTML = html || '';
+    return e;
+  }
+
+  function clear(node) {
+    if (!node) return;
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  // -------------------- config ----------------------------------------------
+  // Konfig hentes fra loaderen (qs_functions.js)
   function getSupaConfig() {
     var url = (window.GK_SUPABASE_URL || '').trim();
     var anon = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
     return { url: url, anon: anon };
   }
 
-  function log() { try { console.log.apply(console, arguments); } catch (_) {} }
-
-  function escapeHtml(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
-  // -------------------- DOM helpers ----------------------------------------
-  function el(tag, cls, text) {
-    var n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text != null) n.textContent = text;
-    return n;
-  }
-  function elHtml(tag, cls, html) {
-    var n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (html != null) n.innerHTML = html;
-    return n;
-  }
-  function clear(node) { while (node && node.firstChild) node.removeChild(node.firstChild); }
-
-  // -------------------- Styles ---------------------------------------------
+  // -------------------- styles ----------------------------------------------
   function injectStyles() {
     if (document.getElementById('minbagg-style')) return;
+
     var css = ''
-      + '.minbagg-app{max-width:980px}'
-      + '.minbagg-banner{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);padding:10px 12px;border-radius:10px;margin:8px 0 14px}'
-      + '.minbagg-banner strong{display:inline-block;margin-right:8px}'
+      + '.minbagg-app{max-width:1100px;margin:0 auto;padding:14px;color:#e8eef6}'
+      + '.minbagg-banner{padding:10px 12px;border-radius:12px;background:rgba(255,165,0,.12);border:1px solid rgba(255,165,0,.28);margin:12px 0}'
+      + '.minbagg-banner b{color:#ffd18a}'
+      + '.minbagg-card{padding:14px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.04);margin:12px 0}'
       + '.minbagg-muted{opacity:.85}'
-      + '.minbagg-card{border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.10);border-radius:12px;padding:12px;margin:10px 0}'
-      + '.minbagg-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}'
-      + '.minbagg-row > *{flex:0 0 auto}'
-      + '.minbagg-input{min-width:240px;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.20);color:#fff;outline:none}'
-      + '.minbagg-input:focus{border-color:rgba(255,255,255,.35)}'
-      + '.minbagg-btn{cursor:pointer;user-select:none;border-radius:10px;padding:8px 10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#fff}'
-      + '.minbagg-btn:hover{background:rgba(255,255,255,.10)}'
-      + '.minbagg-btn.primary{border-color:rgba(44,174,96,.55);background:rgba(44,174,96,.14)}'
-      + '.minbagg-btn.primary:hover{background:rgba(44,174,96,.20)}'
-      + '.minbagg-btn.danger{border-color:rgba(220,53,69,.55);background:rgba(220,53,69,.14)}'
-      + '.minbagg-btn.danger:hover{background:rgba(220,53,69,.20)}'
-      + '.minbagg-results{margin-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}'
-      + '.minbagg-res{border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:10px;display:flex;gap:10px;align-items:center;background:rgba(0,0,0,.10)}'
-      + '.minbagg-res img{width:44px;height:44px;object-fit:cover;border-radius:10px;flex:0 0 auto}'
-      + '.minbagg-res .t{font-weight:600;line-height:1.2}'
-      + '.minbagg-res .a{margin-top:4px}'
-      + '.minbagg-baglist{display:flex;flex-direction:column;gap:8px}'
-      + '.minbagg-item{display:flex;align-items:center;gap:10px;border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:10px;background:rgba(0,0,0,.10)}'
-      + '.minbagg-item img{width:48px;height:48px;object-fit:cover;border-radius:10px}'
-      + '.minbagg-item .meta{flex:1 1 auto;min-width:140px}'
-      + '.minbagg-item .meta a{color:inherit;text-decoration:none}'
-      + '.minbagg-item .meta a:hover{text-decoration:underline}'
-      + '.minbagg-item .sub{opacity:.85;font-size:12px;margin-top:2px}'
-      + '.minbagg-split{display:grid;grid-template-columns:1fr;gap:10px}'
-      + '@media(min-width:900px){.minbagg-split{grid-template-columns:1fr 1fr}}';
+      + '.minbagg-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}'
+      + '.minbagg-input{flex:1;min-width:220px;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.15);color:#e8eef6}'
+      + '.minbagg-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(0,0,0,.10);color:#e8eef6;text-decoration:none;cursor:pointer}'
+      + '.minbagg-btn.primary{background:#2e8b57;border-color:rgba(46,139,87,.6);color:#fff}'
+      + '.minbagg-split{display:grid;grid-template-columns:1fr;gap:14px}'
+      + '@media(min-width:900px){.minbagg-split{grid-template-columns:1.35fr .65fr}}'
+      + '.minbagg-results{margin-top:10px;display:grid;gap:10px}'
+      + '.minbagg-item{display:flex;gap:10px;align-items:center;padding:10px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.10)}'
+      + '.minbagg-item img{width:42px;height:42px;border-radius:10px;object-fit:cover;border:1px solid rgba(255,255,255,.12)}'
+      + '.minbagg-item .meta{flex:1;min-width:0}'
+      + '.minbagg-item .meta .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      + '.minbagg-item .meta .sub{opacity:.8;font-size:12px;margin-top:2px}'
+      + '.minbagg-baglist{display:grid;gap:10px}'
+      + '.minbagg-divider{height:1px;background:rgba(255,255,255,.10);margin:10px 0}'
+      ;
+
     var st = document.createElement('style');
     st.id = 'minbagg-style';
-    st.type = 'text/css';
-    st.appendChild(document.createTextNode(css));
+    st.textContent = css;
     document.head.appendChild(st);
   }
 
-  // -------------------- Login marker fra theme ------------------------------
+  function bannerHtml() {
+    return '<b>🚧 Under konstruksjon</b> Denne siden er under utvikling og kan endre seg fra dag til dag. Takk for tålmodigheten – full versjon kommer snart.';
+  }
+
+  // -------------------- root / login marker ---------------------------------
+  function ensureRoot() {
+    var root = document.getElementById('min-bagg-root');
+    if (!root) {
+      root = el('div', 'minbagg-app');
+      root.id = 'min-bagg-root';
+      document.body.appendChild(root);
+    }
+    return root;
+  }
+
   function getLoginMarker() {
     var m = document.getElementById('gk-login-marker');
-    if (!m) return { loggedIn: false, firstname: '', email: '' };
-    var ds = m.dataset || {};
-    var li = (ds.loggedIn || ds.loggedin || '0') + '';
+    var ds = (m && m.dataset) ? m.dataset : {};
     return {
-      loggedIn: li === '1',
+      loggedIn: ds.loggedIn === '1',
       firstname: ds.firstname || '',
       email: ds.email || ''
     };
   }
 
-  // -------------------- Root ------------------------------------------------
-  function ensureRoot() {
-    var root = document.getElementById('min-bagg-root');
-    if (root) return root;
-    root = document.createElement('div');
-    root.id = 'min-bagg-root';
-    var host = document.getElementById('page-content-area') || document.body;
-    host.appendChild(root);
-    return root;
-  }
-
-  // -------------------- Supabase loader/client ------------------------------
-  function loadScript(src) {
-    return new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      s.src = src;
-      s.defer = true;
-      s.onload = resolve;
-      s.onerror = reject;
-      document.head.appendChild(s);
-    });
-  }
-
+  // -------------------- Supabase client -------------------------------------
   async function ensureSupabaseClient() {
     var cfg = getSupaConfig();
     if (!cfg.url || !cfg.anon) {
       throw new Error('Manglende Supabase config (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).');
     }
-    if (!window.supabase || !window.supabase.createClient) {
-      await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js');
+
+    if (window.supabase && typeof window.supabase.createClient === 'function') {
+      return window.supabase.createClient(cfg.url, cfg.anon);
     }
-    return window.supabase.createClient(cfg.url, cfg.anon);
-  }
 
-  // -------------------- Storage helpers (fallback) --------------------------
-  var LS_KEY = 'GK_MINBAGG_BAG_V1';
-  function lsLoad() {
-    try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]') || []; } catch (_) { return []; }
-  }
-  function lsSave(bag) {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(bag || [])); } catch (_) {}
-  }
-
-  // -------------------- DB: load/save bag via Supabase ----------------------
-  async function dbLoadBag(supa, email) {
-    if (!email) return null;
-    var res = await supa.from('mybag_bags').select('bag').eq('email', email).maybeSingle();
-    if (res && res.error) throw res.error;
-    if (!res || !res.data) return null;
-    return res.data.bag || null;
-  }
-
-  async function dbSaveBag(supa, email, bag) {
-    if (!email) throw new Error('Mangler e-post på Supabase-bruker.');
-    var payload = { email: email, bag: bag || [], updated_at: new Date().toISOString() };
-    var res = await supa.from('mybag_bags').upsert(payload, { onConflict: 'email' }).select('email').maybeSingle();
-    if (res && res.error) throw res.error;
-    return true;
-  }
-
-  // -------------------- Quickbutik search -----------------------------------
-  function safeStr(x) { return (x == null) ? '' : String(x); }
-
-  function pickProduct(p) {
-    var name = p.name || p.title || p.product_name || p.producttitle || p.productTitle || p.heading || '';
-    var url  = p.url || p.producturl || p.link || p.href || p.uri || '';
-    var img  = p.firstimage || p.image || p.first_image || p.firstImage || '';
-    if (!url && p.id) url = '/shop/product/' + p.id;
-    return { name: safeStr(name).trim(), url: safeStr(url).trim(), image: safeStr(img).trim() };
-  }
-
-  async function qbSearch(query) {
-    var q = (query || '').trim();
-    if (!q) return [];
-    var url = '/shop/search?s=' + encodeURIComponent(q) + '&out=json&limit=12';
-    var r = await fetch(url, { credentials: 'same-origin' });
-    var t = await r.text();
-
-    var j;
-    try { j = JSON.parse(t); } catch (_) { return []; }
-    var arr = (j && j.searchresults) ? j.searchresults : [];
-    var out = [];
-    for (var i = 0; i < arr.length; i++) {
-      var prod = arr[i] && (arr[i].product || arr[i]);
-      if (!prod) continue;
-      var p = pickProduct(prod);
-      if (!p.name) continue;
-      out.push(p);
+    // last supabase-js fra CDN (light)
+    if (!window.__MINBAGG_SUPABASE_LOADING__) {
+      window.__MINBAGG_SUPABASE_LOADING__ = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+        s.async = true;
+        s.onload = function () { resolve(true); };
+        s.onerror = function () { reject(new Error('Kunne ikke laste supabase-js')); };
+        document.head.appendChild(s);
+      });
     }
-    return out;
+
+    await window.__MINBAGG_SUPABASE_LOADING__;
+
+    if (window.supabase && typeof window.supabase.createClient === 'function') {
+      return window.supabase.createClient(cfg.url, cfg.anon);
+    }
+    throw new Error('Supabase client ikke tilgjengelig.');
   }
 
-  // -------------------- UI --------------------------------------------------
-  function bannerHtml() {
-    return '<strong>🚧 Under konstruksjon</strong>'
-      + 'Denne siden er under utvikling og kan endre seg fra dag til dag. '
-      + 'Takk for tålmodigheten – full versjon kommer snart.';
-  }
-
+  // -------------------- UI: Guest / Connect ---------------------------------
   function renderNeedShopLogin(root) {
-    root.innerHTML =
-      '<div class="minbagg-wrap">' +
+    clear(root);
 
-        '<div class="minbagg-card" style="margin:12px 0;padding:16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;">' +
-          '<h2 style="margin:0 0 6px 0;">Min Bagg</h2>' +
-          '<p style="margin:0 0 10px 0;opacity:.9;">' +
-            'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.' +
-            ' Du kan likevel se <strong>Topp 3 globalt</strong> uten innlogging.' +
-          '</p>' +
-          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 0 0;">' +
-            '<a href="/customer/login" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#2e8b57;color:#fff;text-decoration:none;">Logg inn</a>' +
-            '<a href="/customer/register" style="display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.25);color:#fff;text-decoration:none;">Opprett konto</a>' +
-          '</div>' +
-        '</div>' +
+    var app = el('div', 'minbagg-app');
+    app.appendChild(elHtml('div', 'minbagg-banner', bannerHtml()));
+    app.appendChild(el('h2', '', 'Min Bagg'));
 
-        '<div id="minbagg-top3-box" class="minbagg-card" style="margin:12px 0;padding:16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;">' +
-          '<h3 style="margin:0 0 8px 0;">Topp 3 globalt</h3>' +
-          '<div id="minbagg-top3-list" style="opacity:.9;">Laster…</div>' +
-        '</div>' +
+    var card = el('div', 'minbagg-card');
+    card.appendChild(el('div', 'minbagg-muted',
+      'Du må være innlogget i nettbutikken for å lagre og bygge baggen din. Du kan likevel se Topp 3 globalt uten innlogging.'));
 
-      '</div>';
+    var btnRow = el('div', 'minbagg-row');
+    btnRow.style.gap = '10px';
+
+    var a1 = document.createElement('a');
+    a1.href = '/customer/login';
+    a1.className = 'minbagg-btn primary';
+    a1.textContent = 'Logg inn';
+    btnRow.appendChild(a1);
+
+    var a2 = document.createElement('a');
+    a2.href = '/customer/register';
+    a2.className = 'minbagg-btn';
+    a2.textContent = 'Opprett konto';
+    btnRow.appendChild(a2);
+
+    card.appendChild(btnRow);
+    app.appendChild(card);
+
+    // TOPP 3 (gjest) – fylles av main-init (BFCache-safe)
+    var topCard = el('div', 'minbagg-card');
+    topCard.appendChild(el('h3', '', 'Topp 3 globalt'));
+    var topInner = el('div', 'minbagg-muted', 'Laster…');
+    topInner.id = 'minbagg-top3-list';
+    topCard.appendChild(topInner);
+    app.appendChild(topCard);
+
+    root.appendChild(app);
+
+    // for main-init hooks
+    root.__minbaggApp = app;
+    app.__top3Container = topInner;
   }
 
   function renderConnectView(root, marker, supa) {
@@ -269,7 +228,7 @@
       btn.disabled = true;
       msg.textContent = 'Sender engangslink…';
       try {
-        var redirectTo = location.origin + location.pathname;
+        var redirectTo = location.origin + location.pathname; // tilbake til samme side
         var res = await supa.auth.signInWithOtp({ email: e, options: { emailRedirectTo: redirectTo } });
         if (res && res.error) throw res.error;
         msg.textContent = 'Sjekk e-posten din og trykk på linken. Du blir sendt tilbake hit.';
@@ -281,97 +240,142 @@
     });
 
     app.appendChild(card);
+
+    // TOPP 3 globalt (vises også før Supabase-tilkobling)
+    var topCard = el('div', 'minbagg-card');
+    topCard.appendChild(el('h3', '', 'Topp 3 globalt'));
+    var topInner = el('div', 'minbagg-muted', 'Laster…');
+    topInner.id = 'minbagg-top3-list';
+    topCard.appendChild(topInner);
+    app.appendChild(topCard);
+
     root.appendChild(app);
+
+    // for main-init hooks
+    root.__minbaggApp = app;
+    app.__top3Container = topInner;
   }
 
-  // -------------------- Global Top 3 (simple: disc + picks) -----------------
-  async function fetchPopularTop3Rows(supa) {
-    try {
-      var res = await supa.from('mybag_popular').select('*').order('picks', { ascending: false }).limit(3);
-      if (res && res.error) throw res.error;
-      return (res && res.data) ? res.data : [];
-    } catch (err) {
-      log('[MINBAGG] popular top3 fetch failed', err);
-      return [];
-    }
-  }
+  // -------------------- Top3 render (brukes av både guest og innlogget) -----
+  function renderTop3Into(container, top3) {
+    clear(container);
 
-  function renderGuestTop3(rows) {
-    var box = document.getElementById('minbagg-top3-list');
-    if (!box) return;
-
-    rows = rows || [];
-    if (!rows.length) {
-      box.innerHTML = '<div style="opacity:.85;">Ingen data ennå. Legg til noen disker (innlogget) så dukker topplista opp her 👑</div>';
+    if (!top3 || !top3.length) {
+      container.appendChild(el('div', 'minbagg-muted', 'Ingen data ennå. Legg til noen disker (innlogget) så dukker topplista opp her 👑'));
       return;
     }
 
-    var html = '<ol style="margin:0;padding-left:18px;">';
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i] || {};
-      var name = (r.disc || r.name || r.title || 'Ukjent').toString();
-      var picks = (r.picks != null ? r.picks : (r.count != null ? r.count : ''));
-      html += '<li style="margin:6px 0;">'
-        + '<span style="font-weight:700;">' + escapeHtml(name) + '</span>'
-        + (picks !== '' ? (' <span style="opacity:.75;">(' + escapeHtml(String(picks)) + ')</span>') : '')
-        + '</li>';
+    for (var i = 0; i < top3.length; i++) {
+      var g = top3[i] || {};
+      var box = el('div', 'minbagg-card');
+      box.appendChild(el('h4', '', g.group || ''));
+
+      var list = el('div', '');
+      var items = g.items || [];
+      for (var j = 0; j < items.length; j++) {
+        var it = items[j] || {};
+
+        var row = el('div', '');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '10px';
+        row.style.marginBottom = '10px';
+
+        // mini-bilde
+        var imgWrap = el('div', '');
+        imgWrap.style.width = '34px';
+        imgWrap.style.height = '34px';
+        imgWrap.style.flex = '0 0 34px';
+        imgWrap.style.borderRadius = '8px';
+        imgWrap.style.overflow = 'hidden';
+        imgWrap.style.background = 'rgba(255,255,255,.06)';
+        imgWrap.style.border = '1px solid rgba(255,255,255,.10)';
+
+        if (it.image) {
+          var img = document.createElement('img');
+          img.src = it.image;
+          img.alt = it.name || '';
+          img.style.width = '100%';
+          img.style.height = '100%';
+          img.style.objectFit = 'cover';
+          imgWrap.appendChild(img);
+        }
+        row.appendChild(imgWrap);
+
+        // navn (link kun hvis url finnes)
+        var nameEl;
+        if (it.url) {
+          nameEl = document.createElement('a');
+          nameEl.href = it.url;
+          nameEl.target = '_self';
+          nameEl.rel = 'nofollow';
+          nameEl.style.textDecoration = 'none';
+        } else {
+          nameEl = document.createElement('span');
+        }
+        nameEl.textContent = it.name || '';
+        nameEl.style.fontWeight = '600';
+        nameEl.style.display = 'inline-block';
+        row.appendChild(nameEl);
+
+        // count
+        var c = el('div', 'minbagg-muted', 'Valgt ' + (it.count || 0) + ' ganger');
+        c.style.marginLeft = 'auto';
+        c.style.whiteSpace = 'nowrap';
+        row.appendChild(c);
+
+        list.appendChild(row);
+      }
+
+      box.appendChild(list);
+      container.appendChild(box);
     }
-    html += '</ol>';
-    box.innerHTML = html;
   }
 
-  // -------------------- App (innlogget + Supabase-session) -------------------
+  // -------------------- App (innlogget) -------------------------------------
   function renderApp(root, marker, supa, supaUser) {
     clear(root);
 
-    var state = { bag: [], lastSavedAt: null };
+    var state = {
+      bag: [],
+      lastSavedAt: null
+    };
 
     var app = el('div', 'minbagg-app');
     app.appendChild(elHtml('div', 'minbagg-banner', bannerHtml()));
-    app.appendChild(el('h2', '', 'Min Bagg'));
 
-    var hello = el('div', 'minbagg-muted', 'Hei ' + (marker.firstname || 'der') + ' 👋  Baggen din lagres på kontoen din.');
-    app.appendChild(hello);
+    var h2 = el('h2', '', (marker.firstname ? (marker.firstname + ' sin bagg') : 'Min Bagg'));
+    app.appendChild(h2);
 
-    var actions = el('div', 'minbagg-row');
-    var btnLogout = el('button', 'minbagg-btn', 'Koble fra (logg ut Min Bagg)');
-    actions.appendChild(btnLogout);
-    app.appendChild(actions);
+    app.appendChild(el('div', 'minbagg-muted',
+      (marker.firstname ? ('Hei ' + marker.firstname + ' 👋 ') : '') + 'Baggen din lagres på kontoen din.'));
 
-    btnLogout.addEventListener('click', async function () {
-      btnLogout.disabled = true;
-      try { await supa.auth.signOut(); } catch (_) {}
-      location.reload();
-    });
-
+    // layout
     var split = el('div', 'minbagg-split');
 
-    // LEFT
+    // --- VENSTRE
     var left = el('div', '');
 
+    // add disk (search)
     var addCard = el('div', 'minbagg-card');
     addCard.appendChild(el('h3', '', 'Legg til disk'));
-
-    var addRow = el('div', 'minbagg-row');
+    var searchRow = el('div', 'minbagg-row');
 
     var searchInput = document.createElement('input');
     searchInput.className = 'minbagg-input';
     searchInput.type = 'text';
     searchInput.placeholder = 'Søk i nettbutikken (f.eks. buzzz, luna, md3)…';
-    addRow.appendChild(searchInput);
+    searchRow.appendChild(searchInput);
 
-    var addHint = el('div', 'minbagg-muted', 'Søk for å få forslag. Trykk “Legg til” på riktig disk.');
-    addHint.style.flex = '1 1 260px';
-    addRow.appendChild(addHint);
-
-    addCard.appendChild(addRow);
+    addCard.appendChild(searchRow);
+    addCard.appendChild(el('div', 'minbagg-muted', 'Søk for å få forslag. Trykk “Legg til” på riktig disk.'));
 
     var results = el('div', 'minbagg-results');
     addCard.appendChild(results);
 
-    // Manual add
+    // manual add
     var manual = el('div', 'minbagg-card');
-    manual.appendChild(el('h4', '', 'Legg til manuelt'));
+    manual.appendChild(el('h3', '', 'Legg til manuelt'));
     var manRow = el('div', 'minbagg-row');
 
     var manName = document.createElement('input');
@@ -390,7 +394,7 @@
     manRow.appendChild(manBtn);
     manual.appendChild(manRow);
 
-    // Bag
+    // BAG
     var bagCard = el('div', 'minbagg-card');
     bagCard.appendChild(el('h3', '', 'Baggen din'));
     var bagList = el('div', 'minbagg-baglist');
@@ -400,7 +404,7 @@
     left.appendChild(manual);
     left.appendChild(bagCard);
 
-    // RIGHT
+    // --- HØYRE
     var right = el('div', '');
     var topCard = el('div', 'minbagg-card');
     topCard.appendChild(el('h3', '', 'Topp 3 globalt'));
@@ -412,6 +416,10 @@
     split.appendChild(right);
     app.appendChild(split);
     root.appendChild(app);
+
+    // for main-init hooks
+    root.__minbaggApp = app;
+    app.__top3Container = topInner;
 
     function renderBag() {
       clear(bagList);
@@ -430,152 +438,194 @@
             img.alt = it.name || '';
             row.appendChild(img);
           } else {
-            row.appendChild(el('div', 'minbagg-muted', ''));
+            // placeholder
+            var ph = el('div', '');
+            ph.style.width = '42px';
+            ph.style.height = '42px';
+            ph.style.borderRadius = '10px';
+            ph.style.background = 'rgba(255,255,255,.06)';
+            ph.style.border = '1px solid rgba(255,255,255,.12)';
+            row.appendChild(ph);
           }
 
           var meta = el('div', 'meta');
-          var title = document.createElement(it.url ? 'a' : 'div');
-          if (it.url) {
-            title.href = it.url;
-            title.target = '_self';
-            title.rel = 'nofollow';
-          }
-          title.textContent = it.name || '(uten navn)';
-          meta.appendChild(title);
-
-          var sub = el('div', 'sub', it.addedAt ? ('Lagt til: ' + it.addedAt) : '');
-          meta.appendChild(sub);
+          meta.appendChild(el('div', 'name', it.name || ''));
+          meta.appendChild(el('div', 'sub', 'Lagt til: ' + (it.addedAt || '')));
           row.appendChild(meta);
 
-          var rm = el('button', 'minbagg-btn danger', 'Fjern');
-          rm.addEventListener('click', function () {
+          var btn = el('button', 'minbagg-btn', 'Fjern');
+          btn.addEventListener('click', async function () {
             state.bag.splice(idx, 1);
-            lsSave(state.bag);
             renderBag();
-            scheduleSave();
+            await dbSaveBag();
           });
-          row.appendChild(rm);
+          row.appendChild(btn);
 
           bagList.appendChild(row);
         })(i);
       }
     }
 
-    function normalizeBagItem(p) {
-      var n = (p && p.name ? String(p.name) : '').trim();
-      if (!n) return null;
-      return {
-        name: n,
-        url: (p.url ? String(p.url) : '').trim(),
-        image: (p.image ? String(p.image) : '').trim(),
-        addedAt: new Date().toISOString().slice(0, 10)
-      };
+    function lsKey() {
+      return 'gk_minbagg_' + (supaUser && supaUser.email ? supaUser.email : 'guest');
     }
 
-    function addDisc(p) {
-      var it = normalizeBagItem(p);
-      if (!it) return;
-      for (var i = 0; i < state.bag.length; i++) {
-        var ex = state.bag[i];
-        if (it.url && ex.url && it.url === ex.url) return;
-        if (!it.url && ex.name && ex.name.toLowerCase() === it.name.toLowerCase()) return;
+    function lsSave(bag) {
+      try { localStorage.setItem(lsKey(), JSON.stringify(bag || [])); } catch (_) {}
+    }
+
+    function lsLoad() {
+      try {
+        var raw = localStorage.getItem(lsKey());
+        var arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+      } catch (_) { return []; }
+    }
+
+    async function dbLoadBag() {
+      try {
+        var email = (supaUser && supaUser.email) ? String(supaUser.email) : '';
+        if (!email) return [];
+        var res = await supa.from('mybag_bags').select('bag').eq('email', email).maybeSingle();
+        if (res && res.error) throw res.error;
+        var row = (res && res.data) ? res.data : null;
+        var bag = row && row.bag ? row.bag : [];
+        return Array.isArray(bag) ? bag : [];
+      } catch (err) {
+        log('[MINBAGG] dbLoadBag fail', err);
+        return [];
       }
-      state.bag.unshift(it);
-      lsSave(state.bag);
-      renderBag();
-      scheduleSave();
     }
 
-    manBtn.addEventListener('click', function () {
-      var n = (manName.value || '').trim();
-      if (!n) return;
-      addDisc({ name: n, url: (manUrl.value || '').trim(), image: '' });
-      manName.value = '';
-      manUrl.value = '';
-    });
+    async function dbSaveBag() {
+      try {
+        var email = (supaUser && supaUser.email) ? String(supaUser.email) : '';
+        if (!email) return;
 
-    // Search UX
-    var searchTimer = null;
-    function setResultsLoading() {
-      clear(results);
-      results.appendChild(el('div', 'minbagg-muted', 'Søker…'));
+        var payload = {
+          email: email,
+          bag: state.bag,
+          updated_at: new Date().toISOString()
+        };
+
+        var res = await supa.from('mybag_bags').upsert(payload, { onConflict: 'email' });
+        if (res && res.error) throw res.error;
+
+        lsSave(state.bag);
+      } catch (err) {
+        log('[MINBAGG] dbSaveBag fail', err);
+      }
     }
-    function setResultsEmpty(msg) {
-      clear(results);
-      results.appendChild(el('div', 'minbagg-muted', msg || 'Ingen treff.'));
+
+    async function qbSearch(q) {
+      q = (q || '').trim();
+      if (!q) return [];
+      var url = '/shop/search?s=' + encodeURIComponent(q) + '&out=json&limit=12';
+      var r = await fetch(url, { credentials: 'same-origin' });
+      var t = await r.text();
+      var json = JSON.parse(t);
+      var sr = (json && json.searchresults) ? json.searchresults : [];
+      var out = [];
+      for (var i = 0; i < sr.length; i++) {
+        var p0 = sr[i] && sr[i].product ? sr[i].product : null;
+        if (!p0) continue;
+        out.push({
+          name: p0.name || '',
+          url: p0.url || p0.link || '',
+          image: (p0.firstimage ? String(p0.firstimage).replace(/\\\//g, '/') : ''),
+        });
+      }
+      return out;
     }
+
     function renderResults(items) {
       clear(results);
-      if (!items || !items.length) { setResultsEmpty('Ingen treff. Prøv annet søk, eller legg til manuelt.'); return; }
+      if (!items || !items.length) return;
 
       for (var i = 0; i < items.length; i++) {
-        (function (p) {
-          var box = el('div', 'minbagg-res');
-          if (p.image) {
-            var im = document.createElement('img');
-            im.src = p.image;
-            im.alt = p.name || '';
-            box.appendChild(im);
+        (function (it) {
+          var row = el('div', 'minbagg-item');
+
+          if (it.image) {
+            var img = document.createElement('img');
+            img.src = it.image;
+            img.alt = it.name || '';
+            row.appendChild(img);
           } else {
-            box.appendChild(el('div', 'minbagg-muted', ''));
+            var ph = el('div', '');
+            ph.style.width = '42px';
+            ph.style.height = '42px';
+            ph.style.borderRadius = '10px';
+            ph.style.background = 'rgba(255,255,255,.06)';
+            ph.style.border = '1px solid rgba(255,255,255,.12)';
+            row.appendChild(ph);
           }
-          var mid = el('div', '');
-          mid.style.flex = '1 1 auto';
-          mid.appendChild(el('div', 't', p.name || ''));
-          var act = el('div', 'a');
-          var b = el('button', 'minbagg-btn primary', 'Legg til');
-          b.addEventListener('click', function () { addDisc(p); });
-          act.appendChild(b);
-          mid.appendChild(act);
-          box.appendChild(mid);
-          results.appendChild(box);
-        })(items[i]);
+
+          var meta = el('div', 'meta');
+          meta.appendChild(el('div', 'name', it.name || ''));
+          meta.appendChild(el('div', 'sub', it.url || ''));
+          row.appendChild(meta);
+
+          var btn = el('button', 'minbagg-btn primary', 'Legg til');
+          btn.addEventListener('click', async function () {
+            state.bag.push({
+              name: it.name || '',
+              url: it.url || '',
+              image: it.image || '',
+              addedAt: new Date().toISOString().slice(0, 10)
+            });
+            renderBag();
+            await dbSaveBag();
+          });
+          row.appendChild(btn);
+
+          results.appendChild(row);
+        })(items[i] || {});
       }
     }
 
+    // Search handlers (debounce)
+    var tmr = null;
     searchInput.addEventListener('input', function () {
       var q = (searchInput.value || '').trim();
-      if (searchTimer) clearTimeout(searchTimer);
-      if (!q) { clear(results); return; }
-      searchTimer = setTimeout(async function () {
-        setResultsLoading();
+      clear(results);
+      if (tmr) clearTimeout(tmr);
+      if (!q || q.length < 2) return;
+      tmr = setTimeout(async function () {
         try {
           var items = await qbSearch(q);
           renderResults(items);
         } catch (err) {
-          setResultsEmpty('Kunne ikke søke akkurat nå.');
-          log('[MINBAGG] search error', err);
+          log('[MINBAGG] search fail', err);
         }
-      }, 250);
+      }, 220);
     });
 
-    // Save debounce
-    var saveTimer = null;
-    var savingNow = false;
-
-    async function doSaveNow() {
-      if (savingNow) return;
-      savingNow = true;
-      try {
-        await dbSaveBag(supa, supaUser.email, state.bag);
-        state.lastSavedAt = new Date();
-      } catch (err) {
-        log('[MINBAGG] save failed', err);
-      } finally {
-        savingNow = false;
-      }
-    }
-    function scheduleSave() {
-      if (saveTimer) clearTimeout(saveTimer);
-      saveTimer = setTimeout(doSaveNow, 600);
-    }
-
-    // Init load: LS først, så DB
-    (async function initBag() {
-      state.bag = lsLoad();
+    // manual add
+    manBtn.addEventListener('click', async function () {
+      var name = (manName.value || '').trim();
+      if (!name) return;
+      state.bag.push({
+        name: name,
+        url: (manUrl.value || '').trim(),
+        image: '',
+        addedAt: new Date().toISOString().slice(0, 10)
+      });
+      manName.value = '';
+      manUrl.value = '';
       renderBag();
+      await dbSaveBag();
+    });
+
+    // Init: load bag (db -> local fallback)
+    (async function () {
       try {
-        var dbBag = await dbLoadBag(supa, supaUser.email);
+        // 1) local
+        state.bag = lsLoad();
+        renderBag();
+
+        // 2) db
+        var dbBag = await dbLoadBag();
         if (dbBag && Array.isArray(dbBag)) {
           state.bag = dbBag;
           lsSave(state.bag);
@@ -586,69 +636,130 @@
       }
     })();
 
-    // Top3 in logged-in view (samme kilde)
-    (async function initTop3() {
-      try {
-        var rows = await fetchPopularTop3Rows(supa);
-        if (!rows || !rows.length) {
-          topInner.textContent = 'Ingen globale data enda.';
-          return;
-        }
-        var html = '<ol style="margin:0;padding-left:18px;">';
-        for (var i = 0; i < rows.length; i++) {
-          var r = rows[i] || {};
-          var name = (r.disc || 'Ukjent');
-          var picks = (r.picks != null ? r.picks : '');
-          html += '<li style="margin:6px 0;">'
-            + '<span style="font-weight:700;">' + escapeHtml(name) + '</span>'
-            + (picks !== '' ? (' <span style="opacity:.75;">(' + escapeHtml(String(picks)) + ')</span>') : '')
-            + '</li>';
-        }
-        html += '</ol>';
-        topInner.innerHTML = html;
-      } catch (e) {
-        topInner.textContent = 'Kunne ikke laste toppliste.';
-      }
-    })();
+    // Hook for Top 3
+    app.__renderTop3 = function (top3) { renderTop3Into(topInner, top3); };
   }
 
- // -------------------- MAIN init ------------------------------------------
-function minbaggScheduleInit() {
-  if (window.__MINBAGG_INIT_SCHEDULED__) return;
-  window.__MINBAGG_INIT_SCHEDULED__ = true;
+  // --- Global top3 data (RPC) -----------------------------------------------
+  async function fetchTop3(supa) {
+    // Henter topp 3 per kategori via RPC (bygger på popular_discs)
+    // returns: [{group, items:[{name,url,image,count}]}...]
+    var CACHE_KEY = 'gk_minbagg_top3_v1';
+    var CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 
-  setTimeout(async function () {
-    window.__MINBAGG_INIT_SCHEDULED__ = false;
+    function normalizeType(t) {
+      t = String(t || '').toLowerCase().trim();
+      if (t === 'fairway driver') t = 'fairway';
+      if (t === 'distance driver') t = 'distance';
+      return t;
+    }
 
-    // Kun på riktig side
-    var p = ((location && location.pathname) ? location.pathname : '').replace(/\/+$/, '').toLowerCase();
-    if (p !== '/sider/min-bagg') return;
+    function titleForType(t) {
+      switch (t) {
+        case 'putter': return 'Putter';
+        case 'midrange': return 'Midrange';
+        case 'fairway': return 'Fairway Driver';
+        case 'distance': return 'Distance Driver';
+        default: return (t || 'Discs');
+      }
+    }
 
-    // Unngå parallelle init-kjøringer
-    if (window.__MINBAGG_INIT_INFLIGHT__) return;
-    window.__MINBAGG_INIT_INFLIGHT__ = true;
+    function orderKey(t) {
+      switch (t) {
+        case 'putter': return 1;
+        case 'midrange': return 2;
+        case 'fairway': return 3;
+        case 'distance': return 4;
+        default: return 9;
+      }
+    }
+
+    // 1) cache først (for rask visning)
+    try {
+      var raw = sessionStorage.getItem(CACHE_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed.ts && (Date.now() - parsed.ts) < CACHE_TTL_MS && Array.isArray(parsed.data)) {
+          return parsed.data;
+        }
+      }
+    } catch (_) {}
+
+    // 2) hent fra Supabase
+    try {
+      var res = await supa.rpc('get_mybag_top3', { limit_per_group: 3 });
+      if (res && res.error) throw res.error;
+      var rows = (res && res.data) ? res.data : [];
+
+      // grupper til UI-format
+      var by = {};
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i] || {};
+        var t = normalizeType(r.type);
+        if (!t) continue;
+        if (!by[t]) by[t] = [];
+        by[t].push({
+          name: r.name || '',
+          url: r.product_url || '',
+          image: r.image_url || '',
+          count: (r.picks != null ? r.picks : 0)
+        });
+      }
+
+      var types = Object.keys(by).sort(function (a, b) { return orderKey(a) - orderKey(b); });
+      var out = [];
+      for (var j = 0; j < types.length; j++) {
+        var t2 = types[j];
+        var arr = by[t2].slice().sort(function (a, b) { return (b.count || 0) - (a.count || 0); }).slice(0, 3);
+        out.push({ group: titleForType(t2), items: arr });
+      }
+
+      // cache lagre
+      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: out })); } catch (_) {}
+
+      return out;
+    } catch (err) {
+      log('[MINBAGG] top3 fetch failed', err);
+      return [];
+    }
+  }
+
+  // -------------------- MAIN init ------------------------------------------
+  document.addEventListener('DOMContentLoaded', async function () {
+    injectStyles();
+    var root = ensureRoot();
+    var marker = getLoginMarker();
 
     try {
-      injectStyles();
-      var root = ensureRoot();
-      var marker = getLoginMarker();
-
       var supa = await ensureSupabaseClient();
+      var top3Promise = fetchTop3(supa);
 
-      // Guest: CTA + top3
+      // ---------------- GUEST (ikke innlogget i butikk) ----------------
       if (!marker.loggedIn) {
         renderNeedShopLogin(root);
 
-        window.__MINBAGG_REFRESH_GUEST_TOP3__ = async function () {
-          var box = document.getElementById('minbagg-top3-list');
-          if (!box) return;
-          box.textContent = 'Laster…';
-          var rows = await fetchPopularTop3Rows(supa);
-          renderGuestTop3(rows);
+        // Oppdater topp 3 nå + ved BFCache (logout/back) uten hard refresh
+        window.__MINBAGG_REFRESH_TOP3__ = async function () {
+          try {
+            var app = root.__minbaggApp;
+            var box = (app && app.__top3Container) ? app.__top3Container : document.getElementById('minbagg-top3-list');
+            if (!box) return;
+
+            box.textContent = 'Laster…';
+            var top3 = await fetchTop3(supa);
+            renderTop3Into(box, top3);
+          } catch (e) {
+            log('[MINBAGG] guest top3 render fail', e);
+          }
         };
 
-        // Kjør nå
-        window.__MINBAGG_REFRESH_GUEST_TOP3__();
+        // Kjør med en gang
+        window.__MINBAGG_REFRESH_TOP3__();
+
+        // BFCache: kjør igjen når siden vises (typisk etter logout/back)
+        window.addEventListener('pageshow', function () {
+          try { window.__MINBAGG_REFRESH_TOP3__(); } catch (_) {}
+        });
 
         return;
       }
@@ -659,6 +770,27 @@ function minbaggScheduleInit() {
 
       if (!session || !session.user) {
         renderConnectView(root, marker, supa);
+
+        // render topp 3 også her
+        try {
+          var app0 = root.__minbaggApp;
+          var box0 = (app0 && app0.__top3Container) ? app0.__top3Container : document.getElementById('minbagg-top3-list');
+          if (box0) {
+            top3Promise.then(function (top3) { try { renderTop3Into(box0, top3); } catch (_) {} });
+          }
+        } catch (_) {}
+
+        // BFCache
+        window.addEventListener('pageshow', function () {
+          try {
+            var app0b = root.__minbaggApp;
+            var box0b = (app0b && app0b.__top3Container) ? app0b.__top3Container : document.getElementById('minbagg-top3-list');
+            if (box0b) {
+              fetchTop3(supa).then(function (top3) { try { renderTop3Into(box0b, top3); } catch (_) {} });
+            }
+          } catch (_) {}
+        });
+
         return;
       }
 
@@ -670,25 +802,24 @@ function minbaggScheduleInit() {
       }
 
       renderApp(root, marker, supa, user);
-      log('[MINBAGG] app loaded OK');
 
-    } catch (err) {
+      // Topp 3 – render når data er klar (og ved BFCache)
       try {
-        clear(root);
-        root.appendChild(el('div', 'minbagg-muted',
-          'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
+        var app1 = root.__minbaggApp;
+        if (app1 && app1.__renderTop3) {
+          top3Promise.then(function (top3) { try { app1.__renderTop3(top3); } catch (_) {} });
+          window.addEventListener('pageshow', function () {
+            try { fetchTop3(supa).then(function (top3) { try { app1.__renderTop3(top3); } catch (_) {} }); } catch (_) {}
+          });
+        }
       } catch (_) {}
+
+      log('[MINBAGG] app loaded OK');
+    } catch (err) {
+      clear(root);
+      root.appendChild(el('div', 'minbagg-muted',
+        'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
       log('[MINBAGG] fatal', err);
-
-    } finally {
-      window.__MINBAGG_INIT_INFLIGHT__ = false;
     }
-  }, 0);
-}
-
-// Kjør både ved “ekte load” og ved BFCache/soft nav
-document.addEventListener('DOMContentLoaded', minbaggScheduleInit);
-window.addEventListener('pageshow', minbaggScheduleInit);
-window.addEventListener('popstate', minbaggScheduleInit);
-
+  });
 })();
