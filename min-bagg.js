@@ -25,7 +25,14 @@
   return { url: url, anon: anon };
 }
 
-  function log() { try { console.log.apply(console, arguments); } catch (_) {} }
+// Fallback (må finnes fordi resten av fila kan referere til SUPA_URL / SUPA_ANON)
+var SUPA_URL = "";
+var SUPA_ANON = "";
+
+function log() {
+  try { console.log.apply(console, arguments); } catch (_) {}
+}
+
 
   // --- DOM helpers -----------------------------------------------------------
   function el(tag, cls, text) {
