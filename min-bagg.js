@@ -630,10 +630,14 @@ if (!cfg.url || !cfg.anon) {
       var supa = await ensureSupabaseClient();
       var top3Promise = fetchTop3(supa);
 
-      if (!marker.loggedIn) {
-        renderNeedShopLogin(root);
-        return;
-      }
+// GJEST: vis topp 3 + login-kort (read-only)
+if (!marker.loggedIn) {
+  renderNeedShopLogin(root);
+  top3Promise.then(function(rows){
+    try { renderTop3(rows); } catch(e){ console.log("[MINBAGG] guest top3 render fail", e); }
+  });
+  return;
+}
 
       var sess = await supa.auth.getSession();
       var session = (sess && sess.data) ? sess.data.session : null;
