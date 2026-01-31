@@ -213,14 +213,29 @@ if (!cfg.url || !cfg.anon) {
   }
 
   function renderNeedShopLogin(root) {
-    clear(root);
-    var app = el('div', 'minbagg-app');
-    app.appendChild(elHtml('div', 'minbagg-banner', bannerHtml()));
-    app.appendChild(el('h2', '', 'Min Bagg'));
-    app.appendChild(el('div', 'minbagg-muted',
-      'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.'));
-    root.appendChild(app);
-  }
+  root.innerHTML =
+    '<div class="minbagg-wrap">' +
+
+      '<div class="minbagg-card" style="margin:12px 0;padding:16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;">' +
+        '<h2 style="margin:0 0 6px 0;">Min Bagg</h2>' +
+        '<p style="margin:0 0 10px 0;opacity:.9;">' +
+          'Du må være innlogget i nettbutikken for å lagre og bygge baggen din.' +
+          ' Du kan likevel se <strong>Topp 3 globalt</strong> uten innlogging.' +
+        '</p>' +
+
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 0 0;">' +
+          '<a href="/customer/login" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#2e8b57;color:#fff;text-decoration:none;">Logg inn</a>' +
+          '<a href="/customer/register" style="display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.25);color:#fff;text-decoration:none;">Opprett konto</a>' +
+        '</div>' +
+      '</div>' +
+
+      '<div id="minbagg-top3-box" class="minbagg-card" style="margin:12px 0;padding:16px;border:1px solid rgba(255,255,255,.15);border-radius:12px;">' +
+        '<h3 style="margin:0 0 8px 0;">Topp 3 globalt</h3>' +
+        '<div id="minbagg-top3-list" style="opacity:.9;">Laster…</div>' +
+      '</div>' +
+
+    '</div>';
+}
 
   function renderConnectView(root, marker, supa) {
     clear(root);
