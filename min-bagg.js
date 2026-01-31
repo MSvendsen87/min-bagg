@@ -130,14 +130,15 @@ function log() {
   }
 
   async function ensureSupabaseClient() {
-    if (!SUPA_URL || !SUPA_ANON) {
-      throw new Error('Manglende Supabase config (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).');
-    }
+    var cfg = getSupaConfig();
+if (!cfg.url || !cfg.anon) {
+  throw new Error('Manglende Supabase config (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).');
+}
     if (!window.supabase || !window.supabase.createClient) {
       // UMD build
       await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js');
     }
-    return window.supabase.createClient(SUPA_URL, SUPA_ANON);
+    return window.supabase.createClient(cfg.url, cfg.anon);
   }
 
   // --- Storage helpers (fallback) -------------------------------------------
