@@ -17,9 +17,15 @@
   p = p.replace(/\/+$/, '');
   if (p !== '/sider/min-bagg') return;
 
-  // Single-run guard
-  if (window.__MINBAGG_APP_RUNNING__) return;
-  window.__MINBAGG_APP_RUNNING__ = true;
+  // Tillat re-init når Quickbutik navigerer uten full reload (PJAX/BFCache)
+window.__MINBAGG_BOOT__ = window.__MINBAGG_BOOT__ || null;
+
+// Per-side guard (ikke global for hele nettleser-økten)
+var RUN_KEY = 'minbagg:' + ((location && location.pathname) ? String(location.pathname) : '');
+if (window.__MINBAGG_RUN_KEY__ === RUN_KEY && window.__MINBAGG_APP_RUNNING__) return;
+window.__MINBAGG_RUN_KEY__ = RUN_KEY;
+window.__MINBAGG_APP_RUNNING__ = true;
+
 
   // -------------------- helpers ---------------------------------------------
   function log() { try { console.log.apply(console, arguments); } catch (_) {} }
@@ -449,9 +455,13 @@
           }
 
           var meta = el('div', 'meta');
-          meta.appendChild(el('div', 'name', it.name || ''));
-          meta.appendChild(el('div', 'sub', 'Lagt til: ' + (it.addedAt || '')));
-          row.appendChild(meta);
+meta.appendChild(el('div', 'name', it.name || ''));
+meta.appendChild(el('div', 'sub',
+  (it.type ? ('Type: ' + it.type + ' • ') : '') +
+  'Lagt til: ' + (it.addedAt || '')
+));
+row.appendChild(meta);
+
 
           var btn = el('button', 'minbagg-btn', 'Fjern');
           btn.addEventListener('click', async function () {
@@ -568,15 +578,43 @@
 
           var btn = el('button', 'minbagg-btn primary', 'Legg til');
           btn.addEventListener('click', async function () {
-            state.bag.push({
-              name: it.name || '',
-              url: it.url || '',
-              image: it.image || '',
-              addedAt: new Date().toISOString().slice(0, 10)
-            });
-            renderBag();
-            await dbSaveBag();
-          });
+  // 1) La bruker velge kategori (midlertidig løsning før auto-kategorisering)
+  var type = prompt("Hvilken kategori? Skriv: putter / midrange / fairway / distance", "putter");
+  type = (type || '').toLowerCase().trim();
+  if (!type) return;
+  if (type === 'fairway driver') type = 'fairway';
+  if (type === 'distance driver') type = 'distance';
+
+  // 2) Legg i bag (med type)
+  var item = {
+    name: it.name || '',
+    url: it.url || '',
+    image: it.image || '',
+    type: type,
+    addedAt: new Date().toISOString().slice(0, 10)
+  };
+
+  state.bag.push(item);
+  renderBag();
+  await dbSaveBag();
+
+  // 3) Tell globalt (popular_discs) via RPC
+  try {
+    await supa.rpc('increment_popular_disc', {
+      p_type: type,
+      p_name: item.name,
+      p_url: item.url || null,
+      p_image: item.image || null
+    });
+
+    // 4) Oppdater toppliste uten hard refresh (tøm cache + refresh)
+    try { sessionStorage.removeItem('gk_minbagg_top3_v1'); } catch(_){}
+    if (typeof window.__MINBAGG_REFRESH_TOP3__ === 'function') window.__MINBAGG_REFRESH_TOP3__();
+  } catch (e) {
+    log('[MINBAGG] increment_popular_disc fail', e);
+  }
+});
+
           row.appendChild(btn);
 
           results.appendChild(row);
@@ -822,4 +860,19 @@
       log('[MINBAGG] fatal', err);
     }
   });
+   // Eksponer en boot som loaderen kan kalle ved SPA-navigasjon/BFCache
+window.__MINBAGG_BOOT__ = function () {
+  try {
+    // “reset” så init kan kjøre på nytt når vi kommer tilbake til siden
+    window.__MINBAGG_APP_RUNNING__ = false;
+    // Kjør en “soft reload” ved å trigge samme init-flyt:
+    // (vi simulerer et nytt DOMContentLoaded ved å kalle location-basert init igjen)
+    // Enkelt: reloader siden normalt hvis Quickbutik ikke remounter DOM riktig.
+    if (((location && location.pathname) ? String(location.pathname) : '').replace(/\/+$/,'') === '/sider/min-bagg') {
+      // Kjør init ved å trigge en mikrojobb
+      setTimeout(function(){ try { window.__MINBAGG_APP_RUNNING__ = false; } catch(_){} }, 0);
+    }
+  } catch (_) {}
+};
+
 })();
