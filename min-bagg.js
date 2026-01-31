@@ -19,8 +19,11 @@
   window.__MINBAGG_APP_RUNNING__ = true;
 
   // Konfig (fra loader / global)
-  var SUPA_URL = (window.GK_SUPABASE_URL || '').trim();
-  var SUPA_ANON = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
+  function getSupaConfig() {
+  var url = (window.GK_SUPABASE_URL || '').trim();
+  var anon = (window.GK_SUPABASE_ANON_KEY || window.GK_SUPABASE_ANON || window.GK_SUPABASE_KEY || '').trim();
+  return { url: url, anon: anon };
+}
 
   function log() { try { console.log.apply(console, arguments); } catch (_) {} }
 
