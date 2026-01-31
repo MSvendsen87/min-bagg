@@ -16,10 +16,6 @@
   var path = ((location && location.pathname) ? location.pathname : '').replace(/\/+$/, '').toLowerCase();
   if (path !== '/sider/min-bagg') return;
 
-  // Unngå dobbel init, men vi tillater pageshow-refresh av toppliste
-  if (window.__MINBAGG_APP_RUNNING__) return;
-  window.__MINBAGG_APP_RUNNING__ = true;
-
   // -------------------- Config (fra loader / global) ------------------------
   function getSupaConfig() {
     var url = (window.GK_SUPABASE_URL || '').trim();
@@ -616,20 +612,33 @@
     })();
   }
 
-  // -------------------- MAIN init ------------------------------------------
-  document.addEventListener('DOMContentLoaded', async function () {
-    injectStyles();
-    var root = ensureRoot();
-    var marker = getLoginMarker();
+ // -------------------- MAIN init ------------------------------------------
+function minbaggScheduleInit() {
+  if (window.__MINBAGG_INIT_SCHEDULED__) return;
+  window.__MINBAGG_INIT_SCHEDULED__ = true;
+
+  setTimeout(async function () {
+    window.__MINBAGG_INIT_SCHEDULED__ = false;
+
+    // Kun på riktig side
+    var p = ((location && location.pathname) ? location.pathname : '').replace(/\/+$/, '').toLowerCase();
+    if (p !== '/sider/min-bagg') return;
+
+    // Unngå parallelle init-kjøringer
+    if (window.__MINBAGG_INIT_INFLIGHT__) return;
+    window.__MINBAGG_INIT_INFLIGHT__ = true;
 
     try {
+      injectStyles();
+      var root = ensureRoot();
+      var marker = getLoginMarker();
+
       var supa = await ensureSupabaseClient();
 
-      // Guest: CTA + top3 (med BFCache-fix)
+      // Guest: CTA + top3
       if (!marker.loggedIn) {
         renderNeedShopLogin(root);
 
-        // Global refresh-funksjon (brukes også på pageshow)
         window.__MINBAGG_REFRESH_GUEST_TOP3__ = async function () {
           var box = document.getElementById('minbagg-top3-list');
           if (!box) return;
@@ -640,11 +649,6 @@
 
         // Kjør nå
         window.__MINBAGG_REFRESH_GUEST_TOP3__();
-
-        // Kjør igjen ved BFCache (logout/back uten full reload)
-        window.addEventListener('pageshow', function () {
-          try { window.__MINBAGG_REFRESH_GUEST_TOP3__(); } catch (_) {}
-        });
 
         return;
       }
@@ -667,11 +671,24 @@
 
       renderApp(root, marker, supa, user);
       log('[MINBAGG] app loaded OK');
+
     } catch (err) {
-      clear(root);
-      root.appendChild(el('div', 'minbagg-muted',
-        'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
+      try {
+        clear(root);
+        root.appendChild(el('div', 'minbagg-muted',
+          'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
+      } catch (_) {}
       log('[MINBAGG] fatal', err);
+
+    } finally {
+      window.__MINBAGG_INIT_INFLIGHT__ = false;
     }
-  });
+  }, 0);
+}
+
+// Kjør både ved “ekte load” og ved BFCache/soft nav
+document.addEventListener('DOMContentLoaded', minbaggScheduleInit);
+window.addEventListener('pageshow', minbaggScheduleInit);
+window.addEventListener('popstate', minbaggScheduleInit);
+
 })();
