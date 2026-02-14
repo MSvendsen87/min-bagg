@@ -272,27 +272,60 @@
 
   // -------------------- Quickbutik search + stock strict --------------------
   function isProductInStock(prod) {
+    // Quickbutik: has_stock, soldOut, stock, allow_minusqty, preorder ...
+    // Returnerer: true / false / "unknown"
     if (!prod) return 'unknown';
 
-    var boolFields = ['in_stock','instock','inStock','available','is_available','isAvailable','has_stock','hasStock'];
+    // 1) soldOut (høy prioritet)
+    if (typeof prod.soldOut === 'boolean') return prod.soldOut ? false : true;
+    // kan komme som 0/1 eller "0"/"1"
+    if (prod.soldOut !== undefined && prod.soldOut !== null) {
+      var so = toNum(prod.soldOut);
+      if (!isNaN(so)) return so > 0 ? false : true; // 1 = sold out
+      var sos = String(prod.soldOut).toLowerCase();
+      if (sos === 'true' || sos === 'yes') return false;
+      if (sos === 'false' || sos === 'no') return true;
+    }
+
+    // 2) has_stock / hasStock / has_stock flag
+    var hs = (prod.has_stock !== undefined) ? prod.has_stock :
+             (prod.hasStock !== undefined) ? prod.hasStock : undefined;
+    if (typeof hs === 'boolean') return hs ? true : false;
+    if (hs !== undefined && hs !== null) {
+      var hsn = toNum(hs);
+      if (!isNaN(hsn)) return hsn > 0;
+      var hss = String(hs).toLowerCase();
+      if (hss === 'true' || hss === 'yes') return true;
+      if (hss === 'false' || hss === 'no') return false;
+    }
+
+    // 3) direkte bool-felt (fallback)
+    var boolFields = ['in_stock','instock','inStock','available','is_available','isAvailable','buyable','is_buyable','isBuyable','canbuy','showbuybutton','has_stock','hasStock'];
     for (var i=0;i<boolFields.length;i++){
       var k = boolFields[i];
       if (typeof prod[k] === 'boolean') return prod[k] ? true : false;
+      if (prod[k] !== undefined && prod[k] !== null) {
+        var bn = toNum(prod[k]);
+        if (!isNaN(bn)) return bn > 0;
+        var bs = String(prod[k]).toLowerCase();
+        if (bs === 'true' || bs === 'yes') return true;
+        if (bs === 'false' || bs === 'no') return false;
+      }
     }
 
-    var numFields = ['stock','stock_quantity','stockQuantity','quantity','inventory','inventory_quantity','inventoryQuantity','qty'];
-    for (var j=0;j<numFields.length;j++){
-      var k2 = numFields[j];
-      if (typeof prod[k2] === 'number') return prod[k2] > 0;
-      var n = toNum(prod[k2]);
-      if (!isNaN(n)) return n > 0;
-    }
+    // 4) stock (antall)
+    var stockVal = prod.stock;
+    if (typeof stockVal === 'number') return stockVal > 0;
+    var sn = toNum(stockVal);
+    if (!isNaN(sn)) return sn > 0;
 
-    var s = safeStr(prod.stock_status || prod.stockStatus || '').toLowerCase();
+    // 5) tekststatus
+    var s = safeStr(prod.stock_status || prod.stockStatus || prod.availability || '').toLowerCase();
     if (s) {
       if (s.indexOf('out') !== -1 || s.indexOf('sold') !== -1 || s.indexOf('0') !== -1) return false;
       if (s.indexOf('in') !== -1 || s.indexOf('avail') !== -1 || s.indexOf('på lager') !== -1) return true;
     }
+
     return 'unknown';
   }
 
@@ -1218,7 +1251,7 @@
     // Anbefalinger
     var cardR = el('div', 'minbagg-card');
     cardR.appendChild(el('h2', 'minbagg-title', 'Anbefalt for deg'));
-    cardR.appendChild(el('p', 'minbagg-sub', '2 forslag basert på profilen din og hva du mangler i baggen. Kun på lager.'));
+    cardR.appendChild(el('p', 'minbagg-sub', '2 forslag basert på profilen din og hva du mangler i baggen.'));
 
     var holder = el('div', 'minbagg-muted', 'Laster anbefalinger…');
     cardR.appendChild(holder);
