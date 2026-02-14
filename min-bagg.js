@@ -1,6 +1,6 @@
 /* ============================================================================
    GOLFKONGEN – MIN BAGG (stable) – FULL FIL
-   Build: 2026-02-14 (AIO)
+   Build: 2026-02-14 (AIO) + A: Flight-kart
    Side: /sider/min-bagg
 
    ✅ Guest:
@@ -16,6 +16,7 @@
      - Kommentar (skjult i modal, vises i kort)
      - Flight fra product.datafield_1 (Quickbutik search JSON)
      - Flight lista (collapsible) sortert Speed høy→lav + OBS ved like flights
+     - ✅ Flight-kart (collapsible) basert på Turn/Fade, auto min/max + cluster + klikk-list
      - Topp 3 globalt nederst (oppdateres etter add)
    ✅ Anti “må hard refresh”:
      - Init kjører på DOMContentLoaded + pageshow (BFCache/back/forward)
@@ -31,7 +32,7 @@
   if (window.__DISABLE_MINBAGG__ === true) return;
 
   // Version marker (for console)
-  window.__MINBAGG_BUILD__ = '2026-02-14-AIO';
+  window.__MINBAGG_BUILD__ = '2026-02-14-AIO+FLIGHTCHART';
 
   // Soft lock object (persists across BFCache)
   if (!window.__MINBAGG_SOFT_LOCK__) window.__MINBAGG_SOFT_LOCK__ = { running: false, lastInitAt: 0 };
@@ -70,6 +71,7 @@
     var n = parseFloat(s);
     return isNaN(n) ? NaN : n;
   }
+  function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
 
   // -------------------- Root + styles --------------------------------------
   function ensureRoot() {
@@ -143,6 +145,28 @@
         border:0;color:#e8eef6;font-weight:900;cursor:pointer}
       .minbagg-collapsible .body{padding:10px 12px;background:rgba(0,0,0,.12);display:none}
       .minbagg-collapsible.open .body{display:block}
+
+      /* Flight-kart */
+      .minbagg-chart{position:relative;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.12);
+        overflow:hidden;height:320px}
+      .minbagg-chart-grid{position:absolute;inset:0;background-image:
+        linear-gradient(to right, rgba(255,255,255,.08) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,.08) 1px, transparent 1px);
+        background-size: 20% 20%;
+        opacity:.55}
+      .minbagg-chart-axes{position:absolute;inset:0;pointer-events:none}
+      .minbagg-chart-label{position:absolute;font-size:12px;opacity:.82;background:rgba(18,22,30,.85);
+        border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:4px 8px}
+      .minbagg-dot{position:absolute;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:999px;
+        border:2px solid rgba(255,255,255,.85);background:#2e8b57;cursor:pointer;box-shadow:0 0 0 2px rgba(0,0,0,.25)}
+      .minbagg-dot:hover{filter:brightness(1.08)}
+      .minbagg-dot-badge{position:absolute;top:-9px;right:-9px;min-width:18px;height:18px;border-radius:999px;
+        display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;
+        background:rgba(255,255,255,.9);color:#111;border:1px solid rgba(0,0,0,.35)}
+      .minbagg-chart-footer{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+      .minbagg-pills{display:flex;gap:8px;flex-wrap:wrap}
+      .minbagg-pill{font-size:12px;opacity:.85;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);
+        border-radius:999px;padding:4px 8px}
     `;
     var st = document.createElement('style');
     st.id = 'minbagg-styles';
@@ -218,7 +242,7 @@
     var raw = safeStr(flightText).trim();
     if (!raw) return null;
 
-    // We accept formats like:
+    // Accept formats like:
     // "Speed: 4 | Glide: 2 | Turn: 0 | Fade: 3,5"
     // or just "4 2 0 3.5"
     var nums = raw.match(/-?\d+(?:[.,]\d+)?/g);
@@ -561,6 +585,193 @@
         var key = [safeStr(f.speed), safeStr(f.glide), safeStr(f.turn), safeStr(f.fade)].join('|');
         if (d.flight && dup[key] >= 2) meta.appendChild(el('div', 'sub', 'OBS: ' + dup[key] + ' disker har helt lik flight.'));
         row.appendChild(meta);
+        ul.appendChild(row);
+      });
+      body.appendChild(ul);
+    }
+
+    wrap.appendChild(wrapC);
+    wrap.appendChild(el('div', 'minbagg-hr'));
+  }
+
+  // -------------------- A) Flight-kart -------------------------------------
+  function renderFlightChart(wrap) {
+    var wrapC = el('div', 'minbagg-collapsible');
+    var btn = el('button', '', 'Flight-kart (Turn / Fade)');
+    var body = el('div', 'body');
+    wrapC.appendChild(btn);
+    wrapC.appendChild(body);
+    btn.addEventListener('click', function () { wrapC.classList.toggle('open'); });
+
+    var withFlight = [];
+    var withoutFlight = [];
+    for (var i = 0; i < state.discs.length; i++) {
+      var d = state.discs[i];
+      var f = d && d.flight ? d.flight : null;
+      var turn = f ? toNum(f.turn) : NaN;
+      var fade = f ? toNum(f.fade) : NaN;
+      if (isNaN(turn) || isNaN(fade)) withoutFlight.push(d);
+      else withFlight.push({ disc: d, turn: turn, fade: fade });
+    }
+
+    if (!withFlight.length) {
+      body.appendChild(el('div', 'minbagg-muted', 'Ingen disker med Turn/Fade ennå – legg til flight, så dukker kartet opp.'));
+      if (withoutFlight.length) {
+        body.appendChild(el('div', 'minbagg-hr'));
+        body.appendChild(el('div', 'minbagg-name', 'Uten flight (' + withoutFlight.length + ')'));
+        var ul0 = el('div', 'minbagg-list');
+        withoutFlight.forEach(function (d0) {
+          var r0 = el('div', 'minbagg-item');
+          var im0 = el('img', 'minbagg-thumb'); im0.alt=''; im0.loading='lazy'; im0.src=d0.image||'';
+          if (!im0.src) im0.style.display='none';
+          r0.appendChild(im0);
+          var m0 = el('div', 'minbagg-meta');
+          m0.appendChild(el('div', 'minbagg-name', d0.name || ''));
+          m0.appendChild(el('div', 'sub', 'Flight mangler'));
+          r0.appendChild(m0);
+          ul0.appendChild(r0);
+        });
+        body.appendChild(ul0);
+      }
+      wrap.appendChild(wrapC);
+      wrap.appendChild(el('div', 'minbagg-hr'));
+      return;
+    }
+
+    // min/max fra disker i baggen
+    var minT = Infinity, maxT = -Infinity, minF = Infinity, maxF = -Infinity;
+    withFlight.forEach(function (x) {
+      if (x.turn < minT) minT = x.turn;
+      if (x.turn > maxT) maxT = x.turn;
+      if (x.fade < minF) minF = x.fade;
+      if (x.fade > maxF) maxF = x.fade;
+    });
+
+    // Litt "luft" rundt (men behold min/max med)
+    function padRange(minV, maxV) {
+      if (minV === maxV) { minV = minV - 1; maxV = maxV + 1; }
+      var span = maxV - minV;
+      var pad = span * 0.08;
+      return { min: minV - pad, max: maxV + pad };
+    }
+    var tr = padRange(minT, maxT);
+    var fr = padRange(minF, maxF);
+
+    var chart = el('div', 'minbagg-chart');
+    var grid = el('div', 'minbagg-chart-grid');
+    chart.appendChild(grid);
+
+    var axes = el('div', 'minbagg-chart-axes');
+    var labTL = el('div', 'minbagg-chart-label', 'Turn: ' + minT + ' → ' + maxT);
+    labTL.style.left = '10px'; labTL.style.top = '10px';
+    var labBR = el('div', 'minbagg-chart-label', 'Fade: ' + minF + ' → ' + maxF);
+    labBR.style.right = '10px'; labBR.style.bottom = '10px';
+    axes.appendChild(labTL);
+    axes.appendChild(labBR);
+    chart.appendChild(axes);
+
+    // Cluster: samme (Turn/Fade) -> badge
+    var clusters = {};
+    function keyFor(turn, fade) {
+      // Nøkkel på 2 desimaler for å cluster "samme punkt"
+      return turn.toFixed(2) + '|' + fade.toFixed(2);
+    }
+
+    withFlight.forEach(function (x) {
+      var k = keyFor(x.turn, x.fade);
+      if (!clusters[k]) clusters[k] = { turn: x.turn, fade: x.fade, items: [] };
+      clusters[k].items.push(x.disc);
+    });
+
+    function openClusterModal(items, turn, fade) {
+      openModal('Disker på punktet (Turn ' + turn + ', Fade ' + fade + ')', function (modal) {
+        var list = el('div', 'minbagg-list');
+        items.forEach(function (d) {
+          var row = el('div', 'minbagg-item');
+          var img = el('img', 'minbagg-thumb');
+          img.alt = ''; img.loading = 'lazy';
+          img.src = d.image || '';
+          if (!img.src) img.style.display = 'none';
+          row.appendChild(img);
+
+          var meta = el('div', 'minbagg-meta');
+          meta.appendChild(el('div', 'minbagg-name', d.name || ''));
+          meta.appendChild(el('div', 'sub', d.flight ? formatFlightLabel(d.flight) : 'Flight mangler'));
+          row.appendChild(meta);
+
+          list.appendChild(row);
+        });
+        modal.appendChild(list);
+      });
+    }
+
+    // Plott prikker
+    Object.keys(clusters).forEach(function (k) {
+      var c = clusters[k];
+      var tx = (c.turn - tr.min) / (tr.max - tr.min);
+      var fy = (c.fade - fr.min) / (fr.max - fr.min);
+
+      // x: 6% -> 94% (padding)
+      var xPct = 6 + clamp(tx, 0, 1) * 88;
+      // y: 94% (lav) -> 6% (høy) fordi fade øker "oppover"
+      var yPct = 94 - clamp(fy, 0, 1) * 88;
+
+      var dot = el('div', 'minbagg-dot');
+      dot.style.left = xPct + '%';
+      dot.style.top = yPct + '%';
+
+      // hvis farge er satt på første disk, bruk den subtilt
+      var d0 = c.items && c.items[0] ? c.items[0] : null;
+      if (d0 && d0.color) {
+        dot.style.background = d0.color;
+      }
+
+      if (c.items.length >= 2) {
+        var badge = el('div', 'minbagg-dot-badge', String(c.items.length));
+        dot.appendChild(badge);
+      }
+
+      dot.addEventListener('click', function () {
+        openClusterModal(c.items, c.turn, c.fade);
+      });
+
+      chart.appendChild(dot);
+    });
+
+    body.appendChild(chart);
+
+    // Footer med ranges + quick stats
+    body.appendChild(el('div', 'minbagg-hr'));
+    var footer = el('div', 'minbagg-chart-footer');
+
+    var pills = el('div', 'minbagg-pills');
+    pills.appendChild(el('div', 'minbagg-pill', 'Punkter: ' + Object.keys(clusters).length));
+    pills.appendChild(el('div', 'minbagg-pill', 'Disker med flight: ' + withFlight.length));
+    footer.appendChild(pills);
+
+    var hint = el('div', 'minbagg-muted', 'Tips: Trykk på en prikk for å se diskene som ligger der.');
+    footer.appendChild(hint);
+
+    body.appendChild(footer);
+
+    // Vis uten flight under (valg B)
+    if (withoutFlight.length) {
+      body.appendChild(el('div', 'minbagg-hr'));
+      body.appendChild(el('div', 'minbagg-name', 'Uten flight (' + withoutFlight.length + ')'));
+      var ul = el('div', 'minbagg-list');
+      withoutFlight.forEach(function (d) {
+        var row = el('div', 'minbagg-item');
+        var img = el('img', 'minbagg-thumb');
+        img.alt = ''; img.loading = 'lazy';
+        img.src = d.image || '';
+        if (!img.src) img.style.display = 'none';
+        row.appendChild(img);
+
+        var meta = el('div', 'minbagg-meta');
+        meta.appendChild(el('div', 'minbagg-name', d.name || ''));
+        meta.appendChild(el('div', 'sub', 'Flight mangler'));
+        row.appendChild(meta);
+
         ul.appendChild(row);
       });
       body.appendChild(ul);
@@ -1168,6 +1379,9 @@
 
         // Flight list
         renderFlightList(wrap);
+
+        // ✅ A) Flight-kart under flightlista
+        renderFlightChart(wrap);
 
         // Top 3 nederst
         renderTop3Section(wrap, { putter: [], midrange: [], fairway: [], distance: [] });
