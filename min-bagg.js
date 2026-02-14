@@ -185,6 +185,10 @@
       .minbagg-reco-card img{width:54px;height:54px;border-radius:12px;object-fit:cover;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06)}
       .minbagg-reco-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
       .minbagg-reco-note{margin:8px 0 0 0;opacity:.9;line-height:1.35}
+      .minbagg-score{display:flex;align-items:center;gap:10px}
+      .minbagg-scorebar{flex:1;height:12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.20);overflow:hidden}
+      .minbagg-scorefill{height:100%}
+      .minbagg-scorepill{font-size:12px;font-weight:900;border-radius:999px;padding:4px 10px;border:1px solid rgba(255,255,255,.14)}
     `;
     var st = document.createElement('style');
     st.id = 'minbagg-styles';
@@ -560,6 +564,123 @@
   }
 
   // -------------------- Reco engine (C) ------------------------------------
+  
+  function idealCounts() {
+    // Praktisk standard for en allround “full” sekk (ca 18 disker):
+    return { putter: 4, midrange: 4, fairway: 5, distance: 5 };
+  }
+  function calcBagScore(discs) {
+    var ideal = idealCounts();
+    var c = countByType(discs);
+
+    // 0–60: antall pr kategori (nær ideal)
+    var maxDelta = 0;
+    ['putter','midrange','fairway','distance'].forEach(function(t){
+      maxDelta += Math.abs((c[t]||0) - (ideal[t]||0));
+    });
+    var countScore = clamp(60 - maxDelta*6, 0, 60);
+
+    // 0–40: coverage (under/straight/over) per type
+    var cov = 0;
+    ['putter','midrange','fairway','distance'].forEach(function(t){
+      var items = (discs||[]).filter(function(d){ return d.type===t && d.flight; });
+      if (!items.length) return;
+      var hasUnder=false, hasStraight=false, hasOver=false;
+      for (var i=0;i<items.length;i++){
+        var tr = toNum(items[i].flight.turn);
+        var fa = toNum(items[i].flight.fade);
+        if (isNaN(tr) || isNaN(fa)) continue;
+        if (tr <= -2 || (tr <= -1 && fa <= 1)) hasUnder = true;
+        if (Math.abs(tr) <= 0.5 && fa <= 2) hasStraight = true;
+        if (fa >= 3 || (tr >= 0 && fa >= 2.5)) hasOver = true;
+      }
+      var local = (hasUnder?1:0) + (hasStraight?1:0) + (hasOver?1:0);
+      cov += local/3;
+    });
+    var covScore = clamp(Math.round(cov/4 * 40), 0, 40);
+    return Math.round(countScore + covScore);
+  }
+  function scoreColor(score) {
+    if (score >= 75) return { bg: 'rgba(46,139,87,.22)', fill:'#2e8b57' };
+    if (score >= 45) return { bg: 'rgba(255,193,7,.18)', fill:'#ffc107' };
+    return { bg: 'rgba(255,107,107,.18)', fill:'#ff6b6b' };
+  }
+  function flightVec(f) {
+    if (!f) return null;
+    var s = toNum(f.speed), g = toNum(f.glide), t = toNum(f.turn), fa = toNum(f.fade);
+    if ([s,g,t,fa].some(function(x){return isNaN(x);} )) return null;
+    return [s,g,t,fa];
+  }
+  function dist4(a,b){
+    var d=0;
+    for (var i=0;i<4;i++){ var x=a[i]-b[i]; d += x*x; }
+    return Math.sqrt(d);
+  }
+  function isTooSimilar(candidateFlight, discsSameType) {
+    var v = flightVec(candidateFlight);
+    if (!v) return false;
+    var best = Infinity;
+    for (var i=0;i<discsSameType.length;i++){
+      var vv = flightVec(discsSameType[i].flight);
+      if (!vv) continue;
+      var dd = dist4(v, vv);
+      if (dd < best) best = dd;
+    }
+    return best < 0.9;
+  }
+  function chooseTargetType(discs) {
+    var ideal = idealCounts();
+    var c = countByType(discs);
+    var bestType = 'fairway';
+    var bestDef = -999;
+    ['putter','midrange','fairway','distance'].forEach(function(t){
+      var def = (ideal[t]||0) - (c[t]||0);
+      if (def > bestDef) { bestDef = def; bestType = t; }
+    });
+    return { type: bestType, deficit: bestDef };
+  }
+  function suggestWhy(profile, targetType, deficit, candFlight, existingSameType) {
+    var p = profile || {};
+    var parts = [p.level, p.throwStyle, p.goal, p.course].filter(Boolean);
+
+    var miss = '';
+    if (deficit > 0) {
+      miss = 'Du mangler ' + deficit + ' ' + typeLabel(targetType).toLowerCase() + ' for en mer balansert sekk. ';
+    } else {
+      miss = 'Du har allerede godt med ' + typeLabel(targetType).toLowerCase() + ', så her får du en variant som gir mer bredde. ';
+    }
+
+    var hasUnder=false, hasStraight=false, hasOver=false;
+    for (var i=0;i<(existingSameType||[]).length;i++){
+      var tr = toNum(existingSameType[i].flight && existingSameType[i].flight.turn);
+      var fa = toNum(existingSameType[i].flight && existingSameType[i].flight.fade);
+      if (isNaN(tr)||isNaN(fa)) continue;
+      if (tr <= -2 || (tr <= -1 && fa <= 1)) hasUnder=true;
+      if (Math.abs(tr) <= 0.5 && fa <= 2) hasStraight=true;
+      if (fa >= 3 || (tr >= 0 && fa >= 2.5)) hasOver=true;
+    }
+
+    var role = '';
+    if (candFlight) {
+      var t = toNum(candFlight.turn), f = toNum(candFlight.fade);
+      if (!isNaN(t) && !isNaN(f)) {
+        if ((t <= -2 || (t <= -1 && f <= 1)) && !hasUnder) role = 'Du mangler en tydelig understabil variant i denne kategorien. ';
+        else if (f >= 3 && !hasOver) role = 'Du mangler en mer overstabil variant i denne kategorien. ';
+        else if (Math.abs(t) <= 0.5 && f <= 2 && !hasStraight) role = 'Du mangler en “rett” arbeidshest i denne kategorien. ';
+        else role = 'Denne fyller et mellomrom mellom de du allerede har. ';
+      }
+    }
+
+    var course = (p.course || '').toLowerCase();
+    var courseTxt = '';
+    if (course.indexOf('skog') !== -1) courseTxt = 'Fin til skogslinjer der kontroll og plassering er viktig.';
+    else if (course.indexOf('åpent') !== -1) courseTxt = 'Fin i åpent landskap når du vil la disken jobbe i lufta.';
+    else if (course.indexOf('blandet') !== -1) courseTxt = 'Et trygt allround-valg for blandede baner.';
+
+    var prof = parts.length ? (' (' + parts.join(' • ') + ')') : '';
+    return miss + role + courseTxt + prof;
+  }
+
   function countByType(discs) {
     var c = { putter:0, midrange:0, fairway:0, distance:0 };
     for (var i=0;i<(discs||[]).length;i++){
@@ -573,28 +694,9 @@
     types.sort(function(a,b){ return (counts[a] - counts[b]); });
     return types;
   }
-  function recoText(profile, missingType, candFlight) {
-    var p = profile || {};
-    var parts = [p.level, p.throwStyle, p.goal, p.course].filter(Boolean);
-
-    // Mangler-tekst
-    var miss = missingType ? ('Du mangler en ' + typeLabel(missingType).toLowerCase() + ', ') : '';
-
-    // Flight-tekst (enkelt, men nyttig)
-    var ft = '';
-    if (candFlight) {
-      var t = toNum(candFlight.turn);
-      var f = toNum(candFlight.fade);
-      if (!isNaN(t) && !isNaN(f)) {
-        if (t <= -2) ft = 'en tydelig understabil disk som kan holde anhyzer/turn, ';
-        else if (t <= -1) ft = 'en litt understabil disk som kan jobbe til høyre før den kommer tilbake, ';
-        else if (t >= 1) ft = 'en mer stabil disk som liker hyzer-linjer, ';
-        else ft = 'en kontrollert disk som ofte går ganske rett, ';
-
-        if (f >= 3) ft += 'med tydelig fade på slutten. ';
-        else if (f >= 2) ft += 'med fin fade på slutten. ';
-        else if (f <= 1) ft += 'med lite fade – fin for rette skogslinjer. ';
-      }
+  function recoText(profile, missingType, candFlight, deficit, existingSameType){
+    return suggestWhy(profile, missingType, deficit, candFlight, existingSameType || []);
+  }
     }
 
     // Miljø/banetype
@@ -611,6 +713,9 @@
   async function pickRecoCandidates(supa, profile, stateDiscs, excludeNames) {
     var counts = countByType(stateDiscs);
     var prio = missingPriority(counts);
+    var target = chooseTargetType(stateDiscs);
+    var bagScore = calcBagScore(stateDiscs);
+    prio = [target.type].concat(prio.filter(function(x){ return x!==target.type; }));
 
     var groups;
     try { groups = await fetchTop3Grouped(supa); }
@@ -646,6 +751,9 @@
         var verified = await verifyInStockByName(name, url);
         if (!verified) continue;
 
+        var existingSameType = stateDiscs.filter(function(d){ return d.type===t; });
+        var candFlight = parseFlightText(verified.flightText || '');
+        if (isTooSimilar(candFlight, existingSameType)) { continue; }
         used[name.toLowerCase()] = 1;
         picked.push({
           type: t,
@@ -692,6 +800,38 @@
             flightText: it.flightText || '',
             flight: parseFlightText(it.flightText || ''),
             why: recoText(profile, (inferTypeFromUrl(it.url) || t2), parseFlightText(it.flightText || ''))
+          });
+        }
+      }
+    }
+
+    // 3) ALLTID forslag: hvis vi fortsatt ikke har 2, ta en “gøy/spesiell”-kandidat
+    if (picked.length < 2) {
+      var funQs = ['glow','eclipse','x-out','tour series','signature','halo','color glow','utility','roller','overstabil','understabil'];
+      for (var fq=0; fq<funQs.length && picked.length<2; fq++){
+        var res = await shopSearch(funQs[fq]);
+        for (var ii=0; ii<res.length && picked.length<2; ii++){
+          var it2 = res[ii];
+          if (!it2 || it2.stock !== true) continue;
+          var nm2 = safeStr(it2.name).trim();
+          if (!nm2) continue;
+          if (used[nm2.toLowerCase()] || exclude[nm2.toLowerCase()]) continue;
+          if (alreadyInBag(nm2)) continue;
+
+          var t3 = inferTypeFromUrl(it2.url) || target.type;
+          var existingSameType3 = stateDiscs.filter(function(d){ return d.type===t3; });
+          var cf3 = parseFlightText(it2.flightText || '');
+          if (isTooSimilar(cf3, existingSameType3)) continue;
+
+          used[nm2.toLowerCase()] = 1;
+          picked.push({
+            type: t3,
+            name: it2.name,
+            url: it2.url,
+            image: it2.image,
+            flightText: it2.flightText || '',
+            flight: cf3,
+            why: 'Sekken din ser veldig komplett ut – her er en litt “gøy” disk som kan gi nye linjer og mer variasjon.'
           });
         }
       }
@@ -1288,6 +1428,21 @@
     var cardR = el('div', 'minbagg-card');
     cardR.appendChild(el('h2', 'minbagg-title', 'Anbefalt for deg'));
     cardR.appendChild(el('p', 'minbagg-sub', '2 forslag basert på profilen din og hva du mangler i baggen.'));
+
+    var sc = calcBagScore(state.discs);
+    var col = scoreColor(sc);
+    var scoreWrap = el('div', 'minbagg-score');
+    var pill = el('div', 'minbagg-scorepill', 'Bag score: ' + sc + '%');
+    pill.style.background = col.bg;
+    var bar = el('div', 'minbagg-scorebar');
+    var fill = el('div', 'minbagg-scorefill');
+    fill.style.width = clamp(sc,0,100) + '%';
+    fill.style.background = col.fill;
+    bar.appendChild(fill);
+    scoreWrap.appendChild(pill);
+    scoreWrap.appendChild(bar);
+    cardR.appendChild(scoreWrap);
+
 
     var holder = el('div', 'minbagg-muted', 'Laster anbefalinger…');
     cardR.appendChild(holder);
