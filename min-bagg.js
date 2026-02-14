@@ -185,7 +185,7 @@
       .minbagg-reco-card img{width:54px;height:54px;border-radius:12px;object-fit:cover;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06)}
       .minbagg-reco-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
       .minbagg-reco-note{margin:8px 0 0 0;opacity:.9;line-height:1.35}
-      .minbagg-score{display:flex;align-items:center;gap:10px}
+      .minbagg-score{display:flex;align-items:center;gap:10px;margin-top:8px}
       .minbagg-scorebar{flex:1;height:12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.20);overflow:hidden}
       .minbagg-scorefill{height:100%}
       .minbagg-scorepill{font-size:12px;font-weight:900;border-radius:999px;padding:4px 10px;border:1px solid rgba(255,255,255,.14)}
@@ -566,7 +566,7 @@
   // -------------------- Reco engine (C) ------------------------------------
   
   function idealCounts() {
-    // Praktisk standard for en allround “full” sekk (ca 18 disker):
+    // Praktisk standard for en allround “full” sekk (ca 18 disker)
     return { putter: 4, midrange: 4, fairway: 5, distance: 5 };
   }
   function calcBagScore(discs) {
@@ -626,6 +626,7 @@
       var dd = dist4(v, vv);
       if (dd < best) best = dd;
     }
+    // terskel: ~0.9 = veldig likt
     return best < 0.9;
   }
   function chooseTargetType(discs) {
@@ -644,12 +645,10 @@
     var parts = [p.level, p.throwStyle, p.goal, p.course].filter(Boolean);
 
     var miss = '';
-    if (deficit > 0) {
-      miss = 'Du mangler ' + deficit + ' ' + typeLabel(targetType).toLowerCase() + ' for en mer balansert sekk. ';
-    } else {
-      miss = 'Du har allerede godt med ' + typeLabel(targetType).toLowerCase() + ', så her får du en variant som gir mer bredde. ';
-    }
+    if (deficit > 0) miss = 'Du mangler ' + deficit + ' ' + typeLabel(targetType).toLowerCase() + ' for en mer balansert sekk. ';
+    else miss = 'Du har allerede godt med ' + typeLabel(targetType).toLowerCase() + ', så her får du en variant som gir mer bredde. ';
 
+    // Hva mangler du av roller i denne kategorien?
     var hasUnder=false, hasStraight=false, hasOver=false;
     for (var i=0;i<(existingSameType||[]).length;i++){
       var tr = toNum(existingSameType[i].flight && existingSameType[i].flight.turn);
@@ -696,18 +695,6 @@
   }
   function recoText(profile, missingType, candFlight, deficit, existingSameType){
     return suggestWhy(profile, missingType, deficit, candFlight, existingSameType || []);
-  }
-    }
-
-    // Miljø/banetype
-    var course = (p.course || '').toLowerCase();
-    var courseTxt = '';
-    if (course.indexOf('skog') !== -1) courseTxt = 'Passer spesielt godt i skog der kontroll og plassering er viktig.';
-    else if (course.indexOf('åpent') !== -1) courseTxt = 'Passer godt i åpent landskap der du kan la disken jobbe litt mer i lufta.';
-    else if (course.indexOf('blandet') !== -1) courseTxt = 'Et trygt allround-valg for blandede baner.';
-
-    var prof = parts.length ? ('(' + parts.join(' • ') + ') ') : '';
-    return miss + (ft || '') + courseTxt + (prof ? (' ' + prof) : '');
   }
 
   async function pickRecoCandidates(supa, profile, stateDiscs, excludeNames) {
