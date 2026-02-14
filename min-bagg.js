@@ -435,6 +435,8 @@
 
   // -------------------- State ----------------------------------------------
   var state = { bagInfo: null, discs: [], profile: null };
+  // C) Anbefalinger: hold oversikt over hva brukeren har sagt "Nei takk" til i denne økten
+  var recoExclude = [];
 
   function normalizeDiscItem(it) {
     it = it || {};
@@ -571,13 +573,42 @@
     types.sort(function(a,b){ return (counts[a] - counts[b]); });
     return types;
   }
-  function recoText(profile) {
+  function recoText(profile, missingType, candFlight) {
     var p = profile || {};
     var parts = [p.level, p.throwStyle, p.goal, p.course].filter(Boolean);
-    return 'Basert på profilen din (' + parts.join(' • ') + ') og hva du mangler i baggen.';
+
+    // Mangler-tekst
+    var miss = missingType ? ('Du mangler en ' + typeLabel(missingType).toLowerCase() + ', ') : '';
+
+    // Flight-tekst (enkelt, men nyttig)
+    var ft = '';
+    if (candFlight) {
+      var t = toNum(candFlight.turn);
+      var f = toNum(candFlight.fade);
+      if (!isNaN(t) && !isNaN(f)) {
+        if (t <= -2) ft = 'en tydelig understabil disk som kan holde anhyzer/turn, ';
+        else if (t <= -1) ft = 'en litt understabil disk som kan jobbe til høyre før den kommer tilbake, ';
+        else if (t >= 1) ft = 'en mer stabil disk som liker hyzer-linjer, ';
+        else ft = 'en kontrollert disk som ofte går ganske rett, ';
+
+        if (f >= 3) ft += 'med tydelig fade på slutten. ';
+        else if (f >= 2) ft += 'med fin fade på slutten. ';
+        else if (f <= 1) ft += 'med lite fade – fin for rette skogslinjer. ';
+      }
+    }
+
+    // Miljø/banetype
+    var course = (p.course || '').toLowerCase();
+    var courseTxt = '';
+    if (course.indexOf('skog') !== -1) courseTxt = 'Passer spesielt godt i skog der kontroll og plassering er viktig.';
+    else if (course.indexOf('åpent') !== -1) courseTxt = 'Passer godt i åpent landskap der du kan la disken jobbe litt mer i lufta.';
+    else if (course.indexOf('blandet') !== -1) courseTxt = 'Et trygt allround-valg for blandede baner.';
+
+    var prof = parts.length ? ('(' + parts.join(' • ') + ') ') : '';
+    return miss + (ft || '') + courseTxt + (prof ? (' ' + prof) : '');
   }
 
-  async function pickRecoCandidates(supa, profile, stateDiscs) {
+  async function pickRecoCandidates(supa, profile, stateDiscs, excludeNames) {
     var counts = countByType(stateDiscs);
     var prio = missingPriority(counts);
 
@@ -587,6 +618,9 @@
 
     var picked = [];
     var used = {};
+    excludeNames = Array.isArray(excludeNames) ? excludeNames : [];
+    var exclude = {};
+    for (var ei=0; ei<excludeNames.length; ei++){ exclude[String(excludeNames[ei]).toLowerCase()] = 1; }
 
     function alreadyInBag(name) {
       var n = safeStr(name).trim().toLowerCase();
@@ -606,6 +640,7 @@
         var url = safeStr(r.product_url || '').trim();
         if (!name) continue;
         if (used[name.toLowerCase()]) continue;
+        if (exclude[name.toLowerCase()]) continue;
         if (alreadyInBag(name)) continue;
 
         var verified = await verifyInStockByName(name, url);
@@ -619,7 +654,7 @@
           image: verified.image || r.image_url || '',
           flightText: verified.flightText || '',
           flight: parseFlightText(verified.flightText || ''),
-          why: recoText(profile)
+          why: recoText(profile, t, parseFlightText(verified.flightText || ''))
         });
       }
     }
@@ -645,6 +680,7 @@
           var nm = safeStr(it.name).trim();
           if (!nm) continue;
           if (used[nm.toLowerCase()]) continue;
+          if (exclude[nm.toLowerCase()]) continue;
           if (alreadyInBag(nm)) continue;
 
           used[nm.toLowerCase()] = 1;
@@ -655,7 +691,7 @@
             image: it.image,
             flightText: it.flightText || '',
             flight: parseFlightText(it.flightText || ''),
-            why: recoText(profile)
+            why: recoText(profile, (inferTypeFromUrl(it.url) || t2), parseFlightText(it.flightText || ''))
           });
         }
       }
@@ -1265,7 +1301,9 @@
       holder.style.display = '';
 
       try {
-        var recos = await pickRecoCandidates(supa, state.profile, state.discs);
+        // ikke la excl. vokse uendelig
+        if (recoExclude.length > 50) recoExclude = recoExclude.slice(-30);
+        var recos = await pickRecoCandidates(supa, state.profile, state.discs, recoExclude);
         if (!recos.length) {
           holder.textContent = 'Fant ingen sikre anbefalinger på lager akkurat nå.';
           return;
@@ -1300,7 +1338,10 @@
           actions.appendChild(a);
 
           var no = el('button', 'minbagg-btn secondary', 'Nei takk');
-          no.addEventListener('click', function () { refreshReco(); });
+          no.addEventListener('click', function () {
+            if (r && r.name) recoExclude.push(r.name);
+            refreshReco();
+          });
           actions.appendChild(no);
 
           c.appendChild(actions);
