@@ -239,10 +239,19 @@
   // -------------------- Type helpers ---------------------------------------
   function inferTypeFromUrl(url) {
     var u = (url || '').toLowerCase();
-    if (u.indexOf('/discgolf/disc-putter') !== -1) return 'putter';
+
+    // Bruk kategori-stien slik Golfkongen/Quickbutik har den (fasit = produsent/kategori, ikke speed).
+    // Eksempler:
+    //  /discgolf/disc-putter/...
+    //  /discgolf/midrange/...
+    //  /discgolf/fairway-driver/...
+    //  /discgolf/driver/... (distance / drivers)
+    if (u.indexOf('/discgolf/disc-putter') !== -1 || u.indexOf('/discgolf/putter') !== -1) return 'putter';
     if (u.indexOf('/discgolf/midrange') !== -1) return 'midrange';
     if (u.indexOf('/discgolf/fairway-driver') !== -1) return 'fairway';
     if (u.indexOf('/discgolf/driver') !== -1) return 'distance';
+
+    // fallback: noen produkt-url kan mangle kategori; da returner tom streng
     return '';
   }
   function typeLabel(t) {
@@ -462,13 +471,14 @@
       addedAt: it.addedAt || todayISO()
     };
 
-    if (!out.type) {
+        if (!out.type) {
       var inf = inferTypeFromUrl(out.url);
       if (inf) out.type = inf;
     }
 
-    // Viktig: hvis flight finnes, normaliser type etter SPEED (så 9-speed ikke havner i "distance")
-    if (out.flight && out.flight.speed !== undefined && out.flight.speed !== null) {
+    // Siste fallback: hvis type fortsatt mangler (f.eks. manuell disk uten URL),
+    // gjør et forsiktig speed-gjett. (Brukeren kan senere endre type i UI.)
+    if (!out.type && out.flight && out.flight.speed !== undefined && out.flight.speed !== null) {
       var sp = toNum(out.flight.speed);
       if (!isNaN(sp)) {
         if (sp <= 3) out.type = 'putter';
