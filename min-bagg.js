@@ -170,6 +170,7 @@
         background:rgba(255,255,255,.9);color:#111;border:1px solid rgba(0,0,0,.35)}
       .minbagg-chart-footer{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
       .minbagg-pills{display:flex;gap:8px;flex-wrap:wrap}
+      .minbagg-pill.active{border-color:rgba(255,255,255,.55);box-shadow:0 0 0 2px rgba(255,255,255,.08) inset}
       .minbagg-pill{font-size:12px;opacity:.85;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);
         border-radius:999px;padding:4px 8px}
 
@@ -177,7 +178,8 @@
       .minbagg-split{display:grid;grid-template-columns:1fr 1fr;gap:10px}
       @media (max-width:860px){.minbagg-split{grid-template-columns:1fr}}
       .minbagg-kv{display:flex;flex-wrap:wrap;gap:8px}
-      .minbagg-kv .minbagg-pill{opacity:.95}
+      .minbagg-kv .minbagg-pill.active{border-color:rgba(255,255,255,.55);box-shadow:0 0 0 2px rgba(255,255,255,.08) inset}
+      .minbagg-pill{opacity:.95}
       .minbagg-reco-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
       @media (max-width:720px){.minbagg-reco-grid{grid-template-columns:1fr}}
       .minbagg-reco-card{border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.14);border-radius:14px;padding:10px}
@@ -502,6 +504,11 @@
       hand: 'Høyre',
       goal: 'Kontroll',
       course: 'Blandet',
+      // Nye felter (for mer treffsikre anbefalinger)
+      distance: '80–100 m',
+      wind: 'Medium',
+      forehandStrength: 'Middels',
+      struggles: ['Rette linjer i skog'],
       updatedAt: todayISO()
     };
   }
@@ -513,6 +520,10 @@
     if (p.hand) pills.push('Hånd: ' + p.hand);
     if (p.goal) pills.push('Mål: ' + p.goal);
     if (p.course) pills.push('Bane: ' + p.course);
+    if (p.distance) pills.push('Lengde: ' + p.distance);
+    if (p.wind) pills.push('Vind: ' + p.wind);
+    if (p.forehandStrength) pills.push('FH-styrke: ' + p.forehandStrength);
+    if (p.struggles && p.struggles.length) pills.push('Fokus: ' + p.struggles[0] + (p.struggles.length>1 ? ' +' + (p.struggles.length-1) : ''));
     return pills;
   }
 
@@ -536,8 +547,52 @@
       var selLevel = makeSelect('Nivå', ['Nybegynner','Litt øvet','Viderekommen'], p.level);
       var selThrow = makeSelect('Kast', ['Backhand','Forehand','Begge'], p.throwStyle);
       var selHand  = makeSelect('Hånd', ['Høyre','Venstre'], p.hand);
+
       var selGoal  = makeSelect('Mål', ['Lengde','Kontroll','Rett fram','Hyzer','Anhyzer'], p.goal);
+      modal.appendChild(el('p','minbagg-muted','Forklaring: Hyzer = disk-kurven til venstre for høyrekaster (motsatt for venstre). Anhyzer = kurven til høyre for høyrekaster.'));
+
       var selCourse= makeSelect('Banetype', ['Skog','Åpent','Blandet'], p.course);
+
+      var selDist  = makeSelect('Kastelengde (med driver)', ['Under 60 m','60–80 m','80–100 m','100–120 m','120 m+'], p.distance || '80–100 m');
+      var selWind  = makeSelect('Vind der du spiller mest', ['Lite','Medium','Mye'], p.wind || 'Medium');
+      var selFH    = makeSelect('Forehand-styrke', ['Lav','Middels','Høy'], p.forehandStrength || 'Middels');
+
+      modal.appendChild(el('div','minbagg-hr'));
+      modal.appendChild(el('div','minbagg-label','Hva sliter du mest med? (velg 1–2)'));
+
+      var strugglesAll = [
+        'Jeg får mye hyzer uansett',
+        'Jeg får mye anhyzer uansett',
+        'Rette linjer i skog',
+        'Stabilitet i vind',
+        'Mer lengde',
+        'Touch/innspill (approach)',
+        'Trygge forehand-linjer'
+      ];
+
+      var chosen = Array.isArray(p.struggles) ? p.struggles.slice(0) : [];
+      var boxWrap = el('div','minbagg-kv');
+      function toggleStruggle(txt){
+        var i = chosen.indexOf(txt);
+        if (i>=0) chosen.splice(i,1); else chosen.push(txt);
+        // hold 2 maks
+        if (chosen.length > 2) chosen = chosen.slice(chosen.length-2);
+        // re-render pills style
+        Array.from(boxWrap.children).forEach(function(ch){
+          if (!ch || !ch.textContent) return;
+          if (chosen.indexOf(ch.textContent)>=0) ch.classList.add('active');
+          else ch.classList.remove('active');
+        });
+      }
+      strugglesAll.forEach(function(txt){
+        var b = el('button','minbagg-pill', txt);
+        b.type = 'button';
+        if (chosen.indexOf(txt)>=0) b.classList.add('active');
+        b.addEventListener('click', function(e){ e.preventDefault(); toggleStruggle(txt); });
+        boxWrap.appendChild(b);
+      });
+      modal.appendChild(boxWrap);
+
 
       modal.appendChild(el('div', 'minbagg-hr'));
       var row = el('div', 'minbagg-row');
@@ -552,6 +607,10 @@
         p.hand = selHand.value;
         p.goal = selGoal.value;
         p.course = selCourse.value;
+        p.distance = selDist.value;
+        p.wind = selWind.value;
+        p.forehandStrength = selFH.value;
+        p.struggles = chosen.slice(0);
         p.updatedAt = todayISO();
         onSave(p);
         close();
@@ -572,13 +631,24 @@
   function calcBagScore(discs) {
     var ideal = idealCounts();
     var c = countByType(discs);
+    var total = (discs || []).length;
+    var idealTotal = (ideal.putter + ideal.midrange + ideal.fairway + ideal.distance);
 
-    // 0–60: antall pr kategori (nær ideal)
+    // Skaler idealet litt når baggen er liten (ikke straff like hardt for å ikke ha 18 disker)
+    var scale = total > 0 ? clamp(total / idealTotal, 0.45, 1) : 1;
+    var scaled = {
+      putter: Math.max(1, Math.round(ideal.putter * scale)),
+      midrange: Math.max(1, Math.round(ideal.midrange * scale)),
+      fairway: Math.max(1, Math.round(ideal.fairway * scale)),
+      distance: Math.max(1, Math.round(ideal.distance * scale))
+    };
+
+    // 0–60: antall pr kategori (nær skalert ideal)
     var maxDelta = 0;
     ['putter','midrange','fairway','distance'].forEach(function(t){
-      maxDelta += Math.abs((c[t]||0) - (ideal[t]||0));
+      maxDelta += Math.abs((c[t]||0) - (scaled[t]||0));
     });
-    var countScore = clamp(60 - maxDelta*6, 0, 60);
+    var countScore = clamp(60 - maxDelta*7, 0, 60);
 
     // 0–40: coverage (under/straight/over) per type
     var cov = 0;
@@ -598,6 +668,7 @@
       cov += local/3;
     });
     var covScore = clamp(Math.round(cov/4 * 40), 0, 40);
+
     return Math.round(countScore + covScore);
   }
   function scoreColor(score) {
@@ -640,13 +711,18 @@
     });
     return { type: bestType, deficit: bestDef };
   }
-  function suggestWhy(profile, targetType, deficit, candFlight, existingSameType) {
+  function suggestWhy(profile, targetType, deficit, candFlight, existingSameType, bagScore) {
     var p = profile || {};
     var parts = [p.level, p.throwStyle, p.goal, p.course].filter(Boolean);
 
     var miss = '';
-    if (deficit > 0) miss = 'Du mangler ' + deficit + ' ' + typeLabel(targetType).toLowerCase() + ' for en mer balansert sekk. ';
-    else miss = 'Du har allerede godt med ' + typeLabel(targetType).toLowerCase() + ', så her får du en variant som gir mer bredde. ';
+    if (deficit > 0) {
+      miss = 'Du mangler ' + deficit + ' ' + typeLabel(targetType).toLowerCase() + ' for en mer balansert sekk. ';
+    } else {
+      // Hvis score er lav/middels, ikke påstå at sekken er “komplett”
+      if ((bagScore||0) < 70) miss = 'Antallet i ' + typeLabel(targetType).toLowerCase() + ' ser greit ut, men dette forslaget gir deg mer variasjon. ';
+      else miss = 'Du har allerede godt med ' + typeLabel(targetType).toLowerCase() + ', så her får du en variant som gir mer bredde. ';
+    }
 
     // Hva mangler du av roller i denne kategorien?
     var hasUnder=false, hasStraight=false, hasOver=false;
@@ -693,8 +769,9 @@
     types.sort(function(a,b){ return (counts[a] - counts[b]); });
     return types;
   }
-  function recoText(profile, missingType, candFlight, deficit, existingSameType){
-    return suggestWhy(profile, missingType, deficit, candFlight, existingSameType || []);
+  function recoText(profile, missingType, candFlight, deficit, existingSameType, bagScore){
+    // Punkt 1-regler: "komplett"-språk kun ved høy score
+    return suggestWhy(profile, missingType, deficit, candFlight, existingSameType || [], bagScore);
   }
 
   async function pickRecoCandidates(supa, profile, stateDiscs, excludeNames) {
@@ -818,8 +895,25 @@
             image: it2.image,
             flightText: it2.flightText || '',
             flight: cf3,
-            why: 'Sekken din ser veldig komplett ut – her er en litt “gøy” disk som kan gi nye linjer og mer variasjon.'
+            why: ((bagScore>=85)
+              ? 'Sekken din ser veldig komplett ut – her er en litt “gøy” disk som kan gi nye linjer og mer variasjon.'
+              : 'Jeg fant ikke et helt “perfekt” match på lager akkurat nå – her er en litt gøy disk som kan gi nye linjer og mer variasjon.')
           });
+        }
+      }
+      // SISTE FALLBACK: hvis fortsatt tomt, ta bare et generisk in-stock treff
+      if (picked.length < 2) {
+        var resX = await shopSearch('disc');
+        for (var xx=0; xx<resX.length && picked.length<2; xx++) {
+          var itX = resX[xx];
+          if (!itX || itX.stock !== true) continue;
+          var nmX = safeStr(itX.name).trim();
+          if (!nmX) continue;
+          if (used[nmX.toLowerCase()] || exclude[nmX.toLowerCase()]) continue;
+          if (alreadyInBag(nmX)) continue;
+          used[nmX.toLowerCase()] = 1;
+          picked.push({ type: inferTypeFromUrl(itX.url) || target.type, name: itX.name, url: itX.url, image: itX.image, flightText: itX.flightText||'', flight: parseFlightText(itX.flightText||''),
+            why: 'Her er et tilgjengelig forslag på lager nå – bruk “Nei takk” for å få et nytt.' });
         }
       }
     }
