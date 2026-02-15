@@ -466,6 +466,18 @@
       var inf = inferTypeFromUrl(out.url);
       if (inf) out.type = inf;
     }
+
+    // Viktig: hvis flight finnes, normaliser type etter SPEED (så 9-speed ikke havner i "distance")
+    if (out.flight && out.flight.speed !== undefined && out.flight.speed !== null) {
+      var sp = toNum(out.flight.speed);
+      if (!isNaN(sp)) {
+        if (sp <= 3) out.type = 'putter';
+        else if (sp <= 5) out.type = 'midrange';
+        else if (sp <= 9) out.type = 'fairway';
+        else out.type = 'distance';
+      }
+    }
+
     return out;
   }
 
