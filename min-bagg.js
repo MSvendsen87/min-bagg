@@ -1,7 +1,7 @@
 /* ============================================================================
    GOLFKONGEN – MIN BAGG (stable) – FULL FIL (REBUILD)
    Build: 2026-02-14 (A+B locked) + C (Profile + Recommendations)
-   Side: /sider/min-bagg
+   Side: /sider/min-bag
 
    - A: Flight-kart (Turn/Fade)
    - B: UI-finpuss (hele kortet klikkbart, hint-tekst på collapsibles, tydelig dup-flight)
@@ -9,7 +9,7 @@
         (ingen nye tabeller / ingen SQL).
 
    Viktig:
-   - Anbefalinger: Profil + mangler i baggen + fallback Top3 global.
+   - Anbefalinger: Profil + mangler i bagen + fallback Top3 global.
    - Kun "på lager": vi er strenge og bruker kun kandidater der vi kan bekrefte stock === true
      via /shop/search?out=json. Hvis ikke bekreftet -> ikke anbefalt.
 ============================================================================ */
@@ -19,7 +19,7 @@
   // -------------------- Gatekeeper -----------------------------------------
   var p = (location && location.pathname) ? String(location.pathname) : '';
   p = p.replace(/\/+$/g, '');
-  if (p !== '/sider/min-bagg') return;
+  if (p !== '/sider/min-bag') return;
   if (window.__DISABLE_MINBAGG__ === true) return;
 
   window.__MINBAGG_BUILD__ = '2026-02-14-REBUILD-A+B+C';
@@ -35,6 +35,158 @@
     if (txt !== undefined && txt !== null) n.textContent = String(txt);
     return n;
   }
+
+
+  // === Multi-bag + mål/score + tekstsystem ===
+  function ensureBagJsonStructure(row) {
+    var bj = row && row.bag_json;
+    if (!bj || typeof bj !== 'object') bj = {};
+    if (!bj.bags || typeof bj.bags !== 'object') bj.bags = {};
+    if (!row.selected_bag) row.selected_bag = 'default';
+
+    if (!bj.bags['default']) {
+      bj.bags['default'] = {
+        name: 'Min bag',
+        discs: Array.isArray(row.bag) ? row.bag : [],
+        profile: (row && row.profile) ? row.profile : null
+      };
+    }
+    if (!bj.bags[row.selected_bag]) row.selected_bag = 'default';
+
+    Object.keys(bj.bags).forEach(function(id){
+      var b = bj.bags[id];
+      if (!b) return;
+      if (!Array.isArray(b.discs)) b.discs = [];
+      if (!b.name) b.name = 'Bag';
+      if (!b.profile) b.profile = null;
+    });
+    return bj;
+  }
+
+  function makeBagId() { return 'bag_' + Math.random().toString(36).slice(2,10); }
+
+  function getActiveBag() {
+    if (!state.bags || !state.activeBagId) return null;
+    return state.bags[state.activeBagId] || null;
+  }
+  function setActiveBagId(id) {
+    if (!state.bags || !state.bags[id]) return;
+    state.activeBagId = id;
+    var b = getActiveBag();
+    state.discs = (b && Array.isArray(b.discs)) ? b.discs.map(normalizeDiscItem) : [];
+    state.profile = (b && b.profile) ? b.profile : null;
+  }
+
+  function bagTargets(profile, discCount) {
+    var size = (profile && profile.bagSize) ? profile.bagSize : '13-16';
+    var t;
+    if (size === '10-12') t = { putter: 3, midrange: 3, fairway: 3, distance: 2 };
+    else if (size === '17-20') t = { putter: 5, midrange: 5, fairway: 6, distance: 4 };
+    else t = { putter: 4, midrange: 4, fairway: 5, distance: 3 };
+
+    discCount = discCount || 0;
+    if (discCount && discCount < 8) t = { putter: 2, midrange: 2, fairway: 2, distance: 1 };
+    return t;
+  }
+
+  function roleBucket(f) {
+    if (!f) return 'unknown';
+    var tr = toNum(f.turn), fa = toNum(f.fade);
+    if (isNaN(tr) || isNaN(fa)) return 'unknown';
+    if (tr <= -2 || (tr <= -1.5 && fa <= 1)) return 'under';
+    if (fa >= 3 || (tr >= -0.5 && fa >= 2.5)) return 'over';
+    if (tr >= -1 && tr <= 0.5 && fa <= 2) return 'straight';
+    return 'other';
+  }
+
+  function countByType2(discs) {
+    var c = { putter: 0, midrange: 0, fairway: 0, distance: 0 };
+    (discs || []).forEach(function(d){ if (d && c[d.type] !== undefined) c[d.type]++; });
+    return c;
+  }
+
+  function calcBagScore2(discs, profile) {
+    var targets = bagTargets(profile, (discs||[]).length);
+    var c = countByType2(discs);
+
+    var countScore = 0;
+    ['putter','midrange','fairway','distance'].forEach(function(t){
+      var have = c[t]||0;
+      var need = targets[t]||0;
+      if (need <= 0) return;
+      var ratio = have/need;
+      countScore += ratio >= 1 ? 1 : ratio;
+    });
+    countScore = (countScore/4) * 55;
+
+    var roleScore = 0;
+    ['midrange','fairway','distance'].forEach(function(t){
+      var items = (discs||[]).filter(function(d){ return d.type===t && d.flight; });
+      if (!items.length) return;
+      var hasU=false, hasS=false, hasO=false;
+      items.forEach(function(d){
+        var rb = roleBucket(d.flight);
+        if (rb==='under') hasU=true;
+        if (rb==='straight') hasS=true;
+        if (rb==='over') hasO=true;
+      });
+      roleScore += ((hasU?1:0)+(hasS?1:0)+(hasO?1:0))/3;
+    });
+    roleScore = (roleScore/3) * 30;
+
+    var sit = 0;
+    var wind = (profile && profile.wind) ? String(profile.wind).toLowerCase() : '';
+    if (wind.indexOf('medium')!==-1 || wind.indexOf('middels')!==-1 || wind.indexOf('mye')!==-1) {
+      var hasWind = (discs||[]).some(function(d){ return (d.type==='fairway' || d.type==='distance') && roleBucket(d.flight)==='over'; });
+      sit += hasWind ? 1 : 0;
+    } else sit += 1;
+
+    var focus = (profile && profile.focus) ? String(profile.focus).toLowerCase() : '';
+    if (focus.indexOf('hyzer')!==-1) {
+      var hasOS = (discs||[]).some(function(d){ return d.type==='fairway' && roleBucket(d.flight)==='over'; });
+      sit += hasOS ? 1 : 0;
+    } else sit += 1;
+
+    sit = (sit/2) * 15;
+    return Math.round(clamp(countScore + roleScore + sit, 0, 100));
+  }
+
+  function scoreColors(score) {
+    if (score >= 85) return { bg: 'rgba(46,139,87,.22)', fill:'#2e8b57' };
+    if (score >= 70) return { bg: 'rgba(255,193,7,.18)', fill:'#ffc107' };
+    return { bg: 'rgba(255,107,107,.18)', fill:'#ff6b6b' };
+  }
+
+  function typeLabel2(t){
+    if (t==='putter') return 'Putter';
+    if (t==='midrange') return 'Midrange';
+    if (t==='fairway') return 'Fairway';
+    if (t==='distance') return 'Driver';
+    return t;
+  }
+
+  function roleMissingText(discsSameType){
+    var hasU=false, hasS=false, hasO=false;
+    (discsSameType||[]).forEach(function(d){
+      var rb = roleBucket(d.flight);
+      if (rb==='under') hasU=true;
+      if (rb==='straight') hasS=true;
+      if (rb==='over') hasO=true;
+    });
+    if (!hasO) return 'overstabil';
+    if (!hasS) return 'rett';
+    if (!hasU) return 'understabil';
+    return '';
+  }
+
+  function recoSentence(profile, type, have, need, roleMissing) {
+    var base = 'Du har ' + have + ' av ca. ' + need + ' anbefalte ' + typeLabel2(type).toLowerCase() + '. ';
+    if (have < Math.max(1, Math.ceil(need*0.5))) return base + 'Du er tidlig i oppbyggingen her, så dette er et naturlig neste steg.';
+    if (have < need) return base + 'Du mangler fortsatt ' + (need-have) + ' for å fylle opp baggen i denne kategorien.';
+    if (have > need) return base + 'Du har allerede godt med ' + typeLabel2(type).toLowerCase() + ', så her foreslår jeg en variant som gir mer bredde.';
+    return base + (roleMissing ? ('Antallet er på plass, men du mangler en ' + roleMissing + ' variant.') : 'Antallet er på plass – her er et forslag som kan gi deg litt ekstra variasjon.');
+  }
+
   function clear(node) { while (node && node.firstChild) node.removeChild(node.firstChild); }
   function debounce(fn, wait) {
     var t = null;
@@ -76,10 +228,10 @@
 
   // -------------------- Root + styles --------------------------------------
   function ensureRoot() {
-    var root = document.getElementById('min-bagg-root');
+    var root = document.getElementById('min-bag-root');
     if (!root) {
       root = document.createElement('div');
-      root.id = 'min-bagg-root';
+      root.id = 'min-bag-root';
       var area = document.getElementById('page-content-area') || document.body;
       area.appendChild(root);
     }
@@ -87,111 +239,111 @@
   }
 
   function injectStyles() {
-    if (document.getElementById('minbagg-styles')) return;
+    if (document.getElementById('minbag-styles')) return;
     var css = `
-      #min-bagg-root{color:#e8eef6}
-      .minbagg-wrap{max-width:1120px;margin:0 auto;padding:14px}
-      .minbagg-card{background:rgba(20,24,32,.72);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px}
-      .minbagg-title{font-size:22px;margin:0 0 6px 0}
-      .minbagg-sub{opacity:.9;margin:0 0 10px 0;line-height:1.35}
-      .minbagg-muted{opacity:.78}
-      .minbagg-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-      .minbagg-btn{appearance:none;border:0;border-radius:12px;padding:10px 12px;font-weight:900;cursor:pointer;background:#2e8b57;color:#fff}
-      .minbagg-btn.secondary{background:transparent;border:1px solid rgba(255,255,255,.18)}
-      .minbagg-btn.small{padding:7px 10px;border-radius:10px;font-weight:900}
-      .minbagg-hr{height:1px;background:rgba(255,255,255,.12);margin:12px 0}
-      .minbagg-input,.minbagg-select,.minbagg-textarea{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.25);color:#e8eef6}
-      .minbagg-textarea{resize:vertical}
-      .minbagg-label{font-size:12px;opacity:.85;margin:0 0 6px 2px}
-      .minbagg-list{display:flex;flex-direction:column;gap:8px}
+      #min-bag-root{color:#e8eef6}
+      .minbag-wrap{max-width:1120px;margin:0 auto;padding:14px}
+      .minbag-card{background:rgba(20,24,32,.72);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px}
+      .minbag-title{font-size:22px;margin:0 0 6px 0}
+      .minbag-sub{opacity:.9;margin:0 0 10px 0;line-height:1.35}
+      .minbag-muted{opacity:.78}
+      .minbag-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+      .minbag-btn{appearance:none;border:0;border-radius:12px;padding:10px 12px;font-weight:900;cursor:pointer;background:#2e8b57;color:#fff}
+      .minbag-btn.secondary{background:transparent;border:1px solid rgba(255,255,255,.18)}
+      .minbag-btn.small{padding:7px 10px;border-radius:10px;font-weight:900}
+      .minbag-hr{height:1px;background:rgba(255,255,255,.12);margin:12px 0}
+      .minbag-input,.minbag-select,.minbag-textarea{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.25);color:#e8eef6}
+      .minbag-textarea{resize:vertical}
+      .minbag-label{font-size:12px;opacity:.85;margin:0 0 6px 2px}
+      .minbag-list{display:flex;flex-direction:column;gap:8px}
 
       /* B) disk-kort */
-      .minbagg-item{
+      .minbag-item{
         display:flex;gap:9px;align-items:center;
         padding:7px 8px;border-radius:12px;
         border:1px solid rgba(255,255,255,.12);
         background:rgba(0,0,0,.18)
       }
-      .minbagg-item.is-clickable{cursor:pointer}
-      .minbagg-item.is-clickable:hover{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.18)}
-      .minbagg-item.is-clickable:active{transform:translateY(1px)}
-      .minbagg-thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10)}
-      .minbagg-name{font-weight:900}
-      .minbagg-meta{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
-      .minbagg-meta .sub{opacity:.78;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.25}
-      .minbagg-link{color:#cfe9ff;text-decoration:none}
-      .minbagg-link:hover{text-decoration:underline}
-      .minbagg-warn{color:#ff6b6b;opacity:1;font-weight:900}
+      .minbag-item.is-clickable{cursor:pointer}
+      .minbag-item.is-clickable:hover{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.18)}
+      .minbag-item.is-clickable:active{transform:translateY(1px)}
+      .minbag-thumb{width:40px;height:40px;border-radius:10px;object-fit:cover;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10)}
+      .minbag-name{font-weight:900}
+      .minbag-meta{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+      .minbag-meta .sub{opacity:.78;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.25}
+      .minbag-link{color:#cfe9ff;text-decoration:none}
+      .minbag-link:hover{text-decoration:underline}
+      .minbag-warn{color:#ff6b6b;opacity:1;font-weight:900}
 
-      .minbagg-banner{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.06);
+      .minbag-banner{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.06);
         border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:10px 12px}
-      .minbagg-banner b{white-space:nowrap}
+      .minbag-banner b{white-space:nowrap}
 
       /* 4 bokser */
-      .minbagg-boxgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-      @media (max-width:760px){.minbagg-boxgrid{grid-template-columns:1fr}}
-      .minbagg-boxgrid .minbagg-card{padding:10px}
-      .minbagg-boxgrid h3{margin:0 0 8px 0;font-size:16px}
+      .minbag-boxgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      @media (max-width:760px){.minbag-boxgrid{grid-template-columns:1fr}}
+      .minbag-boxgrid .minbag-card{padding:10px}
+      .minbag-boxgrid h3{margin:0 0 8px 0;font-size:16px}
 
       /* Topplister */
-      .minbagg-top3-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-      @media (max-width:560px){.minbagg-top3-grid{grid-template-columns:1fr}}
+      .minbag-top3-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      @media (max-width:560px){.minbag-top3-grid{grid-template-columns:1fr}}
 
       /* Modal */
-      .minbagg-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;
+      .minbag-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;
         align-items:flex-start;justify-content:center;z-index:99999;padding:12px;overflow:auto}
-      .minbagg-modal{margin-top:24px;width:min(880px,100%);max-height:86vh;overflow:auto;
+      .minbag-modal{margin-top:24px;width:min(880px,100%);max-height:86vh;overflow:auto;
         background:rgba(18,22,30,.98);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:12px}
-      .minbagg-modal-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+      .minbag-modal-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
 
       /* Collapsible */
-      .minbagg-collapsible{border:1px solid rgba(255,255,255,.12);border-radius:12px;overflow:hidden}
-      .minbagg-collapsible button{width:100%;text-align:left;padding:10px 12px;background:rgba(255,255,255,.04);
+      .minbag-collapsible{border:1px solid rgba(255,255,255,.12);border-radius:12px;overflow:hidden}
+      .minbag-collapsible button{width:100%;text-align:left;padding:10px 12px;background:rgba(255,255,255,.04);
         border:0;color:#e8eef6;font-weight:900;cursor:pointer}
-      .minbagg-collapsible .body{padding:10px 12px;background:rgba(0,0,0,.12);display:none}
-      .minbagg-collapsible.open .body{display:block}
+      .minbag-collapsible .body{padding:10px 12px;background:rgba(0,0,0,.12);display:none}
+      .minbag-collapsible.open .body{display:block}
 
       /* Flight-kart */
-      .minbagg-chart{position:relative;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.12);
+      .minbag-chart{position:relative;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.12);
         overflow:hidden;height:320px}
-      .minbagg-chart-grid{position:absolute;inset:0;background-image:
+      .minbag-chart-grid{position:absolute;inset:0;background-image:
         linear-gradient(to right, rgba(255,255,255,.08) 1px, transparent 1px),
         linear-gradient(to bottom, rgba(255,255,255,.08) 1px, transparent 1px);
         background-size: 20% 20%;
         opacity:.55}
-      .minbagg-chart-axes{position:absolute;inset:0;pointer-events:none}
-      .minbagg-chart-label{position:absolute;font-size:12px;opacity:.82;background:rgba(18,22,30,.85);
+      .minbag-chart-axes{position:absolute;inset:0;pointer-events:none}
+      .minbag-chart-label{position:absolute;font-size:12px;opacity:.82;background:rgba(18,22,30,.85);
         border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:4px 8px}
-      .minbagg-dot{position:absolute;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:999px;
+      .minbag-dot{position:absolute;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:999px;
         border:2px solid rgba(255,255,255,.85);background:#2e8b57;cursor:pointer;box-shadow:0 0 0 2px rgba(0,0,0,.25)}
-      .minbagg-dot:hover{filter:brightness(1.08)}
-      .minbagg-dot-badge{position:absolute;top:-9px;right:-9px;min-width:18px;height:18px;border-radius:999px;
+      .minbag-dot:hover{filter:brightness(1.08)}
+      .minbag-dot-badge{position:absolute;top:-9px;right:-9px;min-width:18px;height:18px;border-radius:999px;
         display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;
         background:rgba(255,255,255,.9);color:#111;border:1px solid rgba(0,0,0,.35)}
-      .minbagg-chart-footer{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
-      .minbagg-pills{display:flex;gap:8px;flex-wrap:wrap}
-      .minbagg-pill{font-size:12px;opacity:.85;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);
+      .minbag-chart-footer{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+      .minbag-pills{display:flex;gap:8px;flex-wrap:wrap}
+      .minbag-pill{font-size:12px;opacity:.85;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);
         border-radius:999px;padding:4px 8px}
 
       /* C) Profil + anbefalinger */
-      .minbagg-split{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-      @media (max-width:860px){.minbagg-split{grid-template-columns:1fr}}
-      .minbagg-kv{display:flex;flex-wrap:wrap;gap:8px}
-      .minbagg-kv .minbagg-pill{opacity:.95}
-      .minbagg-reco-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-      @media (max-width:720px){.minbagg-reco-grid{grid-template-columns:1fr}}
-      .minbagg-reco-card{border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.14);border-radius:14px;padding:10px}
-      .minbagg-reco-head{display:flex;gap:10px;align-items:center}
-      .minbagg-reco-card img{width:54px;height:54px;border-radius:12px;object-fit:cover;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06)}
-      .minbagg-reco-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-      .minbagg-reco-note{margin:8px 0 0 0;opacity:.9;line-height:1.35}
-      .minbagg-score{display:flex;align-items:center;gap:10px;margin-top:8px}
-      .minbagg-scorebar{flex:1;height:12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.20);overflow:hidden}
-      .minbagg-scorefill{height:100%}
-      .minbagg-scorepill{font-size:12px;font-weight:900;border-radius:999px;padding:4px 10px;border:1px solid rgba(255,255,255,.14)}
+      .minbag-split{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      @media (max-width:860px){.minbag-split{grid-template-columns:1fr}}
+      .minbag-kv{display:flex;flex-wrap:wrap;gap:8px}
+      .minbag-kv .minbag-pill{opacity:.95}
+      .minbag-reco-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      @media (max-width:720px){.minbag-reco-grid{grid-template-columns:1fr}}
+      .minbag-reco-card{border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.14);border-radius:14px;padding:10px}
+      .minbag-reco-head{display:flex;gap:10px;align-items:center}
+      .minbag-reco-card img{width:54px;height:54px;border-radius:12px;object-fit:cover;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06)}
+      .minbag-reco-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+      .minbag-reco-note{margin:8px 0 0 0;opacity:.9;line-height:1.35}
+      .minbag-score{display:flex;align-items:center;gap:10px;margin-top:8px}
+      .minbag-scorebar{flex:1;height:12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.20);overflow:hidden}
+      .minbag-scorefill{height:100%}
+      .minbag-scorepill{font-size:12px;font-weight:900;border-radius:999px;padding:4px 10px;border:1px solid rgba(255,255,255,.14)}
     `;
     var st = document.createElement('style');
-    st.id = 'minbagg-styles';
+    st.id = 'minbag-styles';
     st.textContent = css;
     document.head.appendChild(st);
   }
@@ -220,7 +372,7 @@
       await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js');
     }
     window.__MINBAGG_SUPA__ = window.supabase.createClient(cfg.url, cfg.anon, {
-      auth: { persistSession: true, storageKey: 'gk_minbagg_auth_v1' }
+      auth: { persistSession: true, storageKey: 'gk_minbag_auth_v1' }
     });
     return window.__MINBAGG_SUPA__;
   }
@@ -351,7 +503,11 @@
     try { return JSON.parse(t); } catch (_) { return null; }
   }
 
-  async function shopSearch(q) {
+  function openAddFromCategory(forcedType, urlPrefix){
+    openSearchModal(function(q){ return shopSearch(q, urlPrefix, forcedType); }, forcedType);
+  }
+
+  async function shopSearch(q, urlPrefix, forcedType) {
     var j = await rawShopSearch(q);
     if (!j) return [];
     var arr = (j && j.searchresults) ? j.searchresults : [];
@@ -447,7 +603,7 @@
   }
 
   // -------------------- State ----------------------------------------------
-  var state = { bagInfo: null, discs: [], profile: null };
+  var state = { bagInfo: null, discs: [], profile: null, bags: null, activeBagId: null };
   // Debug: eksponer state i console (trygt)
   window.__MINBAGG_STATE__ = state;
   // C) Anbefalinger: hold oversikt over hva brukeren har sagt "Nei takk" til i denne økten
@@ -493,18 +649,18 @@
 
   // -------------------- Modal helpers --------------------------------------
   function openModal(title, buildFn) {
-    var bd = el('div', 'minbagg-modal-backdrop');
-    var modal = el('div', 'minbagg-modal');
+    var bd = el('div', 'minbag-modal-backdrop');
+    var modal = el('div', 'minbag-modal');
 
-    var head = el('div', 'minbagg-modal-head');
-    head.appendChild(el('div', 'minbagg-title', title));
+    var head = el('div', 'minbag-modal-head');
+    head.appendChild(el('div', 'minbag-title', title));
 
-    var closeBtn = el('button', 'minbagg-btn secondary', 'Lukk');
+    var closeBtn = el('button', 'minbag-btn secondary', 'Lukk');
     closeBtn.addEventListener('click', function () { try { document.body.removeChild(bd); } catch (_) {} });
     head.appendChild(closeBtn);
 
     modal.appendChild(head);
-    modal.appendChild(el('div', 'minbagg-hr'));
+    modal.appendChild(el('div', 'minbag-hr'));
 
     buildFn(modal, function close() {
       try { document.body.removeChild(bd); } catch (_) {}
@@ -545,8 +701,8 @@
       var p = current ? JSON.parse(JSON.stringify(current)) : defaultProfile();
 
       function makeSelect(label, values, currentValue) {
-        modal.appendChild(el('div', 'minbagg-label', label));
-        var s = el('select', 'minbagg-select');
+        modal.appendChild(el('div', 'minbag-label', label));
+        var s = el('select', 'minbag-select');
         values.forEach(function (v) {
           var o = document.createElement('option');
           o.value = v; o.textContent = v;
@@ -563,11 +719,11 @@
       var selGoal  = makeSelect('Mål', ['Lengde','Kontroll','Rett fram','Hyzer','Anhyzer'], p.goal);
       var selCourse= makeSelect('Banetype', ['Skog','Åpent','Blandet'], p.course);
 
-      modal.appendChild(el('div', 'minbagg-hr'));
-      var row = el('div', 'minbagg-row');
+      modal.appendChild(el('div', 'minbag-hr'));
+      var row = el('div', 'minbag-row');
 
-      var save = el('button', 'minbagg-btn', 'Lagre profil');
-      var cancel = el('button', 'minbagg-btn secondary', 'Avbryt');
+      var save = el('button', 'minbag-btn', 'Lagre profil');
+      var cancel = el('button', 'minbag-btn secondary', 'Avbryt');
       cancel.addEventListener('click', close);
 
       save.addEventListener('click', function () {
@@ -854,85 +1010,85 @@
   // -------------------- Render base ----------------------------------------
   function renderBase(root) {
     clear(root);
-    var wrap = el('div', 'minbagg-wrap');
+    var wrap = el('div', 'minbag-wrap');
     root.appendChild(wrap);
 
-    var banner = el('div', 'minbagg-banner');
+    var banner = el('div', 'minbag-banner');
     banner.appendChild(el('b', '', '🚧 Under konstruksjon'));
-    banner.appendChild(el('div', 'minbagg-muted',
+    banner.appendChild(el('div', 'minbag-muted',
       'Denne siden er under utvikling og kan endre seg fra dag til dag. Takk for tålmodigheten – full versjon kommer snart.'));
     wrap.appendChild(banner);
 
-    wrap.appendChild(el('div', 'minbagg-hr'));
+    wrap.appendChild(el('div', 'minbag-hr'));
     return wrap;
   }
 
   function renderGuest(wrap) {
-    var card = el('div', 'minbagg-card');
-    card.appendChild(el('h2', 'minbagg-title', 'Min Bagg'));
-    card.appendChild(el('p', 'minbagg-sub',
-      'Du må være innlogget i nettbutikken for å lagre og bygge baggen din. Du kan likevel se Topp 3 globalt uten innlogging.'));
+    var card = el('div', 'minbag-card');
+    card.appendChild(el('h2', 'minbag-title', 'Min bag'));
+    card.appendChild(el('p', 'minbag-sub',
+      'Du må være innlogget i nettbutikken for å lagre og bygge bagen din. Du kan likevel se Topp 3 globalt uten innlogging.'));
 
-    var row = el('div', 'minbagg-row');
-    var a1 = el('a', 'minbagg-btn', 'Logg inn');
+    var row = el('div', 'minbag-row');
+    var a1 = el('a', 'minbag-btn', 'Logg inn');
     a1.href = '/customer/login'; a1.style.textDecoration = 'none';
-    var a2 = el('a', 'minbagg-btn secondary', 'Opprett konto');
+    var a2 = el('a', 'minbag-btn secondary', 'Opprett konto');
     a2.href = '/customer/register'; a2.style.textDecoration = 'none';
     row.appendChild(a1); row.appendChild(a2);
 
     card.appendChild(row);
     wrap.appendChild(card);
-    wrap.appendChild(el('div', 'minbagg-hr'));
+    wrap.appendChild(el('div', 'minbag-hr'));
   }
 
   function renderHeaderLoggedIn(wrap, marker, onAddBag, onAddDisc) {
-    var card = el('div', 'minbagg-card');
-    card.appendChild(el('h2', 'minbagg-title', (marker.firstname ? (marker.firstname + ' SIN BAGG') : 'Min Bagg')));
-    card.appendChild(el('p', 'minbagg-sub', (marker.firstname ? ('Hei ' + marker.firstname + ' 👋 ') : '') + 'Baggen din lagres på kontoen din.'));
+    var card = el('div', 'minbag-card');
+    card.appendChild(el('h2', 'minbag-title', (marker.firstname ? (marker.firstname + ' SIN BAGG') : 'Min bag')));
+    card.appendChild(el('p', 'minbag-sub', (marker.firstname ? ('Hei ' + marker.firstname + ' 👋 ') : '') + 'Bagen din lagres på kontoen din.'));
 
     if (state.bagInfo && (state.bagInfo.name || state.bagInfo.image)) {
-      var row = el('div', 'minbagg-item');
+      var row = el('div', 'minbag-item');
       if (state.bagInfo.image) {
-        var im = el('img', 'minbagg-thumb');
+        var im = el('img', 'minbag-thumb');
         im.src = state.bagInfo.image;
         im.alt = '';
         im.loading = 'lazy';
         row.appendChild(im);
       }
-      var meta = el('div', 'minbagg-meta');
-      meta.appendChild(el('div', 'minbagg-name', state.bagInfo.name || 'Bag'));
+      var meta = el('div', 'minbag-meta');
+      meta.appendChild(el('div', 'minbag-name', state.bagInfo.name || 'Bag'));
       row.appendChild(meta);
       card.appendChild(row);
     }
 
-    var btnRow = el('div', 'minbagg-row');
-    var bBag = el('button', 'minbagg-btn secondary', 'Legg til bagg');
+    var btnRow = el('div', 'minbag-row');
+    var bBag = el('button', 'minbag-btn secondary', 'Legg til bag');
     bBag.addEventListener('click', onAddBag);
-    var bDisc = el('button', 'minbagg-btn', 'Legg til disk');
+    var bDisc = el('button', 'minbag-btn', 'Legg til disk');
     bDisc.addEventListener('click', onAddDisc);
     btnRow.appendChild(bBag);
     btnRow.appendChild(bDisc);
     card.appendChild(btnRow);
 
     wrap.appendChild(card);
-    wrap.appendChild(el('div', 'minbagg-hr'));
+    wrap.appendChild(el('div', 'minbag-hr'));
   }
 
   // B) Klikkbart kort (uten Endre-knapp)
   function renderFourBoxes(wrap, onEdit) {
-    var grid = el('div', 'minbagg-boxgrid');
+    var grid = el('div', 'minbag-boxgrid');
 
     ['putter','midrange','fairway','distance'].forEach(function (t) {
-      var box = el('div', 'minbagg-card');
+      var box = el('div', 'minbag-card');
       box.appendChild(el('h3', '', typeLabel(t)));
 
       var items = state.discs.filter(function (d) { return d.type === t; });
       if (!items.length) {
-        box.appendChild(el('div', 'minbagg-muted', 'Tomt ennå – legg til en disk.'));
+        box.appendChild(el('div', 'minbag-muted', 'Tomt ennå – legg til en disk.'));
       } else {
-        var list = el('div', 'minbagg-list');
+        var list = el('div', 'minbag-list');
         items.forEach(function (it) {
-          var row = el('div', 'minbagg-item is-clickable');
+          var row = el('div', 'minbag-item is-clickable');
           row.setAttribute('role', 'button');
           row.setAttribute('tabindex', '0');
           row.setAttribute('aria-label', 'Endre ' + (it.name || 'disk'));
@@ -942,15 +1098,15 @@
             row.style.boxShadow = '0 0 0 2px ' + it.color + ' inset';
           }
 
-          var img = el('img', 'minbagg-thumb');
+          var img = el('img', 'minbag-thumb');
           img.alt = '';
           img.loading = 'lazy';
           img.src = it.image || '';
           if (!img.src) img.style.display = 'none';
           row.appendChild(img);
 
-          var meta = el('div', 'minbagg-meta');
-          meta.appendChild(el('div', 'minbagg-name', it.name || ''));
+          var meta = el('div', 'minbag-meta');
+          meta.appendChild(el('div', 'minbag-name', it.name || ''));
           meta.appendChild(el('div', 'sub', it.flight ? formatFlightLabel(it.flight) : 'Flight mangler'));
           if (it.note) meta.appendChild(el('div', 'sub', '📝 ' + it.note));
           else meta.appendChild(el('div', 'sub', '📝 Legg til kommentar…'));
@@ -972,12 +1128,12 @@
     });
 
     wrap.appendChild(grid);
-    wrap.appendChild(el('div', 'minbagg-hr'));
+    wrap.appendChild(el('div', 'minbag-hr'));
   }
 
   // -------------------- Flight list (B: dup highlight) ----------------------
   function renderFlightList(wrap) {
-    var wrapC = el('div', 'minbagg-collapsible');
+    var wrapC = el('div', 'minbag-collapsible');
     var btn = el('button', '', 'Flight lista (trykk for å åpne/lukke)');
     var body = el('div', 'body');
     wrapC.appendChild(btn);
@@ -994,7 +1150,7 @@
     });
 
     if (!list.length) {
-      body.appendChild(el('div', 'minbagg-muted', 'Ingen disker i baggen ennå.'));
+      body.appendChild(el('div', 'minbag-muted', 'Ingen disker i bagen ennå.'));
     } else {
       var dup = {};
       list.forEach(function (d) {
@@ -1003,17 +1159,17 @@
         dup[key] = (dup[key] || 0) + 1;
       });
 
-      var ul = el('div', 'minbagg-list');
+      var ul = el('div', 'minbag-list');
       list.forEach(function (d) {
-        var row = el('div', 'minbagg-item');
-        var meta = el('div', 'minbagg-meta');
-        meta.appendChild(el('div', 'minbagg-name', d.name || ''));
+        var row = el('div', 'minbag-item');
+        var meta = el('div', 'minbag-meta');
+        meta.appendChild(el('div', 'minbag-name', d.name || ''));
         meta.appendChild(el('div', 'sub', d.flight ? formatFlightLabel(d.flight) : 'Flight mangler'));
 
         var f = d.flight || {};
         var key = [safeStr(f.speed), safeStr(f.glide), safeStr(f.turn), safeStr(f.fade)].join('|');
         if (d.flight && dup[key] >= 2) {
-          meta.appendChild(el('div', 'sub minbagg-warn', '⚠ ' + dup[key] + ' disker har helt lik flight.'));
+          meta.appendChild(el('div', 'sub minbag-warn', '⚠ ' + dup[key] + ' disker har helt lik flight.'));
         }
 
         row.appendChild(meta);
@@ -1023,12 +1179,12 @@
     }
 
     wrap.appendChild(wrapC);
-    wrap.appendChild(el('div', 'minbagg-hr'));
+    wrap.appendChild(el('div', 'minbag-hr'));
   }
 
   // -------------------- Flight chart (A) -----------------------------------
   function renderFlightChart(wrap) {
-    var wrapC = el('div', 'minbagg-collapsible');
+    var wrapC = el('div', 'minbag-collapsible');
     var btn = el('button', '', 'Flight-kart (Turn / Fade) (trykk for å åpne/lukke)');
     var body = el('div', 'body');
     wrapC.appendChild(btn);
@@ -1047,9 +1203,9 @@
     }
 
     if (!withFlight.length) {
-      body.appendChild(el('div', 'minbagg-muted', 'Ingen disker med Turn/Fade ennå – legg til flight, så dukker kartet opp.'));
+      body.appendChild(el('div', 'minbag-muted', 'Ingen disker med Turn/Fade ennå – legg til flight, så dukker kartet opp.'));
       wrap.appendChild(wrapC);
-      wrap.appendChild(el('div', 'minbagg-hr'));
+      wrap.appendChild(el('div', 'minbag-hr'));
       return;
     }
 
@@ -1070,13 +1226,13 @@
     var tr = padRange(minT, maxT);
     var fr = padRange(minF, maxF);
 
-    var chart = el('div', 'minbagg-chart');
-    chart.appendChild(el('div', 'minbagg-chart-grid'));
+    var chart = el('div', 'minbag-chart');
+    chart.appendChild(el('div', 'minbag-chart-grid'));
 
-    var axes = el('div', 'minbagg-chart-axes');
-    var labTL = el('div', 'minbagg-chart-label', 'Turn: ' + minT + ' → ' + maxT);
+    var axes = el('div', 'minbag-chart-axes');
+    var labTL = el('div', 'minbag-chart-label', 'Turn: ' + minT + ' → ' + maxT);
     labTL.style.left = '10px'; labTL.style.top = '10px';
-    var labBR = el('div', 'minbagg-chart-label', 'Fade: ' + minF + ' → ' + maxF);
+    var labBR = el('div', 'minbag-chart-label', 'Fade: ' + minF + ' → ' + maxF);
     labBR.style.right = '10px'; labBR.style.bottom = '10px';
     axes.appendChild(labTL); axes.appendChild(labBR);
     chart.appendChild(axes);
@@ -1091,17 +1247,17 @@
 
     function openClusterModal(items, turn, fade) {
       openModal('Disker på punktet (Turn ' + turn + ', Fade ' + fade + ')', function (modal) {
-        var list = el('div', 'minbagg-list');
+        var list = el('div', 'minbag-list');
         items.forEach(function (d) {
-          var row = el('div', 'minbagg-item');
-          var img = el('img', 'minbagg-thumb');
+          var row = el('div', 'minbag-item');
+          var img = el('img', 'minbag-thumb');
           img.alt = ''; img.loading = 'lazy';
           img.src = d.image || '';
           if (!img.src) img.style.display = 'none';
           row.appendChild(img);
 
-          var meta = el('div', 'minbagg-meta');
-          meta.appendChild(el('div', 'minbagg-name', d.name || ''));
+          var meta = el('div', 'minbag-meta');
+          meta.appendChild(el('div', 'minbag-name', d.name || ''));
           meta.appendChild(el('div', 'sub', d.flight ? formatFlightLabel(d.flight) : 'Flight mangler'));
           row.appendChild(meta);
 
@@ -1119,75 +1275,75 @@
       var xPct = 6 + clamp(tx, 0, 1) * 88;
       var yPct = 94 - clamp(fy, 0, 1) * 88;
 
-      var dot = el('div', 'minbagg-dot');
+      var dot = el('div', 'minbag-dot');
       dot.style.left = xPct + '%';
       dot.style.top = yPct + '%';
 
       var d0 = c.items && c.items[0] ? c.items[0] : null;
       if (d0 && d0.color) dot.style.background = d0.color;
 
-      if (c.items.length >= 2) dot.appendChild(el('div', 'minbagg-dot-badge', String(c.items.length)));
+      if (c.items.length >= 2) dot.appendChild(el('div', 'minbag-dot-badge', String(c.items.length)));
       dot.addEventListener('click', function () { openClusterModal(c.items, c.turn, c.fade); });
       chart.appendChild(dot);
     });
 
     body.appendChild(chart);
 
-    body.appendChild(el('div', 'minbagg-hr'));
-    var footer = el('div', 'minbagg-chart-footer');
-    var pills = el('div', 'minbagg-pills');
-    pills.appendChild(el('div', 'minbagg-pill', 'Punkter: ' + Object.keys(clusters).length));
-    pills.appendChild(el('div', 'minbagg-pill', 'Disker med flight: ' + withFlight.length));
+    body.appendChild(el('div', 'minbag-hr'));
+    var footer = el('div', 'minbag-chart-footer');
+    var pills = el('div', 'minbag-pills');
+    pills.appendChild(el('div', 'minbag-pill', 'Punkter: ' + Object.keys(clusters).length));
+    pills.appendChild(el('div', 'minbag-pill', 'Disker med flight: ' + withFlight.length));
     footer.appendChild(pills);
-    footer.appendChild(el('div', 'minbagg-muted', 'Tips: Trykk på en prikk for å se diskene som ligger der.'));
+    footer.appendChild(el('div', 'minbag-muted', 'Tips: Trykk på en prikk for å se diskene som ligger der.'));
     body.appendChild(footer);
 
     if (withoutFlight.length) {
-      body.appendChild(el('div', 'minbagg-hr'));
-      body.appendChild(el('div', 'minbagg-muted', 'Uten flight: ' + withoutFlight.length));
+      body.appendChild(el('div', 'minbag-hr'));
+      body.appendChild(el('div', 'minbag-muted', 'Uten flight: ' + withoutFlight.length));
     }
 
     wrap.appendChild(wrapC);
-    wrap.appendChild(el('div', 'minbagg-hr'));
+    wrap.appendChild(el('div', 'minbag-hr'));
   }
 
   // -------------------- Top3 section ---------------------------------------
   function renderTop3Section(wrap, groups) {
-    var old = document.getElementById('minbagg-top3-section');
+    var old = document.getElementById('minbag-top3-section');
     if (old && old.parentNode) old.parentNode.removeChild(old);
 
-    var card = el('div', 'minbagg-card');
-    card.id = 'minbagg-top3-section';
-    card.appendChild(el('h2', 'minbagg-title', 'Topp 3 globalt'));
-    card.appendChild(el('p', 'minbagg-sub', 'Basert på hva folk legger i baggen sin.'));
+    var card = el('div', 'minbag-card');
+    card.id = 'minbag-top3-section';
+    card.appendChild(el('h2', 'minbag-title', 'Topp 3 globalt'));
+    card.appendChild(el('p', 'minbag-sub', 'Basert på hva folk legger i bagen sin.'));
 
-    var grid = el('div', 'minbagg-top3-grid');
+    var grid = el('div', 'minbag-top3-grid');
     ['putter','midrange','fairway','distance'].forEach(function (t) {
-      var c = el('div', 'minbagg-card');
+      var c = el('div', 'minbag-card');
       c.style.padding = '12px';
-      c.appendChild(el('div', 'minbagg-name', typeLabel(t)));
+      c.appendChild(el('div', 'minbag-name', typeLabel(t)));
 
-      var list = el('div', 'minbagg-list');
+      var list = el('div', 'minbag-list');
       var rows = groups && groups[t] ? groups[t] : [];
       if (!rows.length) {
-        list.appendChild(el('div', 'minbagg-muted', 'Ingen data ennå.'));
+        list.appendChild(el('div', 'minbag-muted', 'Ingen data ennå.'));
       } else {
         rows.forEach(function (r) {
-          var row = el('div', 'minbagg-item');
-          var img = el('img', 'minbagg-thumb');
+          var row = el('div', 'minbag-item');
+          var img = el('img', 'minbag-thumb');
           img.alt = '';
           img.loading = 'lazy';
           img.src = r.image_url || '';
           if (!img.src) img.style.display = 'none';
           row.appendChild(img);
 
-          var meta = el('div', 'minbagg-meta');
+          var meta = el('div', 'minbag-meta');
           if (r.product_url) {
-            var a = el('a', 'minbagg-name minbagg-link', r.name || '');
+            var a = el('a', 'minbag-name minbag-link', r.name || '');
             a.href = r.product_url;
             meta.appendChild(a);
           } else {
-            meta.appendChild(el('div', 'minbagg-name', r.name || ''));
+            meta.appendChild(el('div', 'minbag-name', r.name || ''));
           }
           meta.appendChild(el('div', 'sub', 'Valgt ' + (r.picks || 0) + ' ganger'));
           row.appendChild(meta);
@@ -1205,20 +1361,20 @@
 
   // -------------------- Connect view ---------------------------------------
   function renderConnectView(wrap, marker, supa) {
-    var card = el('div', 'minbagg-card');
-    card.appendChild(el('h2', 'minbagg-title', 'Koble Min Bagg'));
-    card.appendChild(el('p', 'minbagg-sub', 'For å lagre baggen din må du koble kontoen én gang via magic link.'));
+    var card = el('div', 'minbag-card');
+    card.appendChild(el('h2', 'minbag-title', 'Koble Min bag'));
+    card.appendChild(el('p', 'minbag-sub', 'For å lagre bagen din må du koble kontoen én gang via magic link.'));
 
     var email = marker.email || '';
-    card.appendChild(el('div', 'minbagg-label', 'E-post'));
-    var inp = el('input', 'minbagg-input');
+    card.appendChild(el('div', 'minbag-label', 'E-post'));
+    var inp = el('input', 'minbag-input');
     inp.type = 'email';
     inp.placeholder = 'din@epost.no';
     inp.value = email;
     card.appendChild(inp);
 
-    var btn = el('button', 'minbagg-btn', 'Send magic link');
-    var msg = el('div', 'minbagg-muted', '');
+    var btn = el('button', 'minbag-btn', 'Send magic link');
+    var msg = el('div', 'minbag-muted', '');
 
     btn.addEventListener('click', async function () {
       msg.textContent = 'Sender…';
@@ -1227,7 +1383,7 @@
         if (!e) throw new Error('Skriv inn e-post.');
         var r = await supa.auth.signInWithOtp({
           email: e,
-          options: { emailRedirectTo: location.origin + '/sider/min-bagg' }
+          options: { emailRedirectTo: location.origin + '/sider/min-bag' }
         });
         if (r && r.error) throw r.error;
         msg.textContent = 'Sjekk e-posten din – trykk på linken for å fullføre innloggingen.';
@@ -1247,40 +1403,40 @@
   // -------------------- Add/Edit discs -------------------------------------
   function openEditDiscModal(item, onSave, onDelete) {
     openModal('Endre disk', function (modal, close) {
-      var preview = el('div', 'minbagg-item');
+      var preview = el('div', 'minbag-item');
 
-      var img = el('img', 'minbagg-thumb');
+      var img = el('img', 'minbag-thumb');
       img.alt = ''; img.loading = 'lazy';
       img.src = item.image || '';
       if (!img.src) img.style.display = 'none';
       preview.appendChild(img);
 
-      var meta = el('div', 'minbagg-meta');
-      meta.appendChild(el('div', 'minbagg-name', item.name || ''));
+      var meta = el('div', 'minbag-meta');
+      meta.appendChild(el('div', 'minbag-name', item.name || ''));
       meta.appendChild(el('div', 'sub', typeLabel(item.type)));
       meta.appendChild(el('div', 'sub', item.flight ? formatFlightLabel(item.flight) : 'Flight mangler'));
       preview.appendChild(meta);
 
       modal.appendChild(preview);
-      modal.appendChild(el('div', 'minbagg-hr'));
+      modal.appendChild(el('div', 'minbag-hr'));
 
-      modal.appendChild(el('div', 'minbagg-label', 'Kommentar'));
-      var com = el('textarea', 'minbagg-textarea');
+      modal.appendChild(el('div', 'minbag-label', 'Kommentar'));
+      var com = el('textarea', 'minbag-textarea');
       com.rows = 3;
       com.value = item.note || '';
       modal.appendChild(com);
 
-      var row = el('div', 'minbagg-row');
+      var row = el('div', 'minbag-row');
       row.style.marginTop = '10px';
 
-      var save = el('button', 'minbagg-btn', 'Lagre');
+      var save = el('button', 'minbag-btn', 'Lagre');
       save.addEventListener('click', function () {
         item.note = safeStr(com.value).trim();
         onSave(item);
         close();
       });
 
-      var del = el('button', 'minbagg-btn secondary', 'Fjern');
+      var del = el('button', 'minbag-btn secondary', 'Fjern');
       del.addEventListener('click', function () {
         if (!confirm('Fjerne denne disken?')) return;
         onDelete(item);
@@ -1295,13 +1451,13 @@
 
   function openAddDiscModal(onAdd) {
     openModal('Legg til disk', function (modal, close) {
-      modal.appendChild(el('div', 'minbagg-label', 'Søk i nettbutikken'));
-      var q = el('input', 'minbagg-input');
+      modal.appendChild(el('div', 'minbag-label', 'Søk i nettbutikken'));
+      var q = el('input', 'minbag-input');
       q.placeholder = 'Søk i nettbutikken (f.eks. buzzz, luna, md3)…';
       modal.appendChild(q);
 
-      modal.appendChild(el('div', 'minbagg-label', 'Kategori'));
-      var selType = el('select', 'minbagg-select');
+      modal.appendChild(el('div', 'minbag-label', 'Kategori'));
+      var selType = el('select', 'minbag-select');
       ['','putter','midrange','fairway','distance'].forEach(function (v) {
         var opt = document.createElement('option');
         opt.value = v;
@@ -1310,7 +1466,7 @@
       });
       modal.appendChild(selType);
 
-      var list = el('div', 'minbagg-list');
+      var list = el('div', 'minbag-list');
       list.style.marginTop = '10px';
       modal.appendChild(list);
 
@@ -1320,22 +1476,22 @@
         clear(list);
         v = safeStr(v).trim();
         if (!v) return;
-        list.appendChild(el('div', 'minbagg-muted', 'Laster…'));
+        list.appendChild(el('div', 'minbag-muted', 'Laster…'));
         var rows = await shopSearch(v);
         clear(list);
-        if (!rows.length) { list.appendChild(el('div', 'minbagg-muted', 'Ingen treff.')); return; }
+        if (!rows.length) { list.appendChild(el('div', 'minbag-muted', 'Ingen treff.')); return; }
 
         rows.forEach(function (p3) {
-          var row = el('div', 'minbagg-item is-clickable');
+          var row = el('div', 'minbag-item is-clickable');
 
-          var img = el('img', 'minbagg-thumb');
+          var img = el('img', 'minbag-thumb');
           img.alt = ''; img.loading = 'lazy';
           img.src = p3.image || '';
           if (!img.src) img.style.display = 'none';
           row.appendChild(img);
 
-          var meta = el('div', 'minbagg-meta');
-          meta.appendChild(el('div', 'minbagg-name', p3.name || ''));
+          var meta = el('div', 'minbag-meta');
+          meta.appendChild(el('div', 'minbag-name', p3.name || ''));
           var fl = parseFlightText(p3.flightText);
           meta.appendChild(el('div', 'sub', fl ? formatFlightLabel(fl) : 'Flight mangler'));
           meta.appendChild(el('div', 'sub', 'Lager: ' + (p3.stock === true ? 'På lager' : p3.stock === false ? 'Ikke på lager' : 'Ukjent')));
@@ -1355,13 +1511,13 @@
 
       q.addEventListener('input', debounce(function () { runSearch(q.value); }, 250));
 
-      modal.appendChild(el('div', 'minbagg-label', 'Kommentar (valgfritt)'));
-      var com = el('textarea', 'minbagg-textarea');
+      modal.appendChild(el('div', 'minbag-label', 'Kommentar (valgfritt)'));
+      var com = el('textarea', 'minbag-textarea');
       com.rows = 3;
       com.placeholder = 'Skriv en kort kommentar…';
       modal.appendChild(com);
 
-      var addBtn = el('button', 'minbagg-btn', 'Legg til');
+      var addBtn = el('button', 'minbag-btn', 'Legg til');
       addBtn.style.marginTop = '10px';
       addBtn.addEventListener('click', function () {
         if (!selected) return;
@@ -1387,16 +1543,16 @@
   }
 
   function openAddBagModal(onSave) {
-    openModal('Legg til bagg', function (modal, close) {
-      modal.appendChild(el('div', 'minbagg-label', 'Navn'));
-      var nInp = el('input', 'minbagg-input'); nInp.placeholder = 'Navn på baggen';
+    openModal('Legg til bag', function (modal, close) {
+      modal.appendChild(el('div', 'minbag-label', 'Navn'));
+      var nInp = el('input', 'minbag-input'); nInp.placeholder = 'Navn på bagen';
       modal.appendChild(nInp);
 
-      modal.appendChild(el('div', 'minbagg-label', 'Bilde-URL (valgfritt)'));
-      var iInp = el('input', 'minbagg-input'); iInp.placeholder = 'https://...';
+      modal.appendChild(el('div', 'minbag-label', 'Bilde-URL (valgfritt)'));
+      var iInp = el('input', 'minbag-input'); iInp.placeholder = 'https://...';
       modal.appendChild(iInp);
 
-      var save = el('button', 'minbagg-btn', 'Lagre bagg');
+      var save = el('button', 'minbag-btn', 'Lagre bag');
       save.style.marginTop = '10px';
       save.addEventListener('click', function () {
         onSave({ name: safeStr(nInp.value).trim() || 'Bag', image: safeStr(iInp.value).trim(), url: '' });
@@ -1408,21 +1564,21 @@
 
   // -------------------- C) Profil + anbefalinger render --------------------
   function renderProfileAndReco(wrap, supa, userEmail, onProfileChanged) {
-    var container = el('div', 'minbagg-split');
+    var container = el('div', 'minbag-split');
 
     // Profilkort
-    var cardP = el('div', 'minbagg-card');
-    cardP.appendChild(el('h2', 'minbagg-title', 'Profil'));
-    cardP.appendChild(el('p', 'minbagg-sub', 'Brukes til å gi deg anbefalinger. Du kan endre når som helst.'));
+    var cardP = el('div', 'minbag-card');
+    cardP.appendChild(el('h2', 'minbag-title', 'Profil'));
+    cardP.appendChild(el('p', 'minbag-sub', 'Brukes til å gi deg anbefalinger. Du kan endre når som helst.'));
 
     if (!state.profile) state.profile = defaultProfile();
 
-    var kv = el('div', 'minbagg-kv');
-    profilePills(state.profile).forEach(function (t) { kv.appendChild(el('div', 'minbagg-pill', t)); });
+    var kv = el('div', 'minbag-kv');
+    profilePills(state.profile).forEach(function (t) { kv.appendChild(el('div', 'minbag-pill', t)); });
     cardP.appendChild(kv);
 
-    var row = el('div', 'minbagg-row');
-    var btnEdit = el('button', 'minbagg-btn secondary', 'Rediger profil');
+    var row = el('div', 'minbag-row');
+    var btnEdit = el('button', 'minbag-btn secondary', 'Rediger profil');
     btnEdit.addEventListener('click', function () {
       openProfileModal(state.profile, async function (newP) {
         state.profile = newP;
@@ -1431,22 +1587,22 @@
       });
     });
     row.appendChild(btnEdit);
-    cardP.appendChild(el('div', 'minbagg-hr'));
+    cardP.appendChild(el('div', 'minbag-hr'));
     cardP.appendChild(row);
     container.appendChild(cardP);
 
     // Anbefalinger
-    var cardR = el('div', 'minbagg-card');
-    cardR.appendChild(el('h2', 'minbagg-title', 'Anbefalt for deg'));
-    cardR.appendChild(el('p', 'minbagg-sub', '2 forslag basert på profilen din og hva du mangler i baggen.'));
+    var cardR = el('div', 'minbag-card');
+    cardR.appendChild(el('h2', 'minbag-title', 'Anbefalt for deg'));
+    cardR.appendChild(el('p', 'minbag-sub', '2 forslag basert på profilen din og hva du mangler i bagen.'));
 
     var sc = calcBagScore(state.discs);
     var col = scoreColor(sc);
-    var scoreWrap = el('div', 'minbagg-score');
-    var pill = el('div', 'minbagg-scorepill', 'Bag score: ' + sc + '%');
+    var scoreWrap = el('div', 'minbag-score');
+    var pill = el('div', 'minbag-scorepill', 'Bag score: ' + sc + '%');
     pill.style.background = col.bg;
-    var bar = el('div', 'minbagg-scorebar');
-    var fill = el('div', 'minbagg-scorefill');
+    var bar = el('div', 'minbag-scorebar');
+    var fill = el('div', 'minbag-scorefill');
     fill.style.width = clamp(sc,0,100) + '%';
     fill.style.background = col.fill;
     bar.appendChild(fill);
@@ -1455,10 +1611,10 @@
     cardR.appendChild(scoreWrap);
 
 
-    var holder = el('div', 'minbagg-muted', 'Laster anbefalinger…');
+    var holder = el('div', 'minbag-muted', 'Laster anbefalinger…');
     cardR.appendChild(holder);
 
-    var recoGrid = el('div', 'minbagg-reco-grid');
+    var recoGrid = el('div', 'minbag-reco-grid');
     cardR.appendChild(recoGrid);
 
     async function refreshReco() {
@@ -1478,32 +1634,32 @@
         holder.style.display = 'none';
 
         recos.forEach(function (r) {
-          var c = el('div', 'minbagg-reco-card');
+          var c = el('div', 'minbag-reco-card');
 
-          var head = el('div', 'minbagg-reco-head');
+          var head = el('div', 'minbag-reco-head');
           var img = el('img', '');
           img.alt = ''; img.loading = 'lazy';
           img.src = r.image || '';
           if (!img.src) img.style.display = 'none';
           head.appendChild(img);
 
-          var meta = el('div', 'minbagg-meta');
-          meta.appendChild(el('div', 'minbagg-name', (r.name || '')));
+          var meta = el('div', 'minbag-meta');
+          meta.appendChild(el('div', 'minbag-name', (r.name || '')));
           meta.appendChild(el('div', 'sub', typeLabel(r.type)));
           if (r.flight) meta.appendChild(el('div', 'sub', formatFlightLabel(r.flight)));
           else meta.appendChild(el('div', 'sub', 'Flight: (ukjent)'));
           head.appendChild(meta);
           c.appendChild(head);
 
-          c.appendChild(el('p', 'minbagg-reco-note', r.why || ''));
+          c.appendChild(el('p', 'minbag-reco-note', r.why || ''));
 
-          var actions = el('div', 'minbagg-reco-actions');
-          var a = el('a', 'minbagg-btn', 'Se produkt');
+          var actions = el('div', 'minbag-reco-actions');
+          var a = el('a', 'minbag-btn', 'Se produkt');
           a.href = r.url || '#';
           a.style.textDecoration = 'none';
           actions.appendChild(a);
 
-          var no = el('button', 'minbagg-btn secondary', 'Nei takk');
+          var no = el('button', 'minbag-btn secondary', 'Nei takk');
           no.addEventListener('click', function () {
             if (r && r.name) recoExclude.push(r.name);
             refreshReco();
@@ -1524,7 +1680,7 @@
     container.appendChild(cardR);
 
     wrap.appendChild(container);
-    wrap.appendChild(el('div', 'minbagg-hr'));
+    wrap.appendChild(el('div', 'minbag-hr'));
 
     return { refreshReco: refreshReco };
   }
@@ -1546,7 +1702,7 @@
       var supa = await ensureSupabaseClient();
 
       async function renderTop3Bottom() {
-        var holder = el('div', 'minbagg-muted', 'Laster topplister…');
+        var holder = el('div', 'minbag-muted', 'Laster topplister…');
         wrap.appendChild(holder);
         try {
           var groups = await fetchTop3Grouped(supa);
@@ -1598,12 +1754,12 @@
       function renderAll() {
         clear(wrap);
 
-        var banner = el('div', 'minbagg-banner');
+        var banner = el('div', 'minbag-banner');
         banner.appendChild(el('b', '', '🚧 Under konstruksjon'));
-        banner.appendChild(el('div', 'minbagg-muted',
+        banner.appendChild(el('div', 'minbag-muted',
           'Denne siden er under utvikling og kan endre seg fra dag til dag. Takk for tålmodigheten – full versjon kommer snart.'));
         wrap.appendChild(banner);
-        wrap.appendChild(el('div', 'minbagg-hr'));
+        wrap.appendChild(el('div', 'minbag-hr'));
 
         renderHeaderLoggedIn(
           wrap,
@@ -1670,10 +1826,10 @@
       var root2 = ensureRoot();
       clear(root2);
       injectStyles();
-      var wrap2 = el('div', 'minbagg-wrap');
-      var card2 = el('div', 'minbagg-card');
-      card2.appendChild(el('div', 'minbagg-muted',
-        'Min Bagg kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
+      var wrap2 = el('div', 'minbag-wrap');
+      var card2 = el('div', 'minbag-card');
+      card2.appendChild(el('div', 'minbag-muted',
+        'Min bag kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
       wrap2.appendChild(card2);
       root2.appendChild(wrap2);
       log('[MINBAGG] fatal', err);
