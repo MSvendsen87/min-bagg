@@ -228,7 +228,7 @@
 
   // -------------------- Root + styles --------------------------------------
   function ensureRoot() {
-    var root = document.getElementById('min-bag-root');
+    var root = ensureRoot();
     if (!root) {
       root = document.createElement('div');
       root.id = 'min-bag-root';
@@ -635,6 +635,7 @@
 
   // -------------------- State ----------------------------------------------
   var state = { bagInfo: null, discs: [], profile: null, bags: null, activeBagId: null };
+  window.__MINBAGG_STATE__ = state;
   // Debug: eksponer state i console (trygt)
   window.__MINBAGG_STATE__ = state;
   // C) Anbefalinger: hold oversikt over hva brukeren har sagt "Nei takk" til i denne økten
