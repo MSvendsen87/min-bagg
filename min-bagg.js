@@ -577,28 +577,59 @@
 
   // -------------------- DB (mybag_bags) -------------------------------------
   async function dbLoadBag(supa, email) {
-    var res = await supa.from('mybag_bags').select('bag').eq('email', email).maybeSingle();
+    var res = await supa.from('mybag_bags').select('bag, bag_json, selected_bag').eq('email', email).maybeSingle();
     if (res && res.error) throw res.error;
-    var bag = res && res.data ? res.data.bag : null;
+    var row = res && res.data ? res.data : null;
 
-    if (Array.isArray(bag)) return { bagInfo: null, discs: bag, profile: null };
+    // Normaliser til en felles struktur
+    var out = { bagInfo: null, discs: [], profile: null, bag_json: null, selected_bag: 'default' };
 
-    if (bag && typeof bag === 'object') {
-      return {
-        bagInfo: bag.bagInfo || null,
-        discs: Array.isArray(bag.discs) ? bag.discs : (Array.isArray(bag.bag) ? bag.bag : []),
-        profile: bag.profile || null
-      };
+    if (!row) return out;
+
+    // 1) Multi-bag kolonner (nyeste)
+    if (row.bag_json) out.bag_json = row.bag_json;
+    if (row.selected_bag) out.selected_bag = row.selected_bag;
+
+    // 2) Eldre "bag" kan være array eller objekt
+    var bag = row.bag;
+    if (Array.isArray(bag)) {
+      out.discs = bag;
+      return out;
     }
-    return { bagInfo: null, discs: [], profile: null };
+    if (bag && typeof bag === 'object') {
+      out.bagInfo = bag.bagInfo || null;
+      out.discs = Array.isArray(bag.discs) ? bag.discs : (Array.isArray(bag.bag) ? bag.bag : []);
+      out.profile = bag.profile || null;
+    }
+    return out;
   }
+
   async function dbSaveBag(supa, email, st) {
-    var payload = {
+    // Sync aktiv bag tilbake til state.bags
+    if (!st.bags) st.bags = { 'default': { name: 'Min bag', discs: st.discs || [], profile: st.profile || null } };
+    if (!st.activeBagId) st.activeBagId = 'default';
+    if (!st.bags[st.activeBagId]) st.bags[st.activeBagId] = { name: 'Min bag', discs: [], profile: null };
+
+    st.bags[st.activeBagId] = {
+      name: (st.bags[st.activeBagId].name || 'Bag'),
+      discs: st.discs || [],
+      profile: st.profile || null
+    };
+
+    // Bakoverkompatibel "bag" (aktiv bag)
+    var legacyPayload = {
       bagInfo: st.bagInfo || null,
       discs: st.discs || [],
       profile: st.profile || null
     };
-    var up = await supa.from('mybag_bags').upsert({ email: email, bag: payload }, { onConflict: 'email' });
+
+    var up = await supa.from('mybag_bags').upsert({
+      email: email,
+      bag: legacyPayload,
+      bag_json: { bags: st.bags },
+      selected_bag: st.activeBagId
+    }, { onConflict: 'email' });
+
     if (up && up.error) throw up.error;
   }
 
@@ -1698,6 +1729,10 @@
       var root = ensureRoot();
       var wrap = renderBase(root);
 
+      // init default bags (for guest og før DB-load)
+      if (!state.bags) state.bags = { 'default': { name: 'Min bag', discs: [], profile: null } };
+      if (!state.activeBagId) state.activeBagId = 'default';
+
       var marker = getLoginMarker();
       var supa = await ensureSupabaseClient();
 
@@ -1740,9 +1775,15 @@
       }
 
       var loaded = await dbLoadBag(supa, user.email);
+
+      // Multi-bag: bygg bags + aktiv bag. Auto "Min bag" hvis tomt.
+      var rowLike = { bag: loaded.discs || [], bag_json: loaded.bag_json || null, selected_bag: loaded.selected_bag || 'default', profile: loaded.profile || null };
+      rowLike.bag_json = ensureBagJsonStructure(rowLike);
+      state.bags = rowLike.bag_json.bags;
+      state.activeBagId = rowLike.selected_bag || 'default';
+      setActiveBagId(state.activeBagId);
+
       state.bagInfo = loaded.bagInfo || null;
-      state.profile = loaded.profile || null;
-      state.discs = (loaded.discs || []).map(normalizeDiscItem);
 
       async function refreshTop3() {
         try {
