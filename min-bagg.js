@@ -1267,7 +1267,7 @@
     var body = el('div', 'body');
     wrapC.appendChild(btn);
     wrapC.appendChild(body);
-    btn.addEventListener('click', function () { wrapC.classList.toggle('open'); });
+    btn.addEventListener('click', function () {
 
     var list = state.discs.slice();
     list.sort(function (a, b) {
@@ -1521,12 +1521,6 @@
         });
       } catch (err2) {
         msg.textContent = 'Feil: ' + (err2 && err2.message ? err2.message : String(err2));
-      }
-    });
-        if (r && r.error) throw r.error;
-        msg.textContent = 'Sjekk e-posten din – trykk på linken for å fullføre innloggingen.';
-      } catch (err) {
-        msg.textContent = 'Feil: ' + (err && err.message ? err.message : String(err));
       }
     });
 
