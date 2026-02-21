@@ -13,7 +13,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-21.3';
+  var VERSION = 'v2026-02-21.4';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root is injected on /sider/min-bag by Quickbutik page content
@@ -71,6 +71,7 @@
     profile: null
   };
 
+  STATE.version = VERSION;
   window.__MINBAGG_STATE__ = STATE;
 
   function ensureBagsStructure() {
@@ -277,6 +278,8 @@
 
   function buildShell() {
     clear(root);
+    // Under bygging-banner (skal alltid vises)
+    root.appendChild(renderConstructionBanner());
 
     var wrap = el('div', 'minbag-wrap');
     wrap.style.cssText = 'max-width:1100px';
@@ -701,7 +704,7 @@
   // Boot
   // ---------------------------
   
-  function renderConstructionBanner(root) {
+  function renderConstructionBanner() {
     var banner = document.createElement('div');
     banner.style.cssText =
       'background:linear-gradient(90deg,#1e3c2f,#2e8b57);' +
@@ -709,12 +712,12 @@
       'border:1px solid rgba(255,255,255,.15);' +
       'box-shadow:0 8px 24px rgba(0,0,0,.25);';
     banner.innerHTML =
-      '<div style="font-weight:800;font-size:14px;letter-spacing:.5px;">' +
+      '<div style="font-weight:800;font-size:14px;letter-spacing:.3px;">' +
       '⚠ Min bag er under bygging</div>' +
-      '<div style="font-size:13px;opacity:.9;margin-top:4px;">' +
+      '<div style="font-size:13px;opacity:.92;margin-top:4px;">' +
       'Design og funksjoner forbedres fortløpende. Full versjon kommer snart.' +
       '</div>';
-    root.insertBefore(banner, root.firstChild);
+    return banner;
   }
 
   function boot() {
