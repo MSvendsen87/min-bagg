@@ -37,85 +37,47 @@
   }
 
 
-  // === Multi-bag (DB: bag_json.bags + selected_bag) ===
-//
-// DB-format (per bag):
-// bag_json: { bags: { <bagId>: { name, createdAt, items: { discs:[], bagInfo:{}, profile:{} } } } }
-// selected_bag: <bagId>
-//
-// Legacy (failsafe): kolonnen "bag" holdes som ARRAY for aktiv bag (discs[]).
+  // === Multi-bag + mål/score + tekstsystem ===
   function ensureBagJsonStructure(row) {
-    row = row || {};
-    var bj = row.bag_json;
+    var bj = row && row.bag_json;
     if (!bj || typeof bj !== 'object') bj = {};
     if (!bj.bags || typeof bj.bags !== 'object') bj.bags = {};
+    if (!row.selected_bag) row.selected_bag = 'default';
 
-    var selected = row.selected_bag ? String(row.selected_bag) : 'default';
-    if (!selected) selected = 'default';
-
-    // Ensure default exists
-    if (!bj.bags['default'] || typeof bj.bags['default'] !== 'object') {
+    if (!bj.bags['default']) {
       bj.bags['default'] = {
         name: 'Min bag',
-        createdAt: (new Date()).toISOString(),
-        items: { discs: [], bagInfo: {}, profile: null }
+        discs: Array.isArray(row.bag) ? row.bag : [],
+        profile: (row && row.profile) ? row.profile : null
       };
     }
+    if (!bj.bags[row.selected_bag]) row.selected_bag = 'default';
 
-    // Normalize each bag
-    Object.keys(bj.bags).forEach(function (id) {
+    Object.keys(bj.bags).forEach(function(id){
       var b = bj.bags[id];
-      if (!b || typeof b !== 'object') {
-        bj.bags[id] = { name: 'Bag', createdAt: (new Date()).toISOString(), items: { discs: [], bagInfo: {}, profile: null } };
-        b = bj.bags[id];
-      }
-      if (!b.name) b.name = (id === 'default') ? 'Min bag' : 'Bag';
-      if (!b.createdAt) b.createdAt = (new Date()).toISOString();
-
-      // Migrate older structure if needed (discs/profile at top level)
-      if (!b.items || typeof b.items !== 'object') {
-        b.items = { discs: [], bagInfo: {}, profile: null };
-      }
-      if (!Array.isArray(b.items.discs)) {
-        // if older format had b.discs as array
-        if (Array.isArray(b.discs)) b.items.discs = b.discs;
-        else b.items.discs = [];
-      }
-      if (!b.items.bagInfo || typeof b.items.bagInfo !== 'object') b.items.bagInfo = {};
-      if (!('profile' in b.items)) b.items.profile = null;
-      if (b.items.profile && typeof b.items.profile !== 'object') b.items.profile = null;
+      if (!b) return;
+      if (!Array.isArray(b.discs)) b.discs = [];
+      if (!b.name) b.name = 'Bag';
+      if (!b.profile) b.profile = null;
     });
-
-    // If selected bag missing -> default
-    if (!bj.bags[selected]) selected = 'default';
-
-    // If default discs empty but legacy bag has discs array, seed default once
-    if (bj.bags['default'] && bj.bags['default'].items && Array.isArray(bj.bags['default'].items.discs)) {
-      if (bj.bags['default'].items.discs.length === 0 && Array.isArray(row.bag) && row.bag.length) {
-        bj.bags['default'].items.discs = row.bag;
-      }
-    }
-
-    row.selected_bag = selected;
-    row.bag_json = bj;
     return bj;
   }
 
-  function makeBagId() { return 'bag_' + Math.random().toString(36).slice(2, 10); }function getActiveBag() {
-  if (!state.bags || !state.activeBagId) return null;
-  return state.bags[state.activeBagId] || null;
-}
-function setActiveBagId(id) {
-  if (!state.bags || !state.bags[id]) return;
-  state.activeBagId = id;
+  function makeBagId() { return 'bag_' + Math.random().toString(36).slice(2,10); }
 
-  var b = getActiveBag();
-  var items = (b && b.items && typeof b.items === 'object') ? b.items : { discs: [], bagInfo: {}, profile: null };
+  function getActiveBag() {
+    if (!state.bags || !state.activeBagId) return null;
+    return state.bags[state.activeBagId] || null;
+  }
+  function setActiveBagId(id) {
+    if (!state.bags || !state.bags[id]) return;
+    state.activeBagId = id;
+    var b = getActiveBag();
+    state.discs = (b && Array.isArray(b.discs)) ? b.discs.map(normalizeDiscItem) : [];
+    state.profile = (b && b.profile) ? b.profile : null;
+  }
 
-  state.discs = Array.isArray(items.discs) ? items.discs.map(normalizeDiscItem) : [];
-  state.profile = (items.profile && typeof items.profile === 'object') ? items.profile : null;
-  state.bagInfo = (items.bagInfo && typeof items.bagInfo === 'object') ? items.bagInfo : null;
-}function bagTargets(profile, discCount) {
+  function bagTargets(profile, discCount) {
     var size = (profile && profile.bagSize) ? profile.bagSize : '13-16';
     var t;
     if (size === '10-12') t = { putter: 3, midrange: 3, fairway: 3, distance: 2 };
@@ -266,15 +228,15 @@ function setActiveBagId(id) {
 
   // -------------------- Root + styles --------------------------------------
   function ensureRoot() {
-  var root = document.getElementById('min-bag-root');
-  if (!root) {
-    root = document.createElement('div');
-    root.id = 'min-bag-root';
-    var area = document.getElementById('page-content-area') || document.body;
-    area.appendChild(root);
+    var root = ensureRoot();
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'min-bag-root';
+      var area = document.getElementById('page-content-area') || document.body;
+      area.appendChild(root);
+    }
+    return root;
   }
-  return root;
-}
 
   function injectStyles() {
     if (document.getElementById('minbag-styles')) return;
@@ -402,18 +364,25 @@ function setActiveBagId(id) {
       document.head.appendChild(s);
     });
   }
-  async function ensureSupabaseClient() {
-    if (window.__MINBAG_SUPA__) return window.__MINBAG_SUPA__;
+  function ensureSupabaseClient() {
+    if (window.__MINBAG_SUPA__) return Promise.resolve(window.__MINBAG_SUPA__);
     var cfg = getSupaConfig();
-    if (!cfg.url || !cfg.anon) throw new Error('Manglende Supabase config (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).');
+    if (!cfg.url || !cfg.anon) return Promise.reject(new Error('Manglende Supabase config (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).'));
+
+    var p = Promise.resolve();
     if (!window.supabase || !window.supabase.createClient) {
-      await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js');
+      p = p.then(function () {
+        return loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js');
+      });
     }
-    window.__MINBAG_SUPA__ = window.supabase.createClient(cfg.url, cfg.anon, {
-      auth: { persistSession: true, storageKey: 'gk_minbag_auth_v1' }
+    return p.then(function () {
+      window.__MINBAG_SUPA__ = window.supabase.createClient(cfg.url, cfg.anon, {
+        auth: { persistSession: true, storageKey: 'gk_minbag_auth_v1' }
+      });
+      return window.__MINBAG_SUPA__;
     });
-    return window.__MINBAG_SUPA__;
   }
+
 
   // -------------------- Login marker (Quickbutik) ---------------------------
   function getLoginMarker() {
@@ -532,155 +501,201 @@ function setActiveBagId(id) {
     return 'unknown';
   }
 
-  async function rawShopSearch(q) {
+  function rawShopSearch(q) {
     q = safeStr(q).trim();
-    if (!q) return null;
+    if (!q) return Promise.resolve(null);
     var url = '/shop/search?s=' + encodeURIComponent(q) + '&out=json&limit=12';
-    var r = await fetch(url, { credentials: 'same-origin' });
-    var t = await r.text();
-    try { return JSON.parse(t); } catch (_) { return null; }
+    return fetch(url, { credentials: 'same-origin' })
+      .then(function (r) { return r.text(); })
+      .then(function (t) {
+        try { return JSON.parse(t); } catch (_) { return null; }
+      });
   }
+
 
   function openAddFromCategory(forcedType, urlPrefix){
     openSearchModal(function(q){ return shopSearch(q, urlPrefix, forcedType); }, forcedType);
   }
 
-  async function shopSearch(q, urlPrefix, forcedType) {
-    var j = await rawShopSearch(q);
-    if (!j) return [];
-    var arr = (j && j.searchresults) ? j.searchresults : [];
-    var out = [];
-    for (var i = 0; i < arr.length; i++) {
-      var p2 = (arr[i] && arr[i].product) ? arr[i].product : null;
-      if (!p2) continue;
+  function shopSearch(q, urlPrefix, forcedType) {
+    return rawShopSearch(q).then(function (j) {
+      if (!j) return [];
+      var arr = (j && j.searchresults) ? j.searchresults : [];
+      var out = [];
+      for (var i = 0; i < arr.length; i++) {
+        var p2 = (arr[i] && arr[i].product) ? arr[i].product : null;
+        if (!p2) continue;
 
-      var name = safeStr(p2.title || p2.producttitle || p2.name).trim();
-      var href = safeStr(p2.url || p2.producturl || p2.href).trim();
-      var img = safeStr(p2.firstimage || p2.image).trim();
-      var df1 = safeStr(p2.datafield_1 || '').trim();
-      if (!name || !href) continue;
+        var name = safeStr(p2.title || p2.producttitle || p2.name).trim();
+        var href = safeStr(p2.url || p2.producturl || p2.href).trim();
+        var img = safeStr(p2.firstimage || p2.image).trim();
+        var df1 = safeStr(p2.datafield_1 || '').trim();
+        if (!name || !href) continue;
 
-      out.push({ name: name, url: href, image: img, flightText: df1, stock: isProductInStock(p2) });
-    }
-    return out.slice(0, 12);
-  }
+        // Optional filter by category url prefix (for category buttons)
+        if (urlPrefix) {
+          var up = safeStr(urlPrefix).trim();
+          if (up && href.indexOf(up) !== 0) continue;
+        }
 
-  async function verifyInStockByName(name, desiredUrl) {
-    var rows = await shopSearch(name);
-    if (!rows.length) return null;
+        var tp = forcedType || inferTypeFromUrl(href) || null;
 
-    var best = null;
-    for (var i=0;i<rows.length;i++){
-      if (desiredUrl && rows[i].url === desiredUrl) { best = rows[i]; break; }
-    }
-    if (!best) {
-      var target = safeStr(name).trim().toLowerCase();
-      for (var j=0;j<rows.length;j++){
-        if (safeStr(rows[j].name).trim().toLowerCase() === target) { best = rows[j]; break; }
+        out.push({ name: name, url: href, image: img, flightText: df1, stock: isProductInStock(p2), type: tp });
       }
-    }
-    if (!best) best = rows[0];
-
-    // Streng: må være true.
-    if (best.stock === true) return best;
-    return null;
+      return out.slice(0, 12);
+    });
   }
+
+
+  function verifyInStockByName(name, desiredUrl) {
+    return shopSearch(name).then(function (rows) {
+      rows = Array.isArray(rows) ? rows : [];
+      if (!rows.length) return null;
+
+      var best = null;
+      for (var i = 0; i < rows.length; i++) {
+        if (desiredUrl && rows[i].url === desiredUrl) { best = rows[i]; break; }
+      }
+      if (!best) {
+        var target = safeStr(name).trim().toLowerCase();
+        for (var j = 0; j < rows.length; j++) {
+          if (safeStr(rows[j].name).trim().toLowerCase() === target) { best = rows[j]; break; }
+        }
+      }
+      if (!best) best = rows[0];
+
+      // Streng: må være true.
+      if (best.stock === true) return best;
+      return null;
+    });
+  }
+
 
   // -------------------- Supabase RPC ----------------------------------------
-  async function fetchTop3Grouped(supa) {
-    var r = await supa.rpc('get_mybag_top3', { limit_per_group: 3 });
-    if (r && r.error) throw r.error;
-    var rows = (r && r.data) ? r.data : [];
-    var groups = { putter: [], midrange: [], fairway: [], distance: [] };
-    for (var i = 0; i < rows.length; i++) {
-      var x = rows[i] || {};
-      var tp = safeStr(x.type).toLowerCase();
-      if (groups[tp]) groups[tp].push(x);
-    }
-    return groups;
+  function fetchTop3Grouped(supa) {
+    return supa.rpc('get_mybag_top3', { limit_per_group: 3 }).then(function (r) {
+      if (r && r.error) throw r.error;
+      var rows = (r && r.data) ? r.data : [];
+      var groups = { putter: [], midrange: [], fairway: [], distance: [] };
+      for (var i = 0; i < rows.length; i++) {
+        var x = rows[i] || {};
+        var tp = safeStr(x.type).toLowerCase();
+        if (groups[tp]) groups[tp].push(x);
+      }
+      return groups;
+    });
   }
-  async function incrementPopular(supa, item) {
-    try {
-      var r = await supa.rpc('increment_popular_disc', {
-        p_type: item.type,
-        p_name: item.name,
-        p_url: item.url || null,
-        p_image: item.image || null
-      });
+
+  function incrementPopular(supa, item) {
+    return supa.rpc('increment_popular_disc', {
+      p_type: item.type,
+      p_name: item.name,
+      p_url: item.url || null,
+      p_image: item.image || null
+    }).then(function (r) {
       if (r && r.error) log('[MINBAG] popular inc error', r.error);
-    } catch (e) {
+      return r;
+    }).catch(function (e) {
       log('[MINBAG] popular inc fail', e);
-    }
+      return null;
+    });
   }
+
+  function incrementPopular(supa, item) {
+    return supa.rpc('increment_popular_disc', {
+      p_type: item.type,
+      p_name: item.name,
+      p_url: item.url || null,
+      p_image: item.image || null
+    }).then(function (r) {
+      if (r && r.error) log('[MINBAG] popular inc error', r.error);
+      return r;
+    }).catch(function (e) {
+      log('[MINBAG] popular inc fail', e);
+      return null;
+    });
+  }
+
 
   // -------------------- DB (mybag_bags) -------------------------------------
-  async function dbLoadBag(supa, email) {
-  var res = await supa.from('mybag_bags').select('bag, bag_json, selected_bag').eq('email', email).maybeSingle();
-  if (res && res.error) throw res.error;
-  var row = res && res.data ? res.data : null;
+  function dbLoadBag(supa, email) {
+    return supa.from('mybag_bags').select('bag, bag_json, selected_bag').eq('email', email).maybeSingle()
+      .then(function (res) {
+        if (res && res.error) throw res.error;
+        var row = res && res.data ? res.data : null;
 
-  var out = { bags: null, selected_bag: 'default' };
+        // Normaliser til en felles struktur
+        var out = { bagInfo: null, discs: [], profile: null, bag_json: null, selected_bag: 'default' };
+        if (!row) return out;
 
-  if (!row) {
-    // empty new user
-    var tmp = { bag: [], bag_json: null, selected_bag: 'default' };
-    var bj = ensureBagJsonStructure(tmp);
-    out.bags = bj.bags;
-    out.selected_bag = tmp.selected_bag || 'default';
-    return out;
+        // Multi-bag kolonner
+        if (row.bag_json) out.bag_json = row.bag_json;
+        if (row.selected_bag) out.selected_bag = row.selected_bag;
+
+        var bag = row.bag;
+
+        // bag kan være array (legacy), eller object {discs, bagInfo, profile}
+        if (Array.isArray(bag)) {
+          out.discs = bag;
+          return out;
+        }
+        if (bag && typeof bag === 'object') {
+          out.bagInfo = bag.bagInfo || null;
+          out.discs = Array.isArray(bag.discs) ? bag.discs : (Array.isArray(bag.bag) ? bag.bag : []);
+          out.profile = bag.profile || null;
+        }
+        return out;
+      });
   }
 
-  // Legacy bag expected as array (failsafe). If it is object with discs, take discs.
-  var legacyDiscs = [];
-  if (Array.isArray(row.bag)) legacyDiscs = row.bag;
-  else if (row.bag && typeof row.bag === 'object' && Array.isArray(row.bag.discs)) legacyDiscs = row.bag.discs;
 
-  var rowLike = {
-    bag: legacyDiscs,
-    bag_json: row.bag_json || null,
-    selected_bag: row.selected_bag || 'default'
-  };
-
-  var bj2 = ensureBagJsonStructure(rowLike);
-  out.bags = bj2.bags;
-  out.selected_bag = rowLike.selected_bag || 'default';
-  return out;
-}if (bag && typeof bag === 'object') {
-      out.bagInfo = bag.bagInfo || null;
-      out.discs = Array.isArray(bag.discs) ? bag.discs : (Array.isArray(bag.bag) ? bag.bag : []);
-      out.profile = bag.profile || null;
+  function dbSaveBag(supa, email, st) {
+    // Ensure multi-bag structure in state
+    if (!st.bags || typeof st.bags !== 'object') {
+      st.bags = {
+        'default': {
+          name: 'Min bag',
+          createdAt: (new Date()).toISOString(),
+          items: { discs: st.discs || [], bagInfo: st.bagInfo || {}, profile: st.profile || null }
+        }
+      };
     }
-    return out;
+    if (!st.activeBagId || !st.bags[st.activeBagId]) st.activeBagId = 'default';
+
+    // Ensure active bag structure
+    var active = st.bags[st.activeBagId];
+    if (!active) active = st.bags[st.activeBagId] = { name: 'Min bag', createdAt: (new Date()).toISOString(), items: { discs: [], bagInfo: {}, profile: null } };
+    if (!active.items || typeof active.items !== 'object') active.items = {};
+    if (!Array.isArray(active.items.discs)) active.items.discs = [];
+    if (typeof active.items.bagInfo !== 'object' || !active.items.bagInfo) active.items.bagInfo = {};
+    if (active.items.profile === undefined) active.items.profile = null;
+
+    // Sync current view state into active bag
+    active.items.discs = Array.isArray(st.discs) ? st.discs : [];
+    active.items.bagInfo = st.bagInfo || {};
+    active.items.profile = st.profile || null;
+
+    // Build payloads
+    var bag_json = { bags: st.bags };
+    var selected_bag = st.activeBagId;
+
+    // Legacy failsafe: keep active bag discs also in legacy 'bag' (array)
+    var legacyArray = Array.isArray(active.items.discs) ? active.items.discs : [];
+
+    return supa.from('mybag_bags').upsert({
+      email: email,
+      bag: legacyArray,
+      bag_json: bag_json,
+      selected_bag: selected_bag,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'email' }).select('email, selected_bag, bag_json').then(function (res) {
+      if (res && res.error) throw res.error;
+      return res;
+    });
   }
 
-  async function dbSaveBag(supa, email, st) {
-  // Ensure structure
-  if (!st.bags || typeof st.bags !== 'object') {
-    st.bags = {
-      'default': { name: 'Min bag', createdAt: (new Date()).toISOString(), items: { discs: st.discs || [], bagInfo: st.bagInfo || {}, profile: st.profile || null } }
-    };
-  }
-  if (!st.activeBagId || !st.bags[st.activeBagId]) st.activeBagId = 'default';
 
-  // Write active state back into the active bag
-  var active = st.bags[st.activeBagId];
-  if (!active.items || typeof active.items !== 'object') active.items = { discs: [], bagInfo: {}, profile: null };
-  active.items.discs = st.discs || [];
-  active.items.bagInfo = st.bagInfo || {};
-  active.items.profile = st.profile || null;
-
-  // Failsafe legacy: keep "bag" column as ARRAY for active bag
-  var legacyBagArray = st.discs || [];
-
-  var up = await supa.from('mybag_bags').upsert({
-    email: email,
-    bag: legacyBagArray,
-    bag_json: { bags: st.bags },
-    selected_bag: st.activeBagId
-  }, { onConflict: 'email' });
-
-  if (up && up.error) throw up.error;
-}// -------------------- State ----------------------------------------------
+  // -------------------- State ----------------------------------------------
   var state = { bagInfo: null, discs: [], profile: null, bags: null, activeBagId: null };
   window.__MINBAG_STATE__ = state;
   // Debug: eksponer state i console (trygt)
@@ -956,135 +971,170 @@ function setActiveBagId(id) {
     return suggestWhy(profile, missingType, deficit, candFlight, existingSameType || []);
   }
 
-  async function pickRecoCandidates(supa, profile, stateDiscs, excludeNames) {
+  function pickRecoCandidates(supa, profile, stateDiscs, excludeNames) {
+    excludeNames = Array.isArray(excludeNames) ? excludeNames : [];
+    var exclude = {};
+    for (var ei = 0; ei < excludeNames.length; ei++) { exclude[String(excludeNames[ei]).toLowerCase()] = 1; }
+
     var counts = countByType(stateDiscs);
     var prio = missingPriority(counts);
     var target = chooseTargetType(stateDiscs);
-    var bagScore = calcBagScore(stateDiscs);
-    prio = [target.type].concat(prio.filter(function(x){ return x!==target.type; }));
-
-    var groups;
-    try { groups = await fetchTop3Grouped(supa); }
-    catch (_) { groups = { putter:[], midrange:[], fairway:[], distance:[] }; }
-
-    var picked = [];
-    var used = {};
-    excludeNames = Array.isArray(excludeNames) ? excludeNames : [];
-    var exclude = {};
-    for (var ei=0; ei<excludeNames.length; ei++){ exclude[String(excludeNames[ei]).toLowerCase()] = 1; }
+    prio = [target.type].concat(prio.filter(function (x) { return x !== target.type; }));
 
     function alreadyInBag(name) {
       var n = safeStr(name).trim().toLowerCase();
-      for (var i=0;i<stateDiscs.length;i++){
+      for (var i = 0; i < stateDiscs.length; i++) {
         if (safeStr(stateDiscs[i].name).trim().toLowerCase() === n) return true;
       }
       return false;
     }
 
-    // 1) Top3 fallback, styrt av mangler
-    for (var pi=0; pi<prio.length && picked.length<2; pi++){
-      var t = prio[pi];
-      var rows = (groups && groups[t]) ? groups[t] : [];
-      for (var ri=0; ri<rows.length && picked.length<2; ri++){
-        var r = rows[ri] || {};
-        var name = safeStr(r.name).trim();
-        var url = safeStr(r.product_url || '').trim();
-        if (!name) continue;
-        if (used[name.toLowerCase()]) continue;
-        if (exclude[name.toLowerCase()]) continue;
-        if (alreadyInBag(name)) continue;
+    var picked = [];
+    var used = {};
 
-        var verified = await verifyInStockByName(name, url);
-        if (!verified) continue;
-
-        var existingSameType = stateDiscs.filter(function(d){ return d.type===t; });
-        var candFlight = parseFlightText(verified.flightText || '');
-        if (isTooSimilar(candFlight, existingSameType)) { continue; }
-        used[name.toLowerCase()] = 1;
-        picked.push({
-          type: t,
-          name: verified.name || name,
-          url: verified.url || url,
-          image: verified.image || r.image_url || '',
-          flightText: verified.flightText || '',
-          flight: parseFlightText(verified.flightText || ''),
-          why: recoText(profile, t, parseFlightText(verified.flightText || ''))
-        });
-      }
+    function addPicked(t, verified, fallbackRow) {
+      var name = safeStr(verified && verified.name ? verified.name : (fallbackRow && fallbackRow.name ? fallbackRow.name : '')).trim();
+      if (!name) return false;
+      if (used[name.toLowerCase()]) return false;
+      used[name.toLowerCase()] = 1;
+      picked.push({
+        type: t,
+        name: name,
+        url: verified.url || (fallbackRow && (fallbackRow.product_url || fallbackRow.url)) || '',
+        image: verified.image || (fallbackRow && (fallbackRow.image_url || fallbackRow.image)) || '',
+        flightText: verified.flightText || '',
+        flight: parseFlightText(verified.flightText || ''),
+        why: recoText(profile, t, parseFlightText(verified.flightText || ''))
+      });
+      return true;
     }
 
-    // 2) Hvis fortsatt ikke 2: enkel profil-søk, men fortsatt strict stock===true
-    if (picked.length < 2) {
-      var keywords = [];
-      var g = safeStr(profile && profile.goal).toLowerCase();
-      var c = safeStr(profile && profile.course).toLowerCase();
-      if (g) keywords.push(g);
-      if (c) keywords.push(c);
-      keywords = uniq(keywords).slice(0,2);
+    return fetchTop3Grouped(supa).catch(function (_) {
+      return { putter: [], midrange: [], fairway: [], distance: [] };
+    }).then(function (groups) {
 
-      for (var pi2=0; pi2<prio.length && picked.length<2; pi2++){
-        var t2 = prio[pi2];
-        var typeWord = (t2 === 'putter') ? 'putter' : (t2 === 'midrange' ? 'midrange' : (t2 === 'fairway' ? 'fairway' : 'driver'));
-        var q = [typeWord].concat(keywords).join(' ');
-        var results = await shopSearch(q);
+      // Phase 1: use Top3 + strict in-stock verify, sequentially
+      function phase1_nextType(pi) {
+        if (picked.length >= 2 || pi >= prio.length) return Promise.resolve();
+        var t = prio[pi];
+        var rows = (groups && groups[t]) ? groups[t] : [];
+        function nextRow(ri) {
+          if (picked.length >= 2 || ri >= rows.length) return phase1_nextType(pi + 1);
+          var r = rows[ri] || {};
+          var name = safeStr(r.name).trim();
+          var url = safeStr(r.product_url || '').trim();
+          if (!name) return nextRow(ri + 1);
+          if (used[name.toLowerCase()] || exclude[name.toLowerCase()] || alreadyInBag(name)) return nextRow(ri + 1);
 
-        for (var k=0; k<results.length && picked.length<2; k++){
-          var it = results[k];
-          if (!it || it.stock !== true) continue; // strict
-          var nm = safeStr(it.name).trim();
-          if (!nm) continue;
-          if (used[nm.toLowerCase()]) continue;
-          if (exclude[nm.toLowerCase()]) continue;
-          if (alreadyInBag(nm)) continue;
+          return verifyInStockByName(name, url).then(function (verified) {
+            if (!verified) return nextRow(ri + 1);
 
-          used[nm.toLowerCase()] = 1;
-          picked.push({
-            type: inferTypeFromUrl(it.url) || t2,
-            name: it.name,
-            url: it.url,
-            image: it.image,
-            flightText: it.flightText || '',
-            flight: parseFlightText(it.flightText || ''),
-            why: recoText(profile, (inferTypeFromUrl(it.url) || t2), parseFlightText(it.flightText || ''))
+            var existingSameType = stateDiscs.filter(function (d) { return d.type === t; });
+            var candFlight = parseFlightText(verified.flightText || '');
+            if (isTooSimilar(candFlight, existingSameType)) return nextRow(ri + 1);
+
+            addPicked(t, verified, r);
+            return nextRow(ri + 1);
+          }).catch(function () {
+            return nextRow(ri + 1);
           });
         }
+        return nextRow(0);
       }
-    }
 
-    // 3) ALLTID forslag: hvis vi fortsatt ikke har 2, ta en “gøy/spesiell”-kandidat
-    if (picked.length < 2) {
-      var funQs = ['glow','eclipse','x-out','tour series','signature','halo','color glow','utility','roller','overstabil','understabil'];
-      for (var fq=0; fq<funQs.length && picked.length<2; fq++){
-        var res = await shopSearch(funQs[fq]);
-        for (var ii=0; ii<res.length && picked.length<2; ii++){
-          var it2 = res[ii];
-          if (!it2 || it2.stock !== true) continue;
-          var nm2 = safeStr(it2.name).trim();
-          if (!nm2) continue;
-          if (used[nm2.toLowerCase()] || exclude[nm2.toLowerCase()]) continue;
-          if (alreadyInBag(nm2)) continue;
+      return phase1_nextType(0).then(function () {
 
-          var t3 = inferTypeFromUrl(it2.url) || target.type;
-          var existingSameType3 = stateDiscs.filter(function(d){ return d.type===t3; });
-          var cf3 = parseFlightText(it2.flightText || '');
-          if (isTooSimilar(cf3, existingSameType3)) continue;
+        // Phase 2: keyword searches if still <2
+        if (picked.length >= 2) return null;
 
-          used[nm2.toLowerCase()] = 1;
-          picked.push({
-            type: t3,
-            name: it2.name,
-            url: it2.url,
-            image: it2.image,
-            flightText: it2.flightText || '',
-            flight: cf3,
-            why: 'Sekken din ser veldig komplett ut – her er en litt “gøy” disk som kan gi nye linjer og mer variasjon.'
+        var keywords = [];
+        var g = safeStr(profile && profile.goal).toLowerCase();
+        var c = safeStr(profile && profile.course).toLowerCase();
+        if (g) keywords.push(g);
+        if (c) keywords.push(c);
+        keywords = uniq(keywords).slice(0, 2);
+
+        function phase2_nextType(pi2) {
+          if (picked.length >= 2 || pi2 >= prio.length) return Promise.resolve();
+          var t2 = prio[pi2];
+          var typeWord = (t2 === 'putter') ? 'putter' : (t2 === 'midrange' ? 'midrange' : (t2 === 'fairway' ? 'fairway' : 'driver'));
+          var q = [typeWord].concat(keywords).join(' ');
+
+          return shopSearch(q).then(function (results) {
+            results = Array.isArray(results) ? results : [];
+            for (var k = 0; k < results.length && picked.length < 2; k++) {
+              var it = results[k];
+              if (!it || it.stock !== true) continue;
+              var nm = safeStr(it.name).trim();
+              if (!nm) continue;
+              if (used[nm.toLowerCase()] || exclude[nm.toLowerCase()] || alreadyInBag(nm)) continue;
+
+              used[nm.toLowerCase()] = 1;
+              var tp = inferTypeFromUrl(it.url) || t2;
+              picked.push({
+                type: tp,
+                name: it.name,
+                url: it.url,
+                image: it.image,
+                flightText: it.flightText || '',
+                flight: parseFlightText(it.flightText || ''),
+                why: recoText(profile, tp, parseFlightText(it.flightText || ''))
+              });
+            }
+            return phase2_nextType(pi2 + 1);
+          }).catch(function () {
+            return phase2_nextType(pi2 + 1);
           });
         }
-      }
-    }
 
-    return picked.slice(0,2);
+        return phase2_nextType(0);
+      }).then(function () {
+
+        // Phase 3: fun fallback if still <2
+        if (picked.length >= 2) return picked.slice(0, 2);
+
+        var funQs = ['glow', 'eclipse', 'x-out', 'tour series', 'signature', 'halo', 'color glow', 'utility', 'roller', 'overstabil', 'understabil'];
+
+        function phase3_nextQ(fq) {
+          if (picked.length >= 2 || fq >= funQs.length) return Promise.resolve(picked.slice(0, 2));
+          return shopSearch(funQs[fq]).then(function (res) {
+            res = Array.isArray(res) ? res : [];
+            for (var ii = 0; ii < res.length && picked.length < 2; ii++) {
+              var it2 = res[ii];
+              if (!it2 || it2.stock !== true) continue;
+              var nm2 = safeStr(it2.name).trim();
+              if (!nm2) continue;
+              if (used[nm2.toLowerCase()] || exclude[nm2.toLowerCase()] || alreadyInBag(nm2)) continue;
+
+              var t3 = inferTypeFromUrl(it2.url) || target.type;
+              var existingSameType3 = stateDiscs.filter(function (d) { return d.type === t3; });
+              var cf3 = parseFlightText(it2.flightText || '');
+              if (isTooSimilar(cf3, existingSameType3)) continue;
+
+              used[nm2.toLowerCase()] = 1;
+              picked.push({
+                type: t3,
+                name: it2.name,
+                url: it2.url,
+                image: it2.image,
+                flightText: it2.flightText || '',
+                flight: cf3,
+                why: 'Sekken din ser veldig komplett ut – her er en litt “gøy” disk som kan gi nye linjer og mer variasjon.'
+              });
+            }
+            return phase3_nextQ(fq + 1);
+          }).catch(function () {
+            return phase3_nextQ(fq + 1);
+          });
+        }
+
+        return phase3_nextQ(0);
+      }).then(function () {
+        return picked.slice(0, 2);
+      });
+    });
   }
+
 
   // -------------------- Render base ----------------------------------------
   function renderBase(root) {
@@ -1120,75 +1170,38 @@ function setActiveBagId(id) {
     wrap.appendChild(el('div', 'minbag-hr'));
   }
 
-  function renderHeaderLoggedIn(wrap, marker, onPickBagInfo, onAddDisc, onCreateBag, onSelectBag) {
-  var card = el('div', 'minbag-card');
+  function renderHeaderLoggedIn(wrap, marker, onAddBag, onAddDisc) {
+    var card = el('div', 'minbag-card');
+    card.appendChild(el('h2', 'minbag-title', (marker.firstname ? (marker.firstname + ' SIN BAG') : 'Min bag')));
+    card.appendChild(el('p', 'minbag-sub', (marker.firstname ? ('Hei ' + marker.firstname + ' 👋 ') : '') + 'Bagen din lagres på kontoen din.'));
 
-  // Title (bag name)
-  var active = getActiveBag();
-  var activeName = (active && active.name) ? active.name : 'Min bag';
-
-  card.appendChild(el('h2', 'minbag-title', activeName.toUpperCase()));
-  card.appendChild(el('p', 'minbag-sub', (marker.firstname ? ('Hei ' + marker.firstname + ' 👋 ') : '') + 'Bagen din lagres på kontoen din.'));
-
-  // Bag selector
-  if (state.bags) {
-    var selWrap = el('div', 'minbag-row');
-    selWrap.appendChild(el('div', 'minbag-label', 'Velg bag'));
-    var sel = el('select', 'minbag-select');
-    Object.keys(state.bags).forEach(function (id) {
-      var b = state.bags[id];
-      var o = document.createElement('option');
-      o.value = id;
-      o.textContent = (b && b.name) ? b.name : id;
-      if (id === state.activeBagId) o.selected = true;
-      sel.appendChild(o);
-    });
-    sel.addEventListener('change', function () {
-      var id = sel.value;
-      if (!id || !state.bags[id]) return;
-      setActiveBagId(id);
-      if (typeof onSelectBag === 'function') onSelectBag(id);
-    });
-    selWrap.appendChild(sel);
-    card.appendChild(selWrap);
-  }
-
-  // Selected backpack (bagInfo) inside active bag
-  if (state.bagInfo && (state.bagInfo.name || state.bagInfo.image)) {
-    var row = el('div', 'minbag-item');
-    if (state.bagInfo.image) {
-      var im = el('img', 'minbag-thumb');
-      im.src = state.bagInfo.image;
-      im.alt = '';
-      im.loading = 'lazy';
-      row.appendChild(im);
+    if (state.bagInfo && (state.bagInfo.name || state.bagInfo.image)) {
+      var row = el('div', 'minbag-item');
+      if (state.bagInfo.image) {
+        var im = el('img', 'minbag-thumb');
+        im.src = state.bagInfo.image;
+        im.alt = '';
+        im.loading = 'lazy';
+        row.appendChild(im);
+      }
+      var meta = el('div', 'minbag-meta');
+      meta.appendChild(el('div', 'minbag-name', state.bagInfo.name || 'Bag'));
+      row.appendChild(meta);
+      card.appendChild(row);
     }
-    var meta = el('div', 'minbag-meta');
-    meta.appendChild(el('div', 'minbag-name', state.bagInfo.name || 'Sekk'));
-    row.appendChild(meta);
-    card.appendChild(row);
+
+    var btnRow = el('div', 'minbag-row');
+    var bBag = el('button', 'minbag-btn secondary', 'Legg til bag');
+    bBag.addEventListener('click', onAddBag);
+    var bDisc = el('button', 'minbag-btn', 'Legg til disk');
+    bDisc.addEventListener('click', onAddDisc);
+    btnRow.appendChild(bBag);
+    btnRow.appendChild(bDisc);
+    card.appendChild(btnRow);
+
+    wrap.appendChild(card);
+    wrap.appendChild(el('div', 'minbag-hr'));
   }
-
-  var btnRow = el('div', 'minbag-row');
-
-  var bNewBag = el('button', 'minbag-btn secondary', 'Ny bag');
-  bNewBag.addEventListener('click', onCreateBag);
-
-  var bPick = el('button', 'minbag-btn secondary', 'Velg sekk');
-  bPick.addEventListener('click', onPickBagInfo);
-
-  var bDisc = el('button', 'minbag-btn', 'Legg til disk');
-  bDisc.addEventListener('click', onAddDisc);
-
-  btnRow.appendChild(bNewBag);
-  btnRow.appendChild(bPick);
-  btnRow.appendChild(bDisc);
-
-  card.appendChild(btnRow);
-
-  wrap.appendChild(card);
-  wrap.appendChild(el('div', 'minbag-hr'));
-}
 
   // B) Klikkbart kort (uten Endre-knapp)
   function renderFourBoxes(wrap, onEdit) {
@@ -1492,15 +1505,24 @@ function setActiveBagId(id) {
     var btn = el('button', 'minbag-btn', 'Send magic link');
     var msg = el('div', 'minbag-muted', '');
 
-    btn.addEventListener('click', async function () {
+        btn.addEventListener('click', function () {
       msg.textContent = 'Sender…';
       try {
         var e = safeStr(inp.value).trim();
         if (!e) throw new Error('Skriv inn e-post.');
-        var r = await supa.auth.signInWithOtp({
+        supa.auth.signInWithOtp({
           email: e,
           options: { emailRedirectTo: location.origin + '/sider/min-bag' }
+        }).then(function (r) {
+          if (r && r.error) throw r.error;
+          msg.textContent = 'Sjekk e-posten din – trykk på linken for å fullføre innloggingen.';
+        }).catch(function (err) {
+          msg.textContent = 'Feil: ' + (err && err.message ? err.message : String(err));
         });
+      } catch (err2) {
+        msg.textContent = 'Feil: ' + (err2 && err2.message ? err2.message : String(err2));
+      }
+    });
         if (r && r.error) throw r.error;
         msg.textContent = 'Sjekk e-posten din – trykk på linken for å fullføre innloggingen.';
       } catch (err) {
@@ -1588,42 +1610,48 @@ function setActiveBagId(id) {
 
       var selected = null;
 
-      async function runSearch(v) {
+      function runSearch(v) {
         clear(list);
         v = safeStr(v).trim();
         if (!v) return;
         list.appendChild(el('div', 'minbag-muted', 'Laster…'));
-        var rows = await shopSearch(v);
-        clear(list);
-        if (!rows.length) { list.appendChild(el('div', 'minbag-muted', 'Ingen treff.')); return; }
+        shopSearch(v).then(function (rows) {
+          clear(list);
+          rows = Array.isArray(rows) ? rows : [];
+          if (!rows.length) { list.appendChild(el('div', 'minbag-muted', 'Ingen treff.')); return; }
 
-        rows.forEach(function (p3) {
-          var row = el('div', 'minbag-item is-clickable');
+          rows.forEach(function (p3) {
+            var row = el('div', 'minbag-item is-clickable');
 
-          var img = el('img', 'minbag-thumb');
-          img.alt = ''; img.loading = 'lazy';
-          img.src = p3.image || '';
-          if (!img.src) img.style.display = 'none';
-          row.appendChild(img);
+            var img = el('img', 'minbag-thumb');
+            img.alt = ''; img.loading = 'lazy';
+            img.src = p3.image || '';
+            if (!img.src) img.style.display = 'none';
+            row.appendChild(img);
 
-          var meta = el('div', 'minbag-meta');
-          meta.appendChild(el('div', 'minbag-name', p3.name || ''));
-          var fl = parseFlightText(p3.flightText);
-          meta.appendChild(el('div', 'sub', fl ? formatFlightLabel(fl) : 'Flight mangler'));
-          meta.appendChild(el('div', 'sub', 'Lager: ' + (p3.stock === true ? 'På lager' : p3.stock === false ? 'Ikke på lager' : 'Ukjent')));
-          row.appendChild(meta);
+            var meta = el('div', 'minbag-meta');
+            meta.appendChild(el('div', 'minbag-name', p3.name || ''));
+            var fl = parseFlightText(p3.flightText);
+            meta.appendChild(el('div', 'sub', fl ? formatFlightLabel(fl) : 'Flight mangler'));
+            meta.appendChild(el('div', 'sub', 'Lager: ' + (p3.stock === true ? 'På lager' : p3.stock === false ? 'Ikke på lager' : 'Ukjent')));
+            row.appendChild(meta);
 
-          row.addEventListener('click', function () {
-            selected = p3;
-            var inf = inferTypeFromUrl(p3.url);
-            if (inf) selType.value = inf;
-            Array.prototype.forEach.call(list.children, function (ch) { ch.style.outline = ''; });
-            row.style.outline = '2px solid rgba(46,139,87,.85)';
+            row.addEventListener('click', function () {
+              selected = p3;
+              var inf = inferTypeFromUrl(p3.url);
+              if (inf) selType.value = inf;
+              Array.prototype.forEach.call(list.children, function (ch) { ch.style.outline = ''; });
+              row.style.outline = '2px solid rgba(46,139,87,.85)';
+            });
+
+            list.appendChild(row);
           });
-
-          list.appendChild(row);
+        }).catch(function () {
+          clear(list);
+          list.appendChild(el('div', 'minbag-muted', 'Kunne ikke søke akkurat nå.'));
         });
       }
+
 
       q.addEventListener('input', debounce(function () { runSearch(q.value); }, 250));
 
@@ -1658,44 +1686,25 @@ function setActiveBagId(id) {
     });
   }
 
-  function openCreateBagModal(onCreate) {
-  openModal('Ny bag', function (modal, close) {
-    modal.appendChild(el('div', 'minbag-label', 'Navn på bag'));
-    var nInp = el('input', 'minbag-input');
-    nInp.placeholder = 'F.eks. Konkurranse / Trening / Vinter';
-    modal.appendChild(nInp);
+  function openAddBagModal(onSave) {
+    openModal('Legg til bag', function (modal, close) {
+      modal.appendChild(el('div', 'minbag-label', 'Navn'));
+      var nInp = el('input', 'minbag-input'); nInp.placeholder = 'Navn på bagen';
+      modal.appendChild(nInp);
 
-    var save = el('button', 'minbag-btn', 'Opprett');
-    save.style.marginTop = '10px';
-    save.addEventListener('click', function () {
-      var name = safeStr(nInp.value).trim() || 'Ny bag';
-      onCreate({ name: name });
-      close();
+      modal.appendChild(el('div', 'minbag-label', 'Bilde-URL (valgfritt)'));
+      var iInp = el('input', 'minbag-input'); iInp.placeholder = 'https://...';
+      modal.appendChild(iInp);
+
+      var save = el('button', 'minbag-btn', 'Lagre bag');
+      save.style.marginTop = '10px';
+      save.addEventListener('click', function () {
+        onSave({ name: safeStr(nInp.value).trim() || 'Bag', image: safeStr(iInp.value).trim(), url: '' });
+        close();
+      });
+      modal.appendChild(save);
     });
-    modal.appendChild(save);
-  });
-}
-
-function openAddBagModal(onSave) {
-  // Dette er "bagInfo" (sekk/bag-modell), ikke multi-bag.
-  openModal('Velg sekk', function (modal, close) {
-    modal.appendChild(el('div', 'minbag-label', 'Navn'));
-    var nInp = el('input', 'minbag-input'); nInp.placeholder = 'Navn på sekken';
-    modal.appendChild(nInp);
-
-    modal.appendChild(el('div', 'minbag-label', 'Bilde-URL (valgfritt)'));
-    var iInp = el('input', 'minbag-input'); iInp.placeholder = 'https://...';
-    modal.appendChild(iInp);
-
-    var save = el('button', 'minbag-btn', 'Lagre');
-    save.style.marginTop = '10px';
-    save.addEventListener('click', function () {
-      onSave({ name: safeStr(nInp.value).trim() || 'Sekk', image: safeStr(iInp.value).trim(), url: '' });
-      close();
-    });
-    modal.appendChild(save);
-  });
-}
+  }
 
   // -------------------- C) Profil + anbefalinger render --------------------
   function renderProfileAndReco(wrap, supa, userEmail, onProfileChanged) {
@@ -1715,9 +1724,9 @@ function openAddBagModal(onSave) {
     var row = el('div', 'minbag-row');
     var btnEdit = el('button', 'minbag-btn secondary', 'Rediger profil');
     btnEdit.addEventListener('click', function () {
-      openProfileModal(state.profile, async function (newP) {
+      openProfileModal(state.profile, function (newP) {
         state.profile = newP;
-        try { await dbSaveBag(supa, userEmail, state); } catch (e) { log('[MINBAG] save profile fail', e); }
+        dbSaveBag(supa, userEmail, state).catch(function (e) { log('[MINBAG] save profile fail', e); });
         onProfileChanged();
       });
     });
@@ -1752,19 +1761,83 @@ function openAddBagModal(onSave) {
     var recoGrid = el('div', 'minbag-reco-grid');
     cardR.appendChild(recoGrid);
 
-    async function refreshReco() {
+    function refreshReco() {
       clear(recoGrid);
       holder.textContent = 'Laster anbefalinger…';
       holder.style.display = '';
 
-      try {
-        // ikke la excl. vokse uendelig
-        if (recoExclude.length > 50) recoExclude = recoExclude.slice(-30);
-        var recos = await pickRecoCandidates(supa, state.profile, state.discs, recoExclude);
+      // ikke la excl. vokse uendelig
+      if (recoExclude.length > 50) recoExclude = recoExclude.slice(-30);
+
+      return pickRecoCandidates(supa, state.profile, state.discs, recoExclude).then(function (recos) {
+        recos = Array.isArray(recos) ? recos : [];
         if (!recos.length) {
           holder.textContent = 'Fant ingen sikre anbefalinger på lager akkurat nå.';
           return;
         }
+
+        holder.style.display = 'none';
+
+        recos.forEach(function (r) {
+          var c = el('div', 'minbag-reco-card');
+
+          var head = el('div', 'minbag-reco-head');
+
+          var img = el('img', 'minbag-reco-img');
+          img.loading = 'lazy';
+          img.alt = '';
+          img.src = r.image || '';
+          if (!img.src) img.style.display = 'none';
+          head.appendChild(img);
+
+          var meta = el('div', 'minbag-reco-meta');
+          meta.appendChild(el('div', 'minbag-reco-title', r.name || ''));
+          meta.appendChild(el('div', 'minbag-muted', typeLabel(r.type)));
+          meta.appendChild(el('div', 'minbag-muted', r.why || ''));
+          head.appendChild(meta);
+
+          c.appendChild(head);
+
+          var actions = el('div', 'minbag-row');
+          var btnYes = el('button', 'minbag-btn', 'Legg til');
+          var btnNo = el('button', 'minbag-btn secondary', 'Nei takk');
+
+          btnYes.addEventListener('click', function () {
+            var disc = {
+              id: newId(),
+              url: r.url || '',
+              name: r.name || '',
+              note: '',
+              type: r.type,
+              color: '',
+              image: r.image || '',
+              flight: r.flight || parseFlightText(r.flightText || ''),
+              addedAt: today()
+            };
+            state.discs.push(disc);
+            if (typeof onProfileChanged === 'function') onProfileChanged();
+            dbSaveBag(supa, userEmail, state)
+              .then(function () { return incrementPopular(supa, disc); })
+              .catch(function (e) { log('[MINBAG] reco add save fail', e); });
+          });
+
+          btnNo.addEventListener('click', function () {
+            recoExclude.push(r.name || '');
+            refreshReco();
+          });
+
+          actions.appendChild(btnYes);
+          actions.appendChild(btnNo);
+          c.appendChild(actions);
+
+          recoGrid.appendChild(c);
+        });
+      }).catch(function (e) {
+        holder.textContent = 'Kunne ikke laste anbefalinger.';
+        log('[MINBAG] reco fail', e);
+      });
+    }
+
 
         holder.style.display = 'none';
 
@@ -1821,7 +1894,8 @@ function openAddBagModal(onSave) {
   }
 
   // -------------------- MAIN init ------------------------------------------
-  async function init(reason) {
+  // -------------------- MAIN init ------------------------------------------
+  function init(reason) {
     var now = Date.now();
     if (window.__MINBAG_SOFT_LOCK__.running) return;
     if (now - window.__MINBAG_SOFT_LOCK__.lastInitAt < 200) return;
@@ -1834,170 +1908,166 @@ function openAddBagModal(onSave) {
       var wrap = renderBase(root);
 
       // init default bags (for guest og før DB-load)
-      if (!state.bags) state.bags = { 'default': { name: 'Min bag', discs: [], profile: null } };
+      if (!state.bags) state.bags = { 'default': { name: 'Min bag', createdAt: (new Date()).toISOString(), items: { discs: [], bagInfo: {}, profile: null } } };
       if (!state.activeBagId) state.activeBagId = 'default';
 
       var marker = getLoginMarker();
-      var supa = await ensureSupabaseClient();
 
-      async function renderTop3Bottom() {
-        var holder = el('div', 'minbag-muted', 'Laster topplister…');
-        wrap.appendChild(holder);
-        try {
-          var groups = await fetchTop3Grouped(supa);
-          try { wrap.removeChild(holder); } catch (_) {}
-          renderTop3Section(wrap, groups);
-        } catch (e) {
-          holder.textContent = 'Kunne ikke laste topplister.';
-          log('[MINBAG] top3 fail', e);
+      ensureSupabaseClient().then(function (supa) {
+
+        function renderTop3Bottom() {
+          var holder = el('div', 'minbag-muted', 'Laster topplister…');
+          wrap.appendChild(holder);
+          return fetchTop3Grouped(supa).then(function (groups) {
+            try { wrap.removeChild(holder); } catch (_) {}
+            renderTop3Section(wrap, groups);
+            return true;
+          }).catch(function (e) {
+            holder.textContent = 'Kunne ikke laste topplister.';
+            log('[MINBAG] top3 fail', e);
+            return false;
+          });
         }
-      }
 
-      if (!marker.loggedIn) {
-        renderGuest(wrap);
-        await renderTop3Bottom();
-        window.__MINBAG_SOFT_LOCK__.running = false;
-        return;
-      }
+        if (!marker.loggedIn) {
+          renderGuest(wrap);
+          return renderTop3Bottom().then(function () {
+            window.__MINBAG_SOFT_LOCK__.running = false;
+          });
+        }
 
-      var sess = await supa.auth.getSession();
-      var session = (sess && sess.data) ? sess.data.session : null;
-      if (!session || !session.user) {
-        renderConnectView(wrap, marker, supa);
-        await renderTop3Bottom();
-        window.__MINBAG_SOFT_LOCK__.running = false;
-        return;
-      }
+        return supa.auth.getSession().then(function (sess) {
+          var session = (sess && sess.data) ? sess.data.session : null;
+          if (!session || !session.user) {
+            renderConnectView(wrap, marker, supa);
+            return renderTop3Bottom().then(function () {
+              window.__MINBAG_SOFT_LOCK__.running = false;
+            });
+          }
 
-      var gu = await supa.auth.getUser();
-      var user = (gu && gu.data) ? gu.data.user : (session.user || null);
-      if (!user || !user.email) {
-        renderConnectView(wrap, marker, supa);
-        await renderTop3Bottom();
-        window.__MINBAG_SOFT_LOCK__.running = false;
-        return;
-      }
-
-      var loaded = await dbLoadBag(supa, user.email);
-
-state.bags = loaded.bags || { 'default': { name: 'Min bag', createdAt: (new Date()).toISOString(), items: { discs: [], bagInfo: {}, profile: null } } };
-state.activeBagId = loaded.selected_bag || 'default';
-if (!state.bags[state.activeBagId]) state.activeBagId = 'default';
-setActiveBagId(state.activeBagId);async function refreshTop3() {
-        try {
-          var groups = await fetchTop3Grouped(supa);
-          renderTop3Section(wrap, groups);
-        } catch (e) { log('[MINBAG] top3 refresh failed', e); }
-      }
-
-      function renderAll() {
-        clear(wrap);
-
-        var banner = el('div', 'minbag-banner');
-        banner.appendChild(el('b', '', '🚧 Under konstruksjon'));
-        banner.appendChild(el('div', 'minbag-muted',
-          'Denne siden er under utvikling og kan endre seg fra dag til dag. Takk for tålmodigheten – full versjon kommer snart.'));
-        wrap.appendChild(banner);
-        wrap.appendChild(el('div', 'minbag-hr'));
-
-        renderHeaderLoggedIn(
-  wrap,
-  marker,
-  function onPickBagInfo() {
-    openAddBagModal(async function (bagInfo) {
-      state.bagInfo = bagInfo;
-      renderAll();
-      await dbSaveBag(supa, user.email, state);
-    });
-  },
-  function onAddDisc() {
-    openAddDiscModal(async function (disc) {
-      if (!disc.type) { alert('Velg kategori.'); return; }
-      state.discs.push(disc);
-      renderAll();
-      await dbSaveBag(supa, user.email, state);
-
-      await incrementPopular(supa, disc);
-      await refreshTop3();
-    });
-  },
-  function onCreateBag() {
-    openCreateBagModal(async function (payload) {
-      var id = makeBagId();
-      state.bags[id] = {
-        name: payload.name || 'Ny bag',
-        createdAt: (new Date()).toISOString(),
-        items: { discs: [], bagInfo: {}, profile: null }
-      };
-      setActiveBagId(id);
-      renderAll();
-      await dbSaveBag(supa, user.email, state);
-    });
-  },
-  async function onSelectBag(id) {
-    // Persist selected_bag
-    try {
-      await dbSaveBag(supa, user.email, state);
-    } catch (e) {
-      log('[MINBAG] save selected_bag fail', e);
-    }
-    renderAll();
-  }
-);
-}
-        );
-
-        renderFourBoxes(wrap, function onEdit(item) {
-          openEditDiscModal(item,
-            async function save(it) {
-              for (var i = 0; i < state.discs.length; i++) {
-                if (state.discs[i].id === it.id) { state.discs[i] = it; break; }
-              }
-              renderAll();
-              await dbSaveBag(supa, user.email, state);
-            },
-            async function del(it) {
-              state.discs = state.discs.filter(function (x) { return x.id !== it.id; });
-              renderAll();
-              await dbSaveBag(supa, user.email, state);
+          return supa.auth.getUser().then(function (gu) {
+            var user = (gu && gu.data) ? gu.data.user : (session.user || null);
+            if (!user || !user.email) {
+              renderConnectView(wrap, marker, supa);
+              return renderTop3Bottom().then(function () {
+                window.__MINBAG_SOFT_LOCK__.running = false;
+              });
             }
-          );
-        });
 
-        // C) Mellom boksene og flight-lista
-        var recoCtl = renderProfileAndReco(wrap, supa, user.email, function () {
-          // refresh whole view to update pills + reco
-          renderAll();
-        });
+            return dbLoadBag(supa, user.email).then(function (loaded) {
 
-        renderFlightList(wrap);
-        renderFlightChart(wrap);
+              // Multi-bag: bygg bags + aktiv bag
+              var rowLike = { bag: loaded.discs || [], bag_json: loaded.bag_json || null, selected_bag: loaded.selected_bag || 'default', profile: loaded.profile || null };
+              rowLike.bag_json = ensureBagJsonStructure(rowLike);
+              state.bags = rowLike.bag_json.bags;
+              state.activeBagId = rowLike.selected_bag || 'default';
+              setActiveBagId(state.activeBagId);
 
-        // Top3 nederst
-        renderTop3Section(wrap, { putter: [], midrange: [], fairway: [], distance: [] });
-        refreshTop3();
+              state.bagInfo = loaded.bagInfo || null;
 
-        // keep linter happy
-        if (recoCtl && recoCtl.refreshReco) {}
-      }
+              function refreshTop3() {
+                return fetchTop3Grouped(supa).then(function (groups) {
+                  renderTop3Section(wrap, groups);
+                }).catch(function (e) {
+                  log('[MINBAG] top3 refresh failed', e);
+                });
+              }
 
-      renderAll();
+              function renderAll() {
+                clear(wrap);
+
+                var banner = el('div', 'minbag-banner');
+                banner.appendChild(el('b', '', '🚧 Under konstruksjon'));
+                banner.appendChild(el('div', 'minbag-muted',
+                  'Denne siden er under utvikling og kan endre seg fra dag til dag. Takk for tålmodigheten – full versjon kommer snart.'));
+                wrap.appendChild(banner);
+                wrap.appendChild(el('div', 'minbag-hr'));
+
+                renderHeaderLoggedIn(
+                  wrap,
+                  marker,
+                  function onAddBag() {
+                    openAddBagModal(function (bagInfo) {
+                      state.bagInfo = bagInfo;
+                      renderAll();
+                      dbSaveBag(supa, user.email, state).catch(function (e) { log('[MINBAG] save bagInfo fail', e); });
+                    });
+                  },
+                  function onAddDisc() {
+                    openAddDiscModal(function (disc) {
+                      if (!disc.type) { alert('Velg kategori.'); return; }
+                      state.discs.push(disc);
+                      renderAll();
+                      dbSaveBag(supa, user.email, state)
+                        .then(function () { return incrementPopular(supa, disc); })
+                        .then(function () { return refreshTop3(); })
+                        .catch(function (e) { log('[MINBAG] add disc save fail', e); });
+                    });
+                  }
+                );
+
+                renderFourBoxes(wrap, function onEdit(item) {
+                  openEditDiscModal(item,
+                    function save(it) {
+                      for (var i = 0; i < state.discs.length; i++) {
+                        if (state.discs[i].id === it.id) { state.discs[i] = it; break; }
+                      }
+                      renderAll();
+                      dbSaveBag(supa, user.email, state).catch(function (e) { log('[MINBAG] save disc fail', e); });
+                    },
+                    function del(it) {
+                      state.discs = state.discs.filter(function (x) { return x.id !== it.id; });
+                      renderAll();
+                      dbSaveBag(supa, user.email, state).catch(function (e) { log('[MINBAG] delete disc fail', e); });
+                    }
+                  );
+                });
+
+                var recoCtl = renderProfileAndReco(wrap, supa, user.email, function () {
+                  renderAll();
+                });
+
+                renderFlightList(wrap);
+                renderFlightChart(wrap);
+
+                renderTop3Section(wrap, { putter: [], midrange: [], fairway: [], distance: [] });
+                refreshTop3();
+
+                if (recoCtl && recoCtl.refreshReco) {}
+              }
+
+              // hydrate active discs/profile from active bag
+              setActiveBagId(state.activeBagId);
+              renderAll();
+
+              return renderTop3Bottom().then(function () {
+                window.__MINBAG_SOFT_LOCK__.running = false;
+              });
+
+            }); // dbLoadBag
+          }); // getUser
+        }); // getSession
+
+      }).catch(function (e) {
+        log('[MINBAG] init fail', e);
+        try {
+          var root2 = ensureRoot();
+          var wrap2 = renderBase(root2);
+          var err = el('div', 'minbag-card');
+          err.appendChild(el('h2', 'minbag-title', 'Feil'));
+          err.appendChild(el('p', 'minbag-sub', 'Kunne ikke starte Min bag.'));
+          err.appendChild(el('pre', 'minbag-pre', String(e && e.message ? e.message : e)));
+          wrap2.appendChild(err);
+        } catch (_) {}
+        window.__MINBAG_SOFT_LOCK__.running = false;
+      });
+
+    } catch (e2) {
+      log('[MINBAG] init outer fail', e2);
       window.__MINBAG_SOFT_LOCK__.running = false;
-
-    } catch (err) {
-      window.__MINBAG_SOFT_LOCK__.running = false;
-      var root2 = ensureRoot();
-      clear(root2);
-      injectStyles();
-      var wrap2 = el('div', 'minbag-wrap');
-      var card2 = el('div', 'minbag-card');
-      card2.appendChild(el('div', 'minbag-muted',
-        'Min bag kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
-      wrap2.appendChild(card2);
-      root2.appendChild(wrap2);
-      log('[MINBAG] fatal', err);
     }
   }
+
 
   function boot(reason) {
     log('[MINBAG] boot', reason, 'build=', window.__MINBAG_BUILD__);
