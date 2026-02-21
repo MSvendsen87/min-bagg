@@ -13,7 +13,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-21';
+  var VERSION = 'v2026-02-21.1';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root is injected on /sider/min-bag by Quickbutik page content
@@ -102,20 +102,39 @@
   }
 
   function syncActiveFromBags() {
-    ensureBagsStructure();
+    // NB: IKKE kall ensureBagsStructure() her (unngår rekursjon).
+    if (!STATE.bags || typeof STATE.bags !== 'object') STATE.bags = {};
+    if (!STATE.activeBagId || !STATE.bags[STATE.activeBagId]) STATE.activeBagId = 'default';
+
     var b = STATE.bags[STATE.activeBagId];
-    STATE.discs = Array.isArray(b.items.discs) ? b.items.discs : [];
-    STATE.bagInfo = b.items.bagInfo || {};
-    STATE.profile = b.items.profile || null;
+    if (!b || typeof b !== 'object') b = STATE.bags.default;
+    if (!b.items || typeof b.items !== 'object') b.items = {};
+    if (!Array.isArray(b.items.discs)) b.items.discs = [];
+    if (!b.items.bagInfo || typeof b.items.bagInfo !== 'object') b.items.bagInfo = {};
+    if (b.items.profile === undefined) b.items.profile = null;
+
+    STATE.discs = b.items.discs;
+    STATE.bagInfo = b.items.bagInfo;
+    STATE.profile = b.items.profile;
   }
 
   function writeActiveBackToBags() {
-    ensureBagsStructure();
+    if (!STATE.bags || typeof STATE.bags !== 'object') STATE.bags = {};
+    if (!STATE.bags.default) {
+      STATE.bags.default = {
+        name: 'Min bag',
+        imageUrl: '',
+        createdAt: nowIso(),
+        items: { discs: [], bagInfo: {}, profile: null }
+      };
+    }
+    if (!STATE.activeBagId || !STATE.bags[STATE.activeBagId]) STATE.activeBagId = 'default';
+
     var b = STATE.bags[STATE.activeBagId];
     if (!b.items || typeof b.items !== 'object') b.items = {};
     b.items.discs = Array.isArray(STATE.discs) ? STATE.discs : [];
     b.items.bagInfo = STATE.bagInfo || {};
-    b.items.profile = STATE.profile || null;
+    b.items.profile = (STATE.profile === undefined) ? null : STATE.profile;
   }
 
   // ---------------------------
@@ -295,7 +314,11 @@
       sel.appendChild(o);
     }
     opt('default', (STATE.bags && STATE.bags.default && STATE.bags.default.name ? STATE.bags.default.name : 'Min bag') + ' (default)');
-    opt('bag2', (STATE.bags && STATE.bags.bag2 && STATE.bags.bag2.name ? STATE.bags.bag2.name : 'Bag 2') + ' (bag2)');
+    // Vis Bag 2 kun hvis den finnes (eller hvis valgt = bag2)
+    var hasBag2 = !!(STATE.bags && STATE.bags.bag2);
+    if (hasBag2 || STATE.activeBagId === 'bag2') {
+      opt('bag2', (STATE.bags && STATE.bags.bag2 && STATE.bags.bag2.name ? STATE.bags.bag2.name : 'Bag 2') + ' (bag2)');
+    }
     sel.value = STATE.activeBagId || 'default';
 
     sel.onchange = function () {
