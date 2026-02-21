@@ -37,47 +37,85 @@
   }
 
 
-  // === Multi-bag + mål/score + tekstsystem ===
+  // === Multi-bag (DB: bag_json.bags + selected_bag) ===
+//
+// DB-format (per bag):
+// bag_json: { bags: { <bagId>: { name, createdAt, items: { discs:[], bagInfo:{}, profile:{} } } } }
+// selected_bag: <bagId>
+//
+// Legacy (failsafe): kolonnen "bag" holdes som ARRAY for aktiv bag (discs[]).
   function ensureBagJsonStructure(row) {
-    var bj = row && row.bag_json;
+    row = row || {};
+    var bj = row.bag_json;
     if (!bj || typeof bj !== 'object') bj = {};
     if (!bj.bags || typeof bj.bags !== 'object') bj.bags = {};
-    if (!row.selected_bag) row.selected_bag = 'default';
 
-    if (!bj.bags['default']) {
+    var selected = row.selected_bag ? String(row.selected_bag) : 'default';
+    if (!selected) selected = 'default';
+
+    // Ensure default exists
+    if (!bj.bags['default'] || typeof bj.bags['default'] !== 'object') {
       bj.bags['default'] = {
         name: 'Min bag',
-        discs: Array.isArray(row.bag) ? row.bag : [],
-        profile: (row && row.profile) ? row.profile : null
+        createdAt: (new Date()).toISOString(),
+        items: { discs: [], bagInfo: {}, profile: null }
       };
     }
-    if (!bj.bags[row.selected_bag]) row.selected_bag = 'default';
 
-    Object.keys(bj.bags).forEach(function(id){
+    // Normalize each bag
+    Object.keys(bj.bags).forEach(function (id) {
       var b = bj.bags[id];
-      if (!b) return;
-      if (!Array.isArray(b.discs)) b.discs = [];
-      if (!b.name) b.name = 'Bag';
-      if (!b.profile) b.profile = null;
+      if (!b || typeof b !== 'object') {
+        bj.bags[id] = { name: 'Bag', createdAt: (new Date()).toISOString(), items: { discs: [], bagInfo: {}, profile: null } };
+        b = bj.bags[id];
+      }
+      if (!b.name) b.name = (id === 'default') ? 'Min bag' : 'Bag';
+      if (!b.createdAt) b.createdAt = (new Date()).toISOString();
+
+      // Migrate older structure if needed (discs/profile at top level)
+      if (!b.items || typeof b.items !== 'object') {
+        b.items = { discs: [], bagInfo: {}, profile: null };
+      }
+      if (!Array.isArray(b.items.discs)) {
+        // if older format had b.discs as array
+        if (Array.isArray(b.discs)) b.items.discs = b.discs;
+        else b.items.discs = [];
+      }
+      if (!b.items.bagInfo || typeof b.items.bagInfo !== 'object') b.items.bagInfo = {};
+      if (!('profile' in b.items)) b.items.profile = null;
+      if (b.items.profile && typeof b.items.profile !== 'object') b.items.profile = null;
     });
+
+    // If selected bag missing -> default
+    if (!bj.bags[selected]) selected = 'default';
+
+    // If default discs empty but legacy bag has discs array, seed default once
+    if (bj.bags['default'] && bj.bags['default'].items && Array.isArray(bj.bags['default'].items.discs)) {
+      if (bj.bags['default'].items.discs.length === 0 && Array.isArray(row.bag) && row.bag.length) {
+        bj.bags['default'].items.discs = row.bag;
+      }
+    }
+
+    row.selected_bag = selected;
+    row.bag_json = bj;
     return bj;
   }
 
-  function makeBagId() { return 'bag_' + Math.random().toString(36).slice(2,10); }
+  function makeBagId() { return 'bag_' + Math.random().toString(36).slice(2, 10); }function getActiveBag() {
+  if (!state.bags || !state.activeBagId) return null;
+  return state.bags[state.activeBagId] || null;
+}
+function setActiveBagId(id) {
+  if (!state.bags || !state.bags[id]) return;
+  state.activeBagId = id;
 
-  function getActiveBag() {
-    if (!state.bags || !state.activeBagId) return null;
-    return state.bags[state.activeBagId] || null;
-  }
-  function setActiveBagId(id) {
-    if (!state.bags || !state.bags[id]) return;
-    state.activeBagId = id;
-    var b = getActiveBag();
-    state.discs = (b && Array.isArray(b.discs)) ? b.discs.map(normalizeDiscItem) : [];
-    state.profile = (b && b.profile) ? b.profile : null;
-  }
+  var b = getActiveBag();
+  var items = (b && b.items && typeof b.items === 'object') ? b.items : { discs: [], bagInfo: {}, profile: null };
 
-  function bagTargets(profile, discCount) {
+  state.discs = Array.isArray(items.discs) ? items.discs.map(normalizeDiscItem) : [];
+  state.profile = (items.profile && typeof items.profile === 'object') ? items.profile : null;
+  state.bagInfo = (items.bagInfo && typeof items.bagInfo === 'object') ? items.bagInfo : null;
+}function bagTargets(profile, discCount) {
     var size = (profile && profile.bagSize) ? profile.bagSize : '13-16';
     var t;
     if (size === '10-12') t = { putter: 3, midrange: 3, fairway: 3, distance: 2 };
@@ -228,15 +266,15 @@
 
   // -------------------- Root + styles --------------------------------------
   function ensureRoot() {
-    var root = ensureRoot();
-    if (!root) {
-      root = document.createElement('div');
-      root.id = 'min-bag-root';
-      var area = document.getElementById('page-content-area') || document.body;
-      area.appendChild(root);
-    }
-    return root;
+  var root = document.getElementById('min-bag-root');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'min-bag-root';
+    var area = document.getElementById('page-content-area') || document.body;
+    area.appendChild(root);
   }
+  return root;
+}
 
   function injectStyles() {
     if (document.getElementById('minbag-styles')) return;
@@ -577,26 +615,37 @@
 
   // -------------------- DB (mybag_bags) -------------------------------------
   async function dbLoadBag(supa, email) {
-    var res = await supa.from('mybag_bags').select('bag, bag_json, selected_bag').eq('email', email).maybeSingle();
-    if (res && res.error) throw res.error;
-    var row = res && res.data ? res.data : null;
+  var res = await supa.from('mybag_bags').select('bag, bag_json, selected_bag').eq('email', email).maybeSingle();
+  if (res && res.error) throw res.error;
+  var row = res && res.data ? res.data : null;
 
-    // Normaliser til en felles struktur
-    var out = { bagInfo: null, discs: [], profile: null, bag_json: null, selected_bag: 'default' };
+  var out = { bags: null, selected_bag: 'default' };
 
-    if (!row) return out;
+  if (!row) {
+    // empty new user
+    var tmp = { bag: [], bag_json: null, selected_bag: 'default' };
+    var bj = ensureBagJsonStructure(tmp);
+    out.bags = bj.bags;
+    out.selected_bag = tmp.selected_bag || 'default';
+    return out;
+  }
 
-    // 1) Multi-bag kolonner (nyeste)
-    if (row.bag_json) out.bag_json = row.bag_json;
-    if (row.selected_bag) out.selected_bag = row.selected_bag;
+  // Legacy bag expected as array (failsafe). If it is object with discs, take discs.
+  var legacyDiscs = [];
+  if (Array.isArray(row.bag)) legacyDiscs = row.bag;
+  else if (row.bag && typeof row.bag === 'object' && Array.isArray(row.bag.discs)) legacyDiscs = row.bag.discs;
 
-    // 2) Eldre "bag" kan være array eller objekt
-    var bag = row.bag;
-    if (Array.isArray(bag)) {
-      out.discs = bag;
-      return out;
-    }
-    if (bag && typeof bag === 'object') {
+  var rowLike = {
+    bag: legacyDiscs,
+    bag_json: row.bag_json || null,
+    selected_bag: row.selected_bag || 'default'
+  };
+
+  var bj2 = ensureBagJsonStructure(rowLike);
+  out.bags = bj2.bags;
+  out.selected_bag = rowLike.selected_bag || 'default';
+  return out;
+}if (bag && typeof bag === 'object') {
       out.bagInfo = bag.bagInfo || null;
       out.discs = Array.isArray(bag.discs) ? bag.discs : (Array.isArray(bag.bag) ? bag.bag : []);
       out.profile = bag.profile || null;
@@ -605,35 +654,33 @@
   }
 
   async function dbSaveBag(supa, email, st) {
-    // Sync aktiv bag tilbake til state.bags
-    if (!st.bags) st.bags = { 'default': { name: 'Min bag', discs: st.discs || [], profile: st.profile || null } };
-    if (!st.activeBagId) st.activeBagId = 'default';
-    if (!st.bags[st.activeBagId]) st.bags[st.activeBagId] = { name: 'Min bag', discs: [], profile: null };
-
-    st.bags[st.activeBagId] = {
-      name: (st.bags[st.activeBagId].name || 'Bag'),
-      discs: st.discs || [],
-      profile: st.profile || null
+  // Ensure structure
+  if (!st.bags || typeof st.bags !== 'object') {
+    st.bags = {
+      'default': { name: 'Min bag', createdAt: (new Date()).toISOString(), items: { discs: st.discs || [], bagInfo: st.bagInfo || {}, profile: st.profile || null } }
     };
-
-    // Bakoverkompatibel "bag" (aktiv bag)
-    var legacyPayload = {
-      bagInfo: st.bagInfo || null,
-      discs: st.discs || [],
-      profile: st.profile || null
-    };
-
-    var up = await supa.from('mybag_bags').upsert({
-      email: email,
-      bag: legacyPayload,
-      bag_json: { bags: st.bags },
-      selected_bag: st.activeBagId
-    }, { onConflict: 'email' });
-
-    if (up && up.error) throw up.error;
   }
+  if (!st.activeBagId || !st.bags[st.activeBagId]) st.activeBagId = 'default';
 
-  // -------------------- State ----------------------------------------------
+  // Write active state back into the active bag
+  var active = st.bags[st.activeBagId];
+  if (!active.items || typeof active.items !== 'object') active.items = { discs: [], bagInfo: {}, profile: null };
+  active.items.discs = st.discs || [];
+  active.items.bagInfo = st.bagInfo || {};
+  active.items.profile = st.profile || null;
+
+  // Failsafe legacy: keep "bag" column as ARRAY for active bag
+  var legacyBagArray = st.discs || [];
+
+  var up = await supa.from('mybag_bags').upsert({
+    email: email,
+    bag: legacyBagArray,
+    bag_json: { bags: st.bags },
+    selected_bag: st.activeBagId
+  }, { onConflict: 'email' });
+
+  if (up && up.error) throw up.error;
+}// -------------------- State ----------------------------------------------
   var state = { bagInfo: null, discs: [], profile: null, bags: null, activeBagId: null };
   window.__MINBAG_STATE__ = state;
   // Debug: eksponer state i console (trygt)
@@ -1073,38 +1120,75 @@
     wrap.appendChild(el('div', 'minbag-hr'));
   }
 
-  function renderHeaderLoggedIn(wrap, marker, onAddBag, onAddDisc) {
-    var card = el('div', 'minbag-card');
-    card.appendChild(el('h2', 'minbag-title', (marker.firstname ? (marker.firstname + ' SIN BAG') : 'Min bag')));
-    card.appendChild(el('p', 'minbag-sub', (marker.firstname ? ('Hei ' + marker.firstname + ' 👋 ') : '') + 'Bagen din lagres på kontoen din.'));
+  function renderHeaderLoggedIn(wrap, marker, onPickBagInfo, onAddDisc, onCreateBag, onSelectBag) {
+  var card = el('div', 'minbag-card');
 
-    if (state.bagInfo && (state.bagInfo.name || state.bagInfo.image)) {
-      var row = el('div', 'minbag-item');
-      if (state.bagInfo.image) {
-        var im = el('img', 'minbag-thumb');
-        im.src = state.bagInfo.image;
-        im.alt = '';
-        im.loading = 'lazy';
-        row.appendChild(im);
-      }
-      var meta = el('div', 'minbag-meta');
-      meta.appendChild(el('div', 'minbag-name', state.bagInfo.name || 'Bag'));
-      row.appendChild(meta);
-      card.appendChild(row);
-    }
+  // Title (bag name)
+  var active = getActiveBag();
+  var activeName = (active && active.name) ? active.name : 'Min bag';
 
-    var btnRow = el('div', 'minbag-row');
-    var bBag = el('button', 'minbag-btn secondary', 'Legg til bag');
-    bBag.addEventListener('click', onAddBag);
-    var bDisc = el('button', 'minbag-btn', 'Legg til disk');
-    bDisc.addEventListener('click', onAddDisc);
-    btnRow.appendChild(bBag);
-    btnRow.appendChild(bDisc);
-    card.appendChild(btnRow);
+  card.appendChild(el('h2', 'minbag-title', activeName.toUpperCase()));
+  card.appendChild(el('p', 'minbag-sub', (marker.firstname ? ('Hei ' + marker.firstname + ' 👋 ') : '') + 'Bagen din lagres på kontoen din.'));
 
-    wrap.appendChild(card);
-    wrap.appendChild(el('div', 'minbag-hr'));
+  // Bag selector
+  if (state.bags) {
+    var selWrap = el('div', 'minbag-row');
+    selWrap.appendChild(el('div', 'minbag-label', 'Velg bag'));
+    var sel = el('select', 'minbag-select');
+    Object.keys(state.bags).forEach(function (id) {
+      var b = state.bags[id];
+      var o = document.createElement('option');
+      o.value = id;
+      o.textContent = (b && b.name) ? b.name : id;
+      if (id === state.activeBagId) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', function () {
+      var id = sel.value;
+      if (!id || !state.bags[id]) return;
+      setActiveBagId(id);
+      if (typeof onSelectBag === 'function') onSelectBag(id);
+    });
+    selWrap.appendChild(sel);
+    card.appendChild(selWrap);
   }
+
+  // Selected backpack (bagInfo) inside active bag
+  if (state.bagInfo && (state.bagInfo.name || state.bagInfo.image)) {
+    var row = el('div', 'minbag-item');
+    if (state.bagInfo.image) {
+      var im = el('img', 'minbag-thumb');
+      im.src = state.bagInfo.image;
+      im.alt = '';
+      im.loading = 'lazy';
+      row.appendChild(im);
+    }
+    var meta = el('div', 'minbag-meta');
+    meta.appendChild(el('div', 'minbag-name', state.bagInfo.name || 'Sekk'));
+    row.appendChild(meta);
+    card.appendChild(row);
+  }
+
+  var btnRow = el('div', 'minbag-row');
+
+  var bNewBag = el('button', 'minbag-btn secondary', 'Ny bag');
+  bNewBag.addEventListener('click', onCreateBag);
+
+  var bPick = el('button', 'minbag-btn secondary', 'Velg sekk');
+  bPick.addEventListener('click', onPickBagInfo);
+
+  var bDisc = el('button', 'minbag-btn', 'Legg til disk');
+  bDisc.addEventListener('click', onAddDisc);
+
+  btnRow.appendChild(bNewBag);
+  btnRow.appendChild(bPick);
+  btnRow.appendChild(bDisc);
+
+  card.appendChild(btnRow);
+
+  wrap.appendChild(card);
+  wrap.appendChild(el('div', 'minbag-hr'));
+}
 
   // B) Klikkbart kort (uten Endre-knapp)
   function renderFourBoxes(wrap, onEdit) {
@@ -1574,25 +1658,44 @@
     });
   }
 
-  function openAddBagModal(onSave) {
-    openModal('Legg til bag', function (modal, close) {
-      modal.appendChild(el('div', 'minbag-label', 'Navn'));
-      var nInp = el('input', 'minbag-input'); nInp.placeholder = 'Navn på bagen';
-      modal.appendChild(nInp);
+  function openCreateBagModal(onCreate) {
+  openModal('Ny bag', function (modal, close) {
+    modal.appendChild(el('div', 'minbag-label', 'Navn på bag'));
+    var nInp = el('input', 'minbag-input');
+    nInp.placeholder = 'F.eks. Konkurranse / Trening / Vinter';
+    modal.appendChild(nInp);
 
-      modal.appendChild(el('div', 'minbag-label', 'Bilde-URL (valgfritt)'));
-      var iInp = el('input', 'minbag-input'); iInp.placeholder = 'https://...';
-      modal.appendChild(iInp);
-
-      var save = el('button', 'minbag-btn', 'Lagre bag');
-      save.style.marginTop = '10px';
-      save.addEventListener('click', function () {
-        onSave({ name: safeStr(nInp.value).trim() || 'Bag', image: safeStr(iInp.value).trim(), url: '' });
-        close();
-      });
-      modal.appendChild(save);
+    var save = el('button', 'minbag-btn', 'Opprett');
+    save.style.marginTop = '10px';
+    save.addEventListener('click', function () {
+      var name = safeStr(nInp.value).trim() || 'Ny bag';
+      onCreate({ name: name });
+      close();
     });
-  }
+    modal.appendChild(save);
+  });
+}
+
+function openAddBagModal(onSave) {
+  // Dette er "bagInfo" (sekk/bag-modell), ikke multi-bag.
+  openModal('Velg sekk', function (modal, close) {
+    modal.appendChild(el('div', 'minbag-label', 'Navn'));
+    var nInp = el('input', 'minbag-input'); nInp.placeholder = 'Navn på sekken';
+    modal.appendChild(nInp);
+
+    modal.appendChild(el('div', 'minbag-label', 'Bilde-URL (valgfritt)'));
+    var iInp = el('input', 'minbag-input'); iInp.placeholder = 'https://...';
+    modal.appendChild(iInp);
+
+    var save = el('button', 'minbag-btn', 'Lagre');
+    save.style.marginTop = '10px';
+    save.addEventListener('click', function () {
+      onSave({ name: safeStr(nInp.value).trim() || 'Sekk', image: safeStr(iInp.value).trim(), url: '' });
+      close();
+    });
+    modal.appendChild(save);
+  });
+}
 
   // -------------------- C) Profil + anbefalinger render --------------------
   function renderProfileAndReco(wrap, supa, userEmail, onProfileChanged) {
@@ -1777,16 +1880,10 @@
 
       var loaded = await dbLoadBag(supa, user.email);
 
-      // Multi-bag: bygg bags + aktiv bag. Auto "Min bag" hvis tomt.
-      var rowLike = { bag: loaded.discs || [], bag_json: loaded.bag_json || null, selected_bag: loaded.selected_bag || 'default', profile: loaded.profile || null };
-      rowLike.bag_json = ensureBagJsonStructure(rowLike);
-      state.bags = rowLike.bag_json.bags;
-      state.activeBagId = rowLike.selected_bag || 'default';
-      setActiveBagId(state.activeBagId);
-
-      state.bagInfo = loaded.bagInfo || null;
-
-      async function refreshTop3() {
+state.bags = loaded.bags || { 'default': { name: 'Min bag', createdAt: (new Date()).toISOString(), items: { discs: [], bagInfo: {}, profile: null } } };
+state.activeBagId = loaded.selected_bag || 'default';
+if (!state.bags[state.activeBagId]) state.activeBagId = 'default';
+setActiveBagId(state.activeBagId);async function refreshTop3() {
         try {
           var groups = await fetchTop3Grouped(supa);
           renderTop3Section(wrap, groups);
@@ -1804,26 +1901,50 @@
         wrap.appendChild(el('div', 'minbag-hr'));
 
         renderHeaderLoggedIn(
-          wrap,
-          marker,
-          function onAddBag() {
-            openAddBagModal(async function (bagInfo) {
-              state.bagInfo = bagInfo;
-              renderAll();
-              await dbSaveBag(supa, user.email, state);
-            });
-          },
-          function onAddDisc() {
-            openAddDiscModal(async function (disc) {
-              if (!disc.type) { alert('Velg kategori.'); return; }
-              state.discs.push(disc);
-              renderAll();
-              await dbSaveBag(supa, user.email, state);
+  wrap,
+  marker,
+  function onPickBagInfo() {
+    openAddBagModal(async function (bagInfo) {
+      state.bagInfo = bagInfo;
+      renderAll();
+      await dbSaveBag(supa, user.email, state);
+    });
+  },
+  function onAddDisc() {
+    openAddDiscModal(async function (disc) {
+      if (!disc.type) { alert('Velg kategori.'); return; }
+      state.discs.push(disc);
+      renderAll();
+      await dbSaveBag(supa, user.email, state);
 
-              await incrementPopular(supa, disc);
-              await refreshTop3();
-            });
-          }
+      await incrementPopular(supa, disc);
+      await refreshTop3();
+    });
+  },
+  function onCreateBag() {
+    openCreateBagModal(async function (payload) {
+      var id = makeBagId();
+      state.bags[id] = {
+        name: payload.name || 'Ny bag',
+        createdAt: (new Date()).toISOString(),
+        items: { discs: [], bagInfo: {}, profile: null }
+      };
+      setActiveBagId(id);
+      renderAll();
+      await dbSaveBag(supa, user.email, state);
+    });
+  },
+  async function onSelectBag(id) {
+    // Persist selected_bag
+    try {
+      await dbSaveBag(supa, user.email, state);
+    } catch (e) {
+      log('[MINBAG] save selected_bag fail', e);
+    }
+    renderAll();
+  }
+);
+}
         );
 
         renderFourBoxes(wrap, function onEdit(item) {
