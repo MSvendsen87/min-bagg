@@ -1,5 +1,5 @@
 /* ============================================================================
-   GOLFKONGEN – MIN BAGG (stable) – FULL FIL (REBUILD)
+   GOLFKONGEN – MIN BAG (stable) – FULL FIL (REBUILD)
    Build: 2026-02-14 (A+B locked) + C (Profile + Recommendations)
    Side: /sider/min-bag
 
@@ -20,11 +20,11 @@
   var p = (location && location.pathname) ? String(location.pathname) : '';
   p = p.replace(/\/+$/g, '');
   if (p !== '/sider/min-bag') return;
-  if (window.__DISABLE_MINBAGG__ === true) return;
+  if (window.__DISABLE_MINBAG__ === true) return;
 
-  window.__MINBAGG_BUILD__ = '2026-02-14-REBUILD-A+B+C';
+  window.__MINBAG_BUILD__ = '2026-02-14-REBUILD-A+B+C';
 
-  if (!window.__MINBAGG_SOFT_LOCK__) window.__MINBAGG_SOFT_LOCK__ = { running: false, lastInitAt: 0 };
+  if (!window.__MINBAG_SOFT_LOCK__) window.__MINBAG_SOFT_LOCK__ = { running: false, lastInitAt: 0 };
 
   // -------------------- Utils ----------------------------------------------
   function log() { try { console.log.apply(console, arguments); } catch (_) {} }
@@ -182,7 +182,7 @@
   function recoSentence(profile, type, have, need, roleMissing) {
     var base = 'Du har ' + have + ' av ca. ' + need + ' anbefalte ' + typeLabel2(type).toLowerCase() + '. ';
     if (have < Math.max(1, Math.ceil(need*0.5))) return base + 'Du er tidlig i oppbyggingen her, så dette er et naturlig neste steg.';
-    if (have < need) return base + 'Du mangler fortsatt ' + (need-have) + ' for å fylle opp baggen i denne kategorien.';
+    if (have < need) return base + 'Du mangler fortsatt ' + (need-have) + ' for å fylle opp bagen i denne kategorien.';
     if (have > need) return base + 'Du har allerede godt med ' + typeLabel2(type).toLowerCase() + ', så her foreslår jeg en variant som gir mer bredde.';
     return base + (roleMissing ? ('Antallet er på plass, men du mangler en ' + roleMissing + ' variant.') : 'Antallet er på plass – her er et forslag som kan gi deg litt ekstra variasjon.');
   }
@@ -365,16 +365,16 @@
     });
   }
   async function ensureSupabaseClient() {
-    if (window.__MINBAGG_SUPA__) return window.__MINBAGG_SUPA__;
+    if (window.__MINBAG_SUPA__) return window.__MINBAG_SUPA__;
     var cfg = getSupaConfig();
     if (!cfg.url || !cfg.anon) throw new Error('Manglende Supabase config (GK_SUPABASE_URL / GK_SUPABASE_ANON_KEY).');
     if (!window.supabase || !window.supabase.createClient) {
       await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js');
     }
-    window.__MINBAGG_SUPA__ = window.supabase.createClient(cfg.url, cfg.anon, {
+    window.__MINBAG_SUPA__ = window.supabase.createClient(cfg.url, cfg.anon, {
       auth: { persistSession: true, storageKey: 'gk_minbag_auth_v1' }
     });
-    return window.__MINBAGG_SUPA__;
+    return window.__MINBAG_SUPA__;
   }
 
   // -------------------- Login marker (Quickbutik) ---------------------------
@@ -569,9 +569,9 @@
         p_url: item.url || null,
         p_image: item.image || null
       });
-      if (r && r.error) log('[MINBAGG] popular inc error', r.error);
+      if (r && r.error) log('[MINBAG] popular inc error', r.error);
     } catch (e) {
-      log('[MINBAGG] popular inc fail', e);
+      log('[MINBAG] popular inc fail', e);
     }
   }
 
@@ -635,9 +635,9 @@
 
   // -------------------- State ----------------------------------------------
   var state = { bagInfo: null, discs: [], profile: null, bags: null, activeBagId: null };
-  window.__MINBAGG_STATE__ = state;
+  window.__MINBAG_STATE__ = state;
   // Debug: eksponer state i console (trygt)
-  window.__MINBAGG_STATE__ = state;
+  window.__MINBAG_STATE__ = state;
   // C) Anbefalinger: hold oversikt over hva brukeren har sagt "Nei takk" til i denne økten
   var recoExclude = [];
 
@@ -1075,7 +1075,7 @@
 
   function renderHeaderLoggedIn(wrap, marker, onAddBag, onAddDisc) {
     var card = el('div', 'minbag-card');
-    card.appendChild(el('h2', 'minbag-title', (marker.firstname ? (marker.firstname + ' SIN BAGG') : 'Min bag')));
+    card.appendChild(el('h2', 'minbag-title', (marker.firstname ? (marker.firstname + ' SIN BAG') : 'Min bag')));
     card.appendChild(el('p', 'minbag-sub', (marker.firstname ? ('Hei ' + marker.firstname + ' 👋 ') : '') + 'Bagen din lagres på kontoen din.'));
 
     if (state.bagInfo && (state.bagInfo.name || state.bagInfo.image)) {
@@ -1614,7 +1614,7 @@
     btnEdit.addEventListener('click', function () {
       openProfileModal(state.profile, async function (newP) {
         state.profile = newP;
-        try { await dbSaveBag(supa, userEmail, state); } catch (e) { log('[MINBAGG] save profile fail', e); }
+        try { await dbSaveBag(supa, userEmail, state); } catch (e) { log('[MINBAG] save profile fail', e); }
         onProfileChanged();
       });
     });
@@ -1704,7 +1704,7 @@
 
       } catch (e) {
         holder.textContent = 'Kunne ikke laste anbefalinger.';
-        log('[MINBAGG] reco fail', e);
+        log('[MINBAG] reco fail', e);
       }
     }
 
@@ -1720,10 +1720,10 @@
   // -------------------- MAIN init ------------------------------------------
   async function init(reason) {
     var now = Date.now();
-    if (window.__MINBAGG_SOFT_LOCK__.running) return;
-    if (now - window.__MINBAGG_SOFT_LOCK__.lastInitAt < 200) return;
-    window.__MINBAGG_SOFT_LOCK__.running = true;
-    window.__MINBAGG_SOFT_LOCK__.lastInitAt = now;
+    if (window.__MINBAG_SOFT_LOCK__.running) return;
+    if (now - window.__MINBAG_SOFT_LOCK__.lastInitAt < 200) return;
+    window.__MINBAG_SOFT_LOCK__.running = true;
+    window.__MINBAG_SOFT_LOCK__.lastInitAt = now;
 
     try {
       injectStyles();
@@ -1746,14 +1746,14 @@
           renderTop3Section(wrap, groups);
         } catch (e) {
           holder.textContent = 'Kunne ikke laste topplister.';
-          log('[MINBAGG] top3 fail', e);
+          log('[MINBAG] top3 fail', e);
         }
       }
 
       if (!marker.loggedIn) {
         renderGuest(wrap);
         await renderTop3Bottom();
-        window.__MINBAGG_SOFT_LOCK__.running = false;
+        window.__MINBAG_SOFT_LOCK__.running = false;
         return;
       }
 
@@ -1762,7 +1762,7 @@
       if (!session || !session.user) {
         renderConnectView(wrap, marker, supa);
         await renderTop3Bottom();
-        window.__MINBAGG_SOFT_LOCK__.running = false;
+        window.__MINBAG_SOFT_LOCK__.running = false;
         return;
       }
 
@@ -1771,7 +1771,7 @@
       if (!user || !user.email) {
         renderConnectView(wrap, marker, supa);
         await renderTop3Bottom();
-        window.__MINBAGG_SOFT_LOCK__.running = false;
+        window.__MINBAG_SOFT_LOCK__.running = false;
         return;
       }
 
@@ -1790,7 +1790,7 @@
         try {
           var groups = await fetchTop3Grouped(supa);
           renderTop3Section(wrap, groups);
-        } catch (e) { log('[MINBAGG] top3 refresh failed', e); }
+        } catch (e) { log('[MINBAG] top3 refresh failed', e); }
       }
 
       function renderAll() {
@@ -1861,10 +1861,10 @@
       }
 
       renderAll();
-      window.__MINBAGG_SOFT_LOCK__.running = false;
+      window.__MINBAG_SOFT_LOCK__.running = false;
 
     } catch (err) {
-      window.__MINBAGG_SOFT_LOCK__.running = false;
+      window.__MINBAG_SOFT_LOCK__.running = false;
       var root2 = ensureRoot();
       clear(root2);
       injectStyles();
@@ -1874,12 +1874,12 @@
         'Min bag kunne ikke starte: ' + (err && err.message ? err.message : String(err))));
       wrap2.appendChild(card2);
       root2.appendChild(wrap2);
-      log('[MINBAGG] fatal', err);
+      log('[MINBAG] fatal', err);
     }
   }
 
   function boot(reason) {
-    log('[MINBAGG] boot', reason, 'build=', window.__MINBAGG_BUILD__);
+    log('[MINBAG] boot', reason, 'build=', window.__MINBAG_BUILD__);
     init(reason);
   }
 
@@ -1890,7 +1890,7 @@
   }
 
   window.addEventListener('pageshow', function () {
-    window.__MINBAGG_SOFT_LOCK__.running = false;
+    window.__MINBAG_SOFT_LOCK__.running = false;
     boot('pageshow');
   });
 
