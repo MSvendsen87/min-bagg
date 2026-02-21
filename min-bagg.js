@@ -13,7 +13,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-21.2';
+  var VERSION = 'v2026-02-21.3';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root is injected on /sider/min-bag by Quickbutik page content
@@ -561,7 +561,7 @@
       clear(body);
       rows.forEach(function (row, i) {
         var wrap = el('div', '');
-        wrap.style.cssText = 'display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.08)';
+        wrap.style.cssText = 'display:flex;gap:14px;align-items:center;padding:14px;border-radius:16px;margin-bottom:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(6px);';
 
         var imgUrl = row.image_url || row.image || row.product_image || row.product_image_url || '';
         if (imgUrl) {
@@ -700,6 +700,23 @@
   // ---------------------------
   // Boot
   // ---------------------------
+  
+  function renderConstructionBanner(root) {
+    var banner = document.createElement('div');
+    banner.style.cssText =
+      'background:linear-gradient(90deg,#1e3c2f,#2e8b57);' +
+      'padding:12px 16px;margin:0 0 16px 0;border-radius:14px;' +
+      'border:1px solid rgba(255,255,255,.15);' +
+      'box-shadow:0 8px 24px rgba(0,0,0,.25);';
+    banner.innerHTML =
+      '<div style="font-weight:800;font-size:14px;letter-spacing:.5px;">' +
+      '⚠ Min bag er under bygging</div>' +
+      '<div style="font-size:13px;opacity:.9;margin-top:4px;">' +
+      'Design og funksjoner forbedres fortløpende. Full versjon kommer snart.' +
+      '</div>';
+    root.insertBefore(banner, root.firstChild);
+  }
+
   function boot() {
     setMsg('', '');
 
