@@ -13,7 +13,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-21.1';
+  var VERSION = 'v2026-02-21.2';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root is injected on /sider/min-bag by Quickbutik page content
@@ -289,7 +289,7 @@
     h.textContent = 'Min bag';
     var p = el('div', 'minbag-p');
     p.style.cssText = 'opacity:.9;margin-bottom:10px';
-    p.textContent = 'Lag og vedlikehold discgolf-sekken din. Logg inn med magic link for å lagre.';
+    p.textContent = 'Bygg og lagre discgolf-sekken din. Du er innlogget på GolfKongen.no – koble til med magic link for å lagre i Min bag.';
     card.appendChild(h);
     card.appendChild(p);
 
@@ -553,30 +553,86 @@
     if (!body) return;
     body.textContent = 'Laster…';
 
-    // Best-effort: try view mybag_popular (public select). If it fails, show "Ingen data".
+    function renderRows(rows) {
+      if (!rows || !rows.length) {
+        body.textContent = 'Ingen data ennå.';
+        return;
+      }
+      clear(body);
+      rows.forEach(function (row, i) {
+        var wrap = el('div', '');
+        wrap.style.cssText = 'display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.08)';
+
+        var imgUrl = row.image_url || row.image || row.product_image || row.product_image_url || '';
+        if (imgUrl) {
+          var img = document.createElement('img');
+          img.src = imgUrl;
+          img.alt = row.name || row.disc_name || 'Disk';
+          img.style.cssText = 'width:36px;height:36px;border-radius:10px;object-fit:cover;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05)';
+          wrap.appendChild(img);
+        } else {
+          var ph = el('div','');
+          ph.style.cssText = 'width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04)';
+          wrap.appendChild(ph);
+        }
+
+        var mid = el('div','');
+        mid.style.cssText = 'flex:1;min-width:0';
+
+        var name = safeStr(row.name || row.disc_name || row.product_name || 'Disk');
+        var type = safeStr(row.type || row.disc_type || '').toLowerCase();
+
+        var title = el('div','', name);
+        title.style.cssText = 'font-weight:800;line-height:1.1';
+        mid.appendChild(title);
+
+        if (type) {
+          var tt = el('div','', type);
+          tt.style.cssText = 'font-size:12px;opacity:.75;margin-top:2px';
+          mid.appendChild(tt);
+        }
+
+        var url = row.product_url || row.url || row.productUrl || '';
+        if (url) {
+          var link = a(url, 'Se produkt', '');
+          link.style.cssText = 'display:inline-block;margin-top:4px;font-size:12px;opacity:.85;color:#cfe;text-decoration:none';
+          mid.appendChild(link);
+        }
+
+        wrap.appendChild(mid);
+
+        var c = row.count || row.cnt || row.times || row.selected || 0;
+        var right = el('div','', String(c));
+        right.style.cssText = 'font-weight:900;opacity:.9;min-width:38px;text-align:right';
+        wrap.appendChild(right);
+
+        body.appendChild(wrap);
+      });
+    }
+
     ensureSupabaseClient().then(function (supa) {
+      // Primær: popular_discs (155 rader hos deg)
       return supa
-        .from('mybag_popular')
-        .select('*')
+        .from('popular_discs')
+        .select('type,name,count,product_url,image_url')
+        .order('count', { ascending: false })
         .limit(3)
         .then(function (r) {
           if (r && r.error) throw r.error;
           var rows = (r && r.data) ? r.data : [];
-          if (!rows.length) {
-            body.textContent = 'Ingen data ennå.';
+          if (rows && rows.length) {
+            renderRows(rows);
             return;
           }
-          clear(body);
-          rows.forEach(function (row) {
-            var line = el('div', '');
-            line.style.cssText = 'display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08)';
-            var left = el('div', '', (row && (row.name || row.disc_name || row.product_name)) ? (row.name || row.disc_name || row.product_name) : 'Disk');
-            var right = el('div', '', 'Valgt ' + (row && (row.count || row.cnt || row.times)) ? (row.count || row.cnt || row.times) : '');
-            right.style.cssText = 'opacity:.8';
-            line.appendChild(left);
-            line.appendChild(right);
-            body.appendChild(line);
-          });
+          // Fallback: view mybag_popular
+          return supa
+            .from('mybag_popular')
+            .select('*')
+            .limit(3)
+            .then(function (r2) {
+              if (r2 && r2.error) throw r2.error;
+              renderRows((r2 && r2.data) ? r2.data : []);
+            });
         });
     }).catch(function () {
       body.textContent = 'Ingen data ennå.';
@@ -660,6 +716,17 @@
       dbLoad(STATE.email).then(function (row) {
         var parsed = parseRowToState(row || {});
         STATE.bags = parsed.bags;
+        // UI støtter kun default + bag2 (beholder andre i DB, men ignorerer i appen)
+        if (STATE.bags && typeof STATE.bags === 'object') {
+          var keep = {};
+          if (STATE.bags.default) keep.default = STATE.bags.default;
+          if (STATE.bags.bag2) keep.bag2 = STATE.bags.bag2;
+          // Hvis valgt bag er en "annen" id, flytt den inn som bag2 (for ikke å miste tilgang)
+          if (STATE.activeBagId && STATE.activeBagId !== 'default' && STATE.activeBagId !== 'bag2' && STATE.bags[STATE.activeBagId]) {
+            keep.bag2 = STATE.bags[STATE.activeBagId];
+          }
+          STATE.bags = keep;
+        }
         STATE.activeBagId = parsed.activeBagId || 'default';
         ensureBagsStructure();
 
