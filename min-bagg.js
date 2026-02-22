@@ -1,124 +1,165 @@
-/*
-============================================================================
-GOLFKONGEN – MIN BAG Build: v2026-02-22.1 (ES5 safe – no async/await)
-Mål i denne versjonen: - Få tilbake “bra versjon”-følelsen: tydelige
-GK-cards, seksjoner, mindre rot - Kun 2 bagger (default + bag2), slett
-Bag 2 - Bag-navn + bag-bilde (URL) - Legg til disker via
-kategori-knapper (mobilvennlig) - Diskliste pr kategori + flight-liste -
-Enkel flight-visual (inline SVG) pr disk - “Anbefalt for deg” (på lager
-– best effort) + “Nei takk” gir nytt forslag - Topp 3 per type
-(putter/midrange/fairway/distance) fra popular_discs - Under bygging
-banner øverst MERK: - Flight-data hentes best-effort fra produktside
-(fallback: tomme felter + manuell edit) - Denne fila bygger videre på
-det som allerede fungerer i Supabase-oppsettet ditt.
-============================================================================
-*/
+/* ============================================================================
+   GOLFKONGEN – MIN BAG
+   Build: v2026-02-21.6  (ES5 safe – no async/await)
+   Mål i denne versjonen:
+   - Få tilbake "bra versjon"-følelsen: tydelige GK-cards, seksjoner, mindre rot
+   - Kun 2 bagger (default + bag2), slett Bag 2
+   - Bag-navn + bag-bilde (URL)
+   - Legg til disker via kategori-knapper (mobilvennlig)
+   - Diskliste pr kategori + flight-liste
+   - Enkel flight-visual (inline SVG) pr disk
+   - "Anbefalt for deg" (på lager – best effort) + "Nei takk" gir nytt forslag
+   - Topp 3 per type (putter/midrange/fairway/distance) fra popular_discs
+   - Under bygging banner øverst
+   MERK:
+   - Flight-data hentes best-effort fra produktside (fallback: tomme felter + manuell edit)
+   - Denne fila bygger videre på det som allerede fungerer i Supabase-oppsettet ditt.
+   ============================================================================ */
 
-(function () { ‘use strict’;
+(function () {
+  'use strict';
 
-var VERSION = ‘v2026-02-22.1’; console.log(‘[MINBAG] boot’ + VERSION);
+  var VERSION = 'v2026-02-21.6';
+  console.log('[MINBAG] boot ' + VERSION);
 
-// Root var ROOT_ID = ‘min-bag-root’; var root =
-document.getElementById(ROOT_ID); if (!root) return;
+  // Root
+  var ROOT_ID = 'min-bag-root';
+  var root = document.getElementById(ROOT_ID);
+  if (!root) return;
 
-// Supabase config (fra loader) var SUPA_URL = window.GK_SUPABASE_URL;
-var SUPA_KEY = window.GK_SUPABASE_ANON_KEY;
+  // Supabase config (fra loader)
+  var SUPA_URL = window.GK_SUPABASE_URL;
+  var SUPA_KEY = window.GK_SUPABASE_ANON_KEY;
 
-// ————————— // Helpers (ES5) // ————————— function el(tag, cls, txt) {
-var e = document.createElement(tag); if (cls) e.className = cls; if (txt
-!== undefined && txt !== null) e.textContent = txt; return e; } function
-css(e, s) { e.style.cssText = s; return e; } function clear(node) {
-while (node.firstChild) node.removeChild(node.firstChild); } function
-safeStr(v) { return (v === null || v === undefined) ? ’’ : String(v); }
-function nowIso() { return (new Date()).toISOString(); } function
-clampTxt(s, n) { s = safeStr(s); return s.length > n ? s.slice(0,
-n - 1) + ‘…’ : s; } function normEmail(s) { return
-safeStr(s).trim().toLowerCase(); } function uniqId(prefix) { return
-prefix + ’_’ + Math.random().toString(16).slice(2) +
-Date.now().toString(16); } function isAbsUrl(u) { return
-/^https?:///i.test(u || ’‘); } function toAbs(u) { u =
-safeStr(u).trim(); if (!u) return’‘; if (isAbsUrl(u)) return u; if
-(u.indexOf(’//‘) === 0) return location.protocol + u; if (u[0] ===’/’)
-return location.origin + u; return u; }
+  // ---------------------------
+  // Helpers (ES5)
+  // ---------------------------
+  function el(tag, cls, txt) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (txt !== undefined && txt !== null) e.textContent = txt;
+    return e;
+  }
+  function css(e, s) { e.style.cssText = s; return e; }
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+  function safeStr(v) { return (v === null || v === undefined) ? '' : String(v); }
+  function nowIso() { return (new Date()).toISOString(); }
+  function clampTxt(s, n) { s = safeStr(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function normEmail(s) { return safeStr(s).trim().toLowerCase(); }
+  function uniqId(prefix) { return prefix + '_' + Math.random().toString(16).slice(2) + Date.now().toString(16); }
+  function isAbsUrl(u) { return /^https?:\/\//i.test(u || ''); }
+  function toAbs(u) {
+    u = safeStr(u).trim();
+    if (!u) return '';
+    if (isAbsUrl(u)) return u;
+    if (u.indexOf('//') === 0) return location.protocol + u;
+    if (u[0] === '/') return location.origin + u;
+    return u;
+  }
 
-function toast(msg, kind) { if (!ui.toast) return; ui.toast.textContent
-= msg || ’‘; ui.toast.style.display = msg ? ’block’ : ‘none’;
-ui.toast.style.borderColor = (kind === ‘err’) ? ‘rgba(255,100,100,.35)’
-: ‘rgba(255,255,255,.14)’; ui.toast.style.background = (kind === ‘err’)
-? ‘rgba(255,60,60,.09)’ : ‘rgba(255,255,255,.05)’; }
+  function toast(msg, kind) {
+    if (!ui.toast) return;
+    ui.toast.textContent = msg || '';
+    ui.toast.style.display = msg ? 'block' : 'none';
+    ui.toast.style.borderColor = (kind === 'err') ? 'rgba(255,100,100,.35)' : 'rgba(255,255,255,.14)';
+    ui.toast.style.background = (kind === 'err') ? 'rgba(255,60,60,.09)' : 'rgba(255,255,255,.05)';
+  }
 
-function card(title, subtitle) { var c = el(‘div’, ‘gk-card’); css(c,
-‘border:1px solid
-rgba(255,255,255,.10);background:rgba(0,0,0,.16);border-radius:16px;padding:14px
-16px;box-shadow:0 10px 28px rgba(0,0,0,.22);’); if (title) { var h =
-el(‘div’, ‘gk-h’, title); css(h,
-‘font-weight:900;font-size:18px;letter-spacing:.2px;margin:0 0 4px 0;’);
-c.appendChild(h); } if (subtitle) { var p = el(‘div’, ‘gk-sub’,
-subtitle); css(p, ‘opacity:.88;margin:0 0 12px 0;line-height:1.35;’);
-c.appendChild(p); } return c; }
+  function card(title, subtitle) {
+    var c = el('div', 'gk-card');
+    css(c, 'border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.16);border-radius:16px;padding:14px 16px;box-shadow:0 10px 28px rgba(0,0,0,.22);');
+    if (title) {
+      var h = el('div', 'gk-h', title);
+      css(h, 'font-weight:900;font-size:18px;letter-spacing:.2px;margin:0 0 4px 0;');
+      c.appendChild(h);
+    }
+    if (subtitle) {
+      var p = el('div', 'gk-sub', subtitle);
+      css(p, 'opacity:.88;margin:0 0 12px 0;line-height:1.35;');
+      c.appendChild(p);
+    }
+    return c;
+  }
 
-function chip(txt) { var c = el(‘span’, ‘gk-chip’, txt); css(c,
-‘display:inline-flex;align-items:center;gap:6px;padding:6px
-10px;border-radius:999px;border:1px solid
-rgba(255,255,255,.14);background:rgba(255,255,255,.04);font-size:12px;opacity:.9;’);
-return c; }
+  function chip(txt) {
+    var c = el('span', 'gk-chip', txt);
+    css(c, 'display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04);font-size:12px;opacity:.9;');
+    return c;
+  }
 
-function btn(txt, kind) { var b = el(‘button’, ‘gk-btn’, txt); var base
-= ‘padding:10px 12px;border-radius:12px;border:1px solid
-rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;font-weight:800;cursor:pointer;’;
-if (kind === ‘primary’) base +=
-‘background:#2e8b57;border-color:rgba(46,139,87,.55);’; if (kind ===
-‘danger’) base +=
-‘background:rgba(255,90,90,.14);border-color:rgba(255,90,90,.40);’;
-css(b, base); return b; }
+  function btn(txt, kind) {
+    var b = el('button', 'gk-btn', txt);
+    var base = 'padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#fff;font-weight:800;cursor:pointer;';
+    if (kind === 'primary') base += 'background:#2e8b57;border-color:rgba(46,139,87,.55);';
+    if (kind === 'danger') base += 'background:rgba(255,90,90,.14);border-color:rgba(255,90,90,.40);';
+    css(b, base);
+    return b;
+  }
 
-function inputText(placeholder, value) { var i = el(‘input’, ‘gk-in’);
-i.type = ‘text’; i.placeholder = placeholder || ’‘; i.value = value
-||’‘; css(i, ’padding:10px 12px;border-radius:12px;border:1px solid
-rgba(255,255,255,.18);background:rgba(0,0,0,.22);color:#fff;min-width:240px;’);
-return i; }
+  function inputText(placeholder, value) {
+    var i = el('input', 'gk-in');
+    i.type = 'text';
+    i.placeholder = placeholder || '';
+    i.value = value || '';
+    css(i, 'padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.22);color:#fff;min-width:240px;');
+    return i;
+  }
 
-function selectBox() { var s = el(‘select’, ‘gk-sel’); css(s,
-‘padding:10px 12px;border-radius:12px;border:1px solid
-rgba(255,255,255,.18);background:rgba(0,0,0,.22);color:#fff;min-width:220px;’);
-return s; }
+  function selectBox() {
+    var s = el('select', 'gk-sel');
+    css(s, 'padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.22);color:#fff;min-width:220px;');
+    return s;
+  }
 
-function modal(title) { var overlay = el(‘div’, ‘gk-modal-overlay’);
-css(overlay,
-‘position:fixed;inset:0;background:rgba(0,0,0,.66);backdrop-filter:blur(6px);z-index:99999;display:flex;align-items:center;justify-content:center;padding:18px;’);
-var box = el(‘div’, ‘gk-modal’); css(box, ‘width:min(980px,
-100%);max-height:85vh;overflow:auto;border-radius:18px;border:1px solid
-rgba(255,255,255,.14);background:rgba(18,18,18,.95);box-shadow:0 24px
-70px rgba(0,0,0,.55);’); var head = el(‘div’,‘gk-modal-head’);
-css(head,‘display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px
-16px;border-bottom:1px solid rgba(255,255,255,.10);’); var h =
-el(‘div’,’‘, title || ’Dialog’);
-css(h,‘font-weight:900;font-size:16px;’); var close = btn(‘Lukk’,’‘);
-close.onclick = function(){ document.body.removeChild(overlay); };
-head.appendChild(h); head.appendChild(close); var body =
-el(’div’,‘gk-modal-body’); css(body,‘padding:14px 16px;’);
-box.appendChild(head); box.appendChild(body); overlay.appendChild(box);
-return { overlay: overlay, body: body, close: close }; }
+  function modal(title) {
+    var overlay = el('div', 'gk-modal-overlay');
+    css(overlay, 'position:fixed;inset:0;background:rgba(0,0,0,.66);backdrop-filter:blur(6px);z-index:99999;display:flex;align-items:center;justify-content:center;padding:18px;');
+    var box = el('div', 'gk-modal');
+    css(box, 'width:min(980px, 100%);max-height:85vh;overflow:auto;border-radius:18px;border:1px solid rgba(255,255,255,.14);background:rgba(18,18,18,.95);box-shadow:0 24px 70px rgba(0,0,0,.55);');
+    var head = el('div','gk-modal-head');
+    css(head,'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.10);');
+    var h = el('div','', title || 'Dialog');
+    css(h,'font-weight:900;font-size:16px;');
+    var close = btn('Lukk','');
+    close.onclick = function(){ document.body.removeChild(overlay); };
+    head.appendChild(h); head.appendChild(close);
+    var body = el('div','gk-modal-body');
+    css(body,'padding:14px 16px;');
+    box.appendChild(head); box.appendChild(body);
+    overlay.appendChild(box);
+    return { overlay: overlay, body: body, close: close };
+  }
 
-// ————————— // Types / categories (fasit) // ————————— var TYPE_ORDER =
-[‘putter’,‘midrange’,‘fairway’,‘distance’]; var TYPE_LABEL = {
-putter:‘Puttere’, midrange:‘Midrange’, fairway:‘Fairway’,
-distance:‘Drivere’ };
+  // ---------------------------
+  // Types / categories (fasit)
+  // ---------------------------
+  var TYPE_ORDER = ['putter','midrange','fairway','distance'];
+  var TYPE_LABEL = { putter:'Puttere', midrange:'Midrange', fairway:'Fairway', distance:'Drivere' };
 
-var CAT = [ { type:‘putter’, label:‘Puttere’,
-url:‘/discgolf/disc-putter’ }, { type:‘midrange’, label:‘Midrange’,
-url:‘/discgolf/midrange’ }, { type:‘fairway’, label:‘Fairway’,
-url:‘/discgolf/fairway-driver’ }, { type:‘distance’, label:‘Drivere’,
-url:‘/discgolf/driver’ } ];
+  var CAT = [
+    { type:'putter',   label:'Puttere',  url:'/discgolf/disc-putter' },
+    { type:'midrange', label:'Midrange', url:'/discgolf/midrange' },
+    { type:'fairway',  label:'Fairway',  url:'/discgolf/fairway-driver' },
+    { type:'distance', label:'Drivere',  url:'/discgolf/driver' }
+  ];
 
-function inferTypeFromUrl(url) { url = safeStr(url).toLowerCase(); if
-(url.indexOf(‘/discgolf/disc-putter’) === 0) return ‘putter’; if
-(url.indexOf(‘/discgolf/midrange’) === 0) return ‘midrange’; if
-(url.indexOf(‘/discgolf/fairway-driver’) === 0) return ‘fairway’; if
-(url.indexOf(‘/discgolf/driver’) === 0) return ‘distance’; return ’’; }
+  function inferTypeFromUrl(url) {
+    url = safeStr(url).toLowerCase();
+    if (url.indexOf('/discgolf/disc-putter') === 0) return 'putter';
+    if (url.indexOf('/discgolf/midrange') === 0) return 'midrange';
+    if (url.indexOf('/discgolf/fairway-driver') === 0) return 'fairway';
+    if (url.indexOf('/discgolf/driver') === 0) return 'distance';
+    return '';
+  }
 
-// ————————— // State // ————————— var STATE = { version: VERSION, supa:
-null, user: null, email: null,
+  // ---------------------------
+  // State
+  // ---------------------------
+  var STATE = {
+    version: VERSION,
+    supa: null,
+    user: null,
+    email: null,
 
     bags: null,        // { default:{name,imageUrl,items:{discs,bagInfo,profile}}, bag2:{...} }
     activeBagId: 'default',
@@ -126,11 +167,11 @@ null, user: null, email: null,
     discs: [],
     bagInfo: {},
     profile: null
+  };
+  window.__MINBAGG_STATE__ = STATE;
 
-}; window.__MINBAGG_STATE__ = STATE;
-
-function ensureBags() { if (!STATE.bags || typeof STATE.bags !==
-‘object’) STATE.bags = {};
+  function ensureBags() {
+    if (!STATE.bags || typeof STATE.bags !== 'object') STATE.bags = {};
 
     if (!STATE.bags.default) {
       STATE.bags.default = {
@@ -154,12 +195,11 @@ function ensureBags() { if (!STATE.bags || typeof STATE.bags !==
 
     if (!STATE.activeBagId || !STATE.bags[STATE.activeBagId]) STATE.activeBagId = 'default';
     syncActiveFromBags();
+  }
 
-}
-
-function syncActiveFromBags() { if (!STATE.bags || typeof STATE.bags !==
-‘object’) STATE.bags = {}; if (!STATE.activeBagId ||
-!STATE.bags[STATE.activeBagId]) STATE.activeBagId = ‘default’;
+  function syncActiveFromBags() {
+    if (!STATE.bags || typeof STATE.bags !== 'object') STATE.bags = {};
+    if (!STATE.activeBagId || !STATE.bags[STATE.activeBagId]) STATE.activeBagId = 'default';
 
     var b = STATE.bags[STATE.activeBagId];
     if (!b || typeof b !== 'object') b = STATE.bags.default;
@@ -171,45 +211,70 @@ function syncActiveFromBags() { if (!STATE.bags || typeof STATE.bags !==
     STATE.discs = b.items.discs;
     STATE.bagInfo = b.items.bagInfo;
     STATE.profile = b.items.profile;
+  }
 
-}
+  function writeActiveToBags() {
+    if (!STATE.bags || typeof STATE.bags !== 'object') STATE.bags = {};
+    if (!STATE.bags.default) {
+      STATE.bags.default = {
+        name: 'Min bag',
+        imageUrl: '',
+        createdAt: nowIso(),
+        items: { discs: [], bagInfo: {}, profile: null }
+      };
+    }
+    if (!STATE.activeBagId || !STATE.bags[STATE.activeBagId]) STATE.activeBagId = 'default';
+    var b = STATE.bags[STATE.activeBagId];
+    if (!b.items || typeof b.items !== 'object') b.items = {};
+    b.items.discs = Array.isArray(STATE.discs) ? STATE.discs : [];
+    b.items.bagInfo = STATE.bagInfo || {};
+    b.items.profile = (STATE.profile === undefined) ? null : STATE.profile;
+  }
 
-function writeActiveToBags() { if (!STATE.bags || typeof STATE.bags !==
-‘object’) STATE.bags = {}; if (!STATE.bags.default) { STATE.bags.default
-= { name: ‘Min bag’, imageUrl: ’‘, createdAt: nowIso(), items: { discs:
-[], bagInfo: {}, profile: null } }; } if (!STATE.activeBagId ||
-!STATE.bags[STATE.activeBagId]) STATE.activeBagId = ’default’; var b =
-STATE.bags[STATE.activeBagId]; if (!b.items || typeof b.items !==
-‘object’) b.items = {}; b.items.discs = Array.isArray(STATE.discs) ?
-STATE.discs : []; b.items.bagInfo = STATE.bagInfo || {}; b.items.profile
-= (STATE.profile === undefined) ? null : STATE.profile; }
+  // ---------------------------
+  // Supabase client / auth
+  // ---------------------------
+  function ensureSupabaseClient() {
+    return new Promise(function (resolve, reject) {
+      try {
+        if (!SUPA_URL || !SUPA_KEY) return reject(new Error('Supabase URL/KEY mangler i loader'));
+        if (!window.supabase || !window.supabase.createClient) return reject(new Error('Supabase SDK mangler'));
+        if (!STATE.supa) STATE.supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+        resolve(STATE.supa);
+      } catch (e) { reject(e); }
+    });
+  }
 
-// ————————— // Supabase client / auth // ————————— function
-ensureSupabaseClient() { return new Promise(function (resolve, reject) {
-try { if (!SUPA_URL || !SUPA_KEY) return reject(new Error(‘Supabase
-URL/KEY mangler i loader’)); if (!window.supabase ||
-!window.supabase.createClient) return reject(new Error(‘Supabase SDK
-mangler’)); if (!STATE.supa) STATE.supa =
-window.supabase.createClient(SUPA_URL, SUPA_KEY); resolve(STATE.supa); }
-catch (e) { reject(e); } }); }
+  function supaGetUser() {
+    return ensureSupabaseClient().then(function (supa) {
+      return supa.auth.getUser().then(function (r) {
+        if (r && r.error) throw r.error;
+        return (r && r.data) ? r.data.user : null;
+      });
+    });
+  }
 
-function supaGetUser() { return ensureSupabaseClient().then(function
-(supa) { return supa.auth.getUser().then(function (r) { if (r &&
-r.error) throw r.error; return (r && r.data) ? r.data.user : null; });
-}); }
+  function supaSendMagicLink(email) {
+    return ensureSupabaseClient().then(function (supa) {
+      return supa.auth.signInWithOtp({
+        email: email,
+        options: { emailRedirectTo: location.origin + '/sider/min-bag' }
+      }).then(function (r) {
+        if (r && r.error) throw r.error;
+        return r;
+      });
+    });
+  }
 
-function supaSendMagicLink(email) { return
-ensureSupabaseClient().then(function (supa) { return
-supa.auth.signInWithOtp({ email: email, options: { emailRedirectTo:
-location.origin + ‘/sider/min-bag’ } }).then(function (r) { if (r &&
-r.error) throw r.error; return r; }); }); }
-
-// ————————— // DB: mybag_bags // ————————— function parseRow(row) { var
-out = { bags: {}, activeBagId: ‘default’ }; if (row && row.bag_json &&
-typeof row.bag_json === ‘object’ && row.bag_json.bags && typeof
-row.bag_json.bags === ‘object’) { out.bags = row.bag_json.bags; }
-out.activeBagId = (row && row.selected_bag) ? row.selected_bag :
-‘default’;
+  // ---------------------------
+  // DB: mybag_bags
+  // ---------------------------
+  function parseRow(row) {
+    var out = { bags: {}, activeBagId: 'default' };
+    if (row && row.bag_json && typeof row.bag_json === 'object' && row.bag_json.bags && typeof row.bag_json.bags === 'object') {
+      out.bags = row.bag_json.bags;
+    }
+    out.activeBagId = (row && row.selected_bag) ? row.selected_bag : 'default';
 
     // UI støtter kun default+bag2 – behold andre i DB, men vi henter dem ikke inn i UI
     var keep = {};
@@ -235,20 +300,27 @@ out.activeBagId = (row && row.selected_bag) ? row.selected_bag :
     }
 
     return out;
+  }
 
-}
+  function dbLoad(email) {
+    return ensureSupabaseClient().then(function (supa) {
+      return supa.from('mybag_bags')
+        .select('email, selected_bag, bag, bag_json')
+        .eq('email', email)
+        .maybeSingle()
+        .then(function (r) {
+          if (r && r.error) throw r.error;
+          return (r && r.data) ? r.data : null;
+        });
+    });
+  }
 
-function dbLoad(email) { return ensureSupabaseClient().then(function
-(supa) { return supa.from(‘mybag_bags’) .select(‘email, selected_bag,
-bag, bag_json’) .eq(‘email’, email) .maybeSingle() .then(function (r) {
-if (r && r.error) throw r.error; return (r && r.data) ? r.data : null;
-}); }); }
-
-function dbSave(email) { writeActiveToBags(); var bj = { bags:
-STATE.bags }; var selected = STATE.activeBagId; var active =
-STATE.bags[selected] || STATE.bags.default; var legacyBagArray = (active
-&& active.items && Array.isArray(active.items.discs)) ?
-active.items.discs : [];
+  function dbSave(email) {
+    writeActiveToBags();
+    var bj = { bags: STATE.bags };
+    var selected = STATE.activeBagId;
+    var active = STATE.bags[selected] || STATE.bags.default;
+    var legacyBagArray = (active && active.items && Array.isArray(active.items.discs)) ? active.items.discs : [];
 
     return ensureSupabaseClient().then(function (supa) {
       return supa.from('mybag_bags')
@@ -265,21 +337,28 @@ active.items.discs : [];
           return r;
         });
     });
+  }
 
-}
+  // ---------------------------
+  // Product parsing (category pages)
+  // ---------------------------
+  function fetchText(url) {
+    return fetch(url, { credentials: 'include' }).then(function (r) { return r.text(); });
+  }
 
-// ————————— // Product parsing (category pages) // ————————— function
-fetchText(url) { return fetch(url, { credentials: ‘include’
-}).then(function (r) { return r.text(); }); }
-
-function parseProductsFromCategoryHtml(html, baseType) { // Best effort:
-find product cards with href under /discgolf/ // Returns:
-[{url,name,image,type}] var out = []; try { // Use DOMParser for
-resilience var doc = new DOMParser().parseFromString(html, ‘text/html’);
-var links = doc.querySelectorAll(‘a[href^=“/discgolf/”]’); var seen =
-{}; for (var i = 0; i < links.length; i++) { var href =
-links[i].getAttribute(‘href’); if (!href || href.indexOf(‘/discgolf/’)
-!== 0) continue; if (seen[href]) continue;
+  function parseProductsFromCategoryHtml(html, baseType) {
+    // Best effort: find product cards with href under /discgolf/
+    // Returns: [{url,name,image,type}]
+    var out = [];
+    try {
+      // Use DOMParser for resilience
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      var links = doc.querySelectorAll('a[href^="/discgolf/"]');
+      var seen = {};
+      for (var i = 0; i < links.length; i++) {
+        var href = links[i].getAttribute('href');
+        if (!href || href.indexOf('/discgolf/') !== 0) continue;
+        if (seen[href]) continue;
 
         // attempt to find product name
         var name = '';
@@ -308,12 +387,13 @@ links[i].getAttribute(‘href’); if (!href || href.indexOf(‘/discgolf/’)
       }
     } catch (_) {}
     return out;
+  }
 
-}
-
-function parseFlightFromProductHtml(html) { // Best effort: tries to
-detect four numbers in common patterns // Returns {speed, glide, turn,
-fade} as strings or null try { var txt = safeStr(html);
+  function parseFlightFromProductHtml(html) {
+    // Best effort: tries to detect four numbers in common patterns
+    // Returns {speed, glide, turn, fade} as strings or null
+    try {
+      var txt = safeStr(html);
 
       // Pattern 1: "Speed 9 Glide 5 Turn -1 Fade 2" (any order)
       function pick(label) {
@@ -343,14 +423,16 @@ fade} as strings or null try { var txt = safeStr(html);
       }
     } catch (_) {}
     return null;
+  }
 
-}
-
-// ————————— // Flight visuals (inline SVG) // ————————— function
-flightSvg(f) { // simple curve based on turn/fade (best effort) var s =
-parseFloat((f && f.speed) ? f.speed : ‘0’) || 0; var t = parseFloat((f
-&& f.turn) ? f.turn : ‘0’) || 0; var d = parseFloat((f && f.fade) ?
-f.fade : ‘0’) || 0;
+  // ---------------------------
+  // Flight visuals (inline SVG)
+  // ---------------------------
+  function flightSvg(f) {
+    // simple curve based on turn/fade (best effort)
+    var s = parseFloat((f && f.speed) ? f.speed : '0') || 0;
+    var t = parseFloat((f && f.turn) ? f.turn : '0') || 0;
+    var d = parseFloat((f && f.fade) ? f.fade : '0') || 0;
 
     // normalize
     var maxX = 120;
@@ -406,32 +488,54 @@ f.fade : ‘0’) || 0;
     svg.appendChild(path);
 
     return svg;
+  }
 
-}
+  // ---------------------------
+  // Recommendations (simple)
+  // ---------------------------
+  function countByType(discs) {
+    var c = { putter:0, midrange:0, fairway:0, distance:0 };
+    for (var i=0;i<discs.length;i++) {
+      var t = discs[i] && discs[i].type ? discs[i].type : '';
+      if (c[t] !== undefined) c[t] += 1;
+    }
+    return c;
+  }
 
-// ————————— // Recommendations (simple) // ————————— function
-countByType(discs) { var c = { putter:0, midrange:0, fairway:0,
-distance:0 }; for (var i=0;i<discs.length;i++) { var t = discs[i] &&
-discs[i].type ? discs[i].type : ’’; if (c[t] !== undefined) c[t] += 1; }
-return c; }
+  function pickNeededType(discs) {
+    var c = countByType(discs);
+    // super enkel logikk: sørg for minst 2 puttere, 3 mid, 3 fairway, 2 distance
+    if (c.putter < 2) return 'putter';
+    if (c.midrange < 3) return 'midrange';
+    if (c.fairway < 3) return 'fairway';
+    if (c.distance < 2) return 'distance';
+    // ellers prøv å fylle "rett" midrange/fairway (turn ~0 fade ~1)
+    return 'midrange';
+  }
 
-function pickNeededType(discs) { var c = countByType(discs); // super
-enkel logikk: sørg for minst 2 puttere, 3 mid, 3 fairway, 2 distance if
-(c.putter < 2) return ‘putter’; if (c.midrange < 3) return ‘midrange’;
-if (c.fairway < 3) return ‘fairway’; if (c.distance < 2) return
-‘distance’; // ellers prøv å fylle “rett” midrange/fairway (turn ~0 fade
-~1) return ‘midrange’; }
+  function isApproxStraight(f) {
+    if (!f) return false;
+    var t = parseFloat(f.turn || '0') || 0;
+    var d = parseFloat(f.fade || '0') || 0;
+    return (Math.abs(t) <= 1.0 && d >= 0 && d <= 2.0);
+  }
 
-function isApproxStraight(f) { if (!f) return false; var t =
-parseFloat(f.turn || ‘0’) || 0; var d = parseFloat(f.fade || ‘0’) || 0;
-return (Math.abs(t) <= 1.0 && d >= 0 && d <= 2.0); }
+  // ---------------------------
+  // UI nodes
+  // ---------------------------
+  var ui = {
+    shell: null,
+    toast: null,
+    bagSel: null,
+    delBagBtn: null,
+    content: null,
+    top3: null,
+    reco: null
+  };
 
-// ————————— // UI nodes // ————————— var ui = { shell: null, toast:
-null, bagSel: null, delBagBtn: null, content: null, top3: null, reco:
-null };
-
-function buildShell() { clear(root); css(root,
-‘max-width:1100px;margin:0 auto;padding:10px 14px;’);
+  function buildShell() {
+    clear(root);
+    css(root, 'max-width:1100px;margin:0 auto;padding:10px 14px;');
 
     // Under construction banner
     var warn = el('div','gk-warn');
@@ -532,12 +636,14 @@ function buildShell() { clear(root); css(root,
     css(foot,'opacity:.55;font-size:12px;margin:14px 0 4px 0;text-align:right;');
     foot.textContent = VERSION;
     root.appendChild(foot);
+  }
 
-}
-
-// ————————— // Bag meta modal (name + image url) // ————————— function
-openBagMetaModal() { ensureBags(); var b =
-STATE.bags[STATE.activeBagId];
+  // ---------------------------
+  // Bag meta modal (name + image url)
+  // ---------------------------
+  function openBagMetaModal() {
+    ensureBags();
+    var b = STATE.bags[STATE.activeBagId];
 
     var m = modal('Bag-innstillinger');
     var wrap = el('div','');
@@ -575,13 +681,15 @@ STATE.bags[STATE.activeBagId];
     m.body.appendChild(save);
 
     document.body.appendChild(m.overlay);
+  }
 
-}
-
-// ————————— // Add discs modal: category buttons + search + fetch //
-————————— function openAddDiscModal() { var m = modal(‘Legg til disk’);
-var top = el(‘div’,’‘);
-css(top,’display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;’);
+  // ---------------------------
+  // Add discs modal: category buttons + search + fetch
+  // ---------------------------
+  function openAddDiscModal() {
+    var m = modal('Legg til disk');
+    var top = el('div','');
+    css(top,'display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;');
 
     // category buttons (mobile-friendly)
     CAT.forEach(function(c){
@@ -656,15 +764,24 @@ css(top,’display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom
     }
 
     document.body.appendChild(m.overlay);
+  }
 
-}
-
-function addProductToBag(p) { // fetch product page to try extract
-flight return fetchText(p.url).then(function(html){ var flight =
-parseFlightFromProductHtml(html); var disc = { id: uniqId(‘d’), url:
-p.url, name: p.name, note: ’‘, type: p.type || inferTypeFromUrl(p.url)
-||’‘, color:’‘, image: p.image ||’‘, flight: flight, addedAt:
-nowIso().slice(0,10) }; if (!disc.type) disc.type = ’midrange’;
+  function addProductToBag(p) {
+    // fetch product page to try extract flight
+    return fetchText(p.url).then(function(html){
+      var flight = parseFlightFromProductHtml(html);
+      var disc = {
+        id: uniqId('d'),
+        url: p.url,
+        name: p.name,
+        note: '',
+        type: p.type || inferTypeFromUrl(p.url) || '',
+        color: '',
+        image: p.image || '',
+        flight: flight,
+        addedAt: nowIso().slice(0,10)
+      };
+      if (!disc.type) disc.type = 'midrange';
 
       // push + save
       STATE.discs.push(disc);
@@ -675,36 +792,57 @@ nowIso().slice(0,10) }; if (!disc.type) disc.type = ’midrange’;
         incPopular(disc).catch(function(){});
       });
     });
+  }
 
-}
+  function incPopular(disc) {
+    // Use popular_discs table directly (public insert/update allowed in your RLS setup)
+    return ensureSupabaseClient().then(function(supa){
+      var t = disc.type || '';
+      var name = disc.name || '';
+      var url = disc.url || '';
+      var img = disc.image || '';
+      // upsert (type,name) if unique constraint exists; if not, simple insert
+      return supa.from('popular_discs')
+        .upsert({ type: t, name: name, count: 1, product_url: url, image_url: img }, { onConflict: 'type,name' })
+        .select('type')
+        .then(function(r){
+          // if no unique constraint, error can happen – ignore
+          return r;
+        });
+    });
+  }
 
-function incPopular(disc) { // Use popular_discs table directly (public
-insert/update allowed in your RLS setup) return
-ensureSupabaseClient().then(function(supa){ var t = disc.type || ’‘; var
-name = disc.name ||’‘; var url = disc.url ||’‘; var img = disc.image
-||’‘; // upsert (type,name) if unique constraint exists; if not, simple
-insert return supa.from(’popular_discs’) .upsert({ type: t, name: name,
-count: 1, product_url: url, image_url: img }, { onConflict: ‘type,name’
-}) .select(‘type’) .then(function(r){ // if no unique constraint, error
-can happen – ignore return r; }); }); }
+  // ---------------------------
+  // Discs rendering
+  // ---------------------------
+  function groupDiscsByType(discs) {
+    var g = { putter:[], midrange:[], fairway:[], distance:[] };
+    for (var i=0;i<discs.length;i++) {
+      var d = discs[i];
+      var t = (d && d.type) ? d.type : '';
+      if (!g[t]) t = inferTypeFromUrl(d && d.url ? d.url : '') || 'midrange';
+      if (!g[t]) t = 'midrange';
+      d.type = t;
+      g[t].push(d);
+    }
+    return g;
+  }
 
-// ————————— // Discs rendering // ————————— function
-groupDiscsByType(discs) { var g = { putter:[], midrange:[], fairway:[],
-distance:[] }; for (var i=0;i<discs.length;i++) { var d = discs[i]; var
-t = (d && d.type) ? d.type : ’‘; if (!g[t]) t = inferTypeFromUrl(d &&
-d.url ? d.url :’‘) || ’midrange’; if (!g[t]) t = ‘midrange’; d.type = t;
-g[t].push(d); } return g; }
+  function flightRow(d) {
+    var f = d.flight || {};
+    var sp = safeStr(f.speed), gl = safeStr(f.glide), tu = safeStr(f.turn), fa = safeStr(f.fade);
+    if (!sp && !gl && !tu && !fa) return el('div','', 'Flight: (mangler)');
+    var r = el('div','');
+    css(r,'display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;');
+    r.appendChild(chip('S ' + (sp||'?')));
+    r.appendChild(chip('G ' + (gl||'?')));
+    r.appendChild(chip('T ' + (tu||'?')));
+    r.appendChild(chip('F ' + (fa||'?')));
+    return r;
+  }
 
-function flightRow(d) { var f = d.flight || {}; var sp =
-safeStr(f.speed), gl = safeStr(f.glide), tu = safeStr(f.turn), fa =
-safeStr(f.fade); if (!sp && !gl && !tu && !fa) return el(‘div’,’‘,
-’Flight: (mangler)’); var r = el(‘div’,’‘);
-css(r,’display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;’);
-r.appendChild(chip(‘S’ + (sp||‘?’))); r.appendChild(chip(‘G’ +
-(gl||‘?’))); r.appendChild(chip(‘T’ + (tu||‘?’)));
-r.appendChild(chip(‘F’ + (fa||‘?’))); return r; }
-
-function renderDiscs() { clear(ui.content);
+  function renderDiscs() {
+    clear(ui.content);
 
     // Bag image preview + count + quick tips
     ensureBags();
@@ -810,13 +948,15 @@ function renderDiscs() { clear(ui.content);
       sec.appendChild(grid);
       ui.content.appendChild(sec);
     });
+  }
 
-}
+  // ---------------------------
+  // Recommendations panel (right column)
+  // ---------------------------
+  var recoState = { lastType: null, lastPicked: null };
 
-// ————————— // Recommendations panel (right column) // ————————— var
-recoState = { lastType: null, lastPicked: null };
-
-function renderRecommendations() { clear(ui.reco);
+  function renderRecommendations() {
+    clear(ui.reco);
 
     var c = card('Anbefalt for deg', 'Forslag basert på hva som mangler i bagen din akkurat nå.');
     ui.reco.appendChild(c);
@@ -956,14 +1096,16 @@ function renderRecommendations() { clear(ui.reco);
 
     // Start with one suggestion automatically
     pickSuggestion();
+  }
 
-}
-
-// ————————— // Top 3 per type (popular_discs) // ————————— function
-renderTop3PerType() { // Top 3 lives under recommendations panel for now
-var c = card(‘Topp 3 globalt (per type)’, ‘Basert på hva folk legger i
-bag på GolfKongen.’); ui.reco.appendChild(el(‘div’,’‘,’’));
-ui.reco.appendChild(c);
+  // ---------------------------
+  // Top 3 per type (popular_discs)
+  // ---------------------------
+  function renderTop3PerType() {
+    // Top 3 lives under recommendations panel for now
+    var c = card('Topp 3 globalt (per type)', 'Basert på hva folk legger i bag på GolfKongen.');
+    ui.reco.appendChild(el('div','', ''));
+    ui.reco.appendChild(c);
 
     var host = el('div','');
     css(host,'display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px;');
@@ -1039,11 +1181,15 @@ ui.reco.appendChild(c);
       clear(host);
       host.appendChild(el('div','', 'Kunne ikke hente topplister akkurat nå.'));
     });
+  }
 
-}
-
-// ————————— // Connect view (magic link) // ————————— function
-renderConnectView() { buildShell(); clear(ui.content); clear(ui.reco);
+  // ---------------------------
+  // Connect view (magic link)
+  // ---------------------------
+  function renderConnectView() {
+    buildShell();
+    clear(ui.content);
+    clear(ui.reco);
 
     var c = card('Koble til (magic link)', 'Skriv inn e-post. Du får en innloggingslenke fra Supabase (trygg).');
     var row = el('div','');
@@ -1071,16 +1217,28 @@ renderConnectView() { buildShell(); clear(ui.content); clear(ui.reco);
     ui.reco.appendChild(info);
     // show per type anyway
     renderTop3PerType();
+  }
 
-}
+  // ---------------------------
+  // Render all
+  // ---------------------------
+  function renderAll() {
+    buildShell();
+    ensureBags();
+    renderDiscs();
+    renderRecommendations();
+    renderTop3PerType();
+  }
 
-// ————————— // Render all // ————————— function renderAll() {
-buildShell(); ensureBags(); renderDiscs(); renderRecommendations();
-renderTop3PerType(); }
-
-// ————————— // Boot // ————————— function boot() {
-supaGetUser().then(function(user){ if (!user || !user.email) {
-renderConnectView(); return; }
+  // ---------------------------
+  // Boot
+  // ---------------------------
+  function boot() {
+    supaGetUser().then(function(user){
+      if (!user || !user.email) {
+        renderConnectView();
+        return;
+      }
 
       STATE.user = user;
       STATE.email = normEmail(user.email);
@@ -1100,11 +1258,10 @@ renderConnectView(); return; }
       buildShell();
       toast('Kunne ikke starte: ' + (e&&e.message?e.message:e), 'err');
     });
+  }
 
-}
+  window.__MINBAG_BOOT__ = boot;
 
-window.__MINBAG_BOOT__ = boot;
-
-boot();
+  boot();
 
 })();
