@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-23.1';
+  var VERSION = 'v2026-02-23.2';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -980,7 +980,7 @@
 
     left.appendChild(chip('Disker: ' + (STATE.discs ? STATE.discs.length : 0)));
     var c = countByType(STATE.discs || []);
-    left.appendChild(chip('P ' + c.putter + ' • M ' + c.midrange + ' • F ' + c.fairway + ' • D ' + c.distance));
+    left.appendChild(chip('Putter ' + c.putter + ' • M ' + c.midrange + ' • F ' + c.fairway + ' • D ' + c.distance));
     metaRow.appendChild(left);
 
     var right = el('div','');
@@ -1027,43 +1027,119 @@
 
     
     // ===== FLIGHT KART (REAL SVG) =====
-    var acc2 = accordion('Flight-kart','Turn (X) vs Fade (Y)');
+    var acc2 = accordion('Flight-kart','Trykk for å åpne');
+    // Forklaring + legend
+    var expl = el('div','');
+    css(expl,'font-size:12px;opacity:.9;line-height:1.35;margin-bottom:10px;');
+    expl.innerHTML = ''
+      + '<div style="margin-bottom:6px;"><b>X-akse:</b> Turn (mer negativ = mer understabil)</div>'
+      + '<div style="margin-bottom:6px;"><b>Y-akse:</b> Fade (høyere = mer overstabil avslutning)</div>'
+      + '<div style="opacity:.85;">Lesing: Punkter til <b>høyre</b> betyr ofte mer understabilt. Punkter høyere opp betyr mer overstabil avslutning.</div>';
+    acc2.body.appendChild(expl);
+
+    var legend = el('div','');
+    css(legend,'display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px;font-size:12px;');
+    function legItem(label, color){
+      var it = el('div','');
+      css(it,'display:flex;align-items:center;gap:6px;');
+      var dot = el('span','');
+      css(dot,'width:10px;height:10px;border-radius:999px;background:'+color+';display:inline-block;');
+      it.appendChild(dot);
+      it.appendChild(el('span','',label));
+      return it;
+    }
+    legend.appendChild(legItem('Putter', TYPE_COLORS.putter));
+    legend.appendChild(legItem('Midrange', TYPE_COLORS.midrange));
+    legend.appendChild(legItem('Fairway', TYPE_COLORS.fairway));
+    legend.appendChild(legItem('Driver', TYPE_COLORS.distance));
+    acc2.body.appendChild(legend);
+
     var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-    svg.setAttribute('viewBox','0 0 300 300');
+    svg.setAttribute('viewBox','0 0 320 320');
     svg.style.width='100%';
-    svg.style.height='300px';
+    svg.style.height='320px';
     svg.style.background='rgba(0,0,0,.25)';
     svg.style.borderRadius='12px';
+    svg.style.border='1px solid rgba(255,255,255,.12)';
 
-    // Axes
-    var ax = document.createElementNS(svg.namespaceURI,'line');
-    ax.setAttribute('x1','150'); ax.setAttribute('y1','0');
-    ax.setAttribute('x2','150'); ax.setAttribute('y2','300');
-    ax.setAttribute('stroke','#555');
-    svg.appendChild(ax);
+    function sEl(name){ return document.createElementNS('http://www.w3.org/2000/svg', name); }
 
-    var ay = document.createElementNS(svg.namespaceURI,'line');
-    ay.setAttribute('x1','0'); ay.setAttribute('y1','150');
-    ay.setAttribute('x2','300'); ay.setAttribute('y2','150');
-    ay.setAttribute('stroke','#555');
-    svg.appendChild(ay);
+    // Zones (very subtle)
+    var zLeft = sEl('rect'); zLeft.setAttribute('x','0'); zLeft.setAttribute('y','0'); zLeft.setAttribute('width','160'); zLeft.setAttribute('height','320'); zLeft.setAttribute('fill','rgba(255,255,255,.03)'); svg.appendChild(zLeft);
+    var zRight = sEl('rect'); zRight.setAttribute('x','160'); zRight.setAttribute('y','0'); zRight.setAttribute('width','160'); zRight.setAttribute('height','320'); zRight.setAttribute('fill','rgba(255,255,255,.01)'); svg.appendChild(zRight);
+
+    // Axes (center)
+    var ax = sEl('line'); ax.setAttribute('x1','160'); ax.setAttribute('y1','0'); ax.setAttribute('x2','160'); ax.setAttribute('y2','320'); ax.setAttribute('stroke','rgba(255,255,255,.18)'); svg.appendChild(ax);
+    var ay = sEl('line'); ay.setAttribute('x1','0'); ay.setAttribute('y1','160'); ay.setAttribute('x2','320'); ay.setAttribute('y2','160'); ay.setAttribute('stroke','rgba(255,255,255,.18)'); svg.appendChild(ay);
+
+    // Labels
+    function label(txt,x,y,anchor){
+      var t = sEl('text');
+      t.textContent = txt;
+      t.setAttribute('x',x);
+      t.setAttribute('y',y);
+      t.setAttribute('fill','rgba(255,255,255,.65)');
+      t.setAttribute('font-size','11');
+      t.setAttribute('font-weight','700');
+      if (anchor) t.setAttribute('text-anchor',anchor);
+      svg.appendChild(t);
+    }
+    label('Overstabil (venstre)', 6, 18, 'start');
+    label('Understabil (høyre)', 314, 18, 'end');
+    label('Mer fade ↑', 6, 308, 'start');
+    label('Mindre fade ↓', 6, 178, 'start');
+
+    // Scale: Turn -5..+1 mapped to 0..320, Fade 0..5 mapped to 160..0 (up)
+    function clamp(v, a, b){ return v<a?a:v>b?b:v; }
+    function xFromTurn(turn){
+      // map -5..+1 to 0..320
+      var t = clamp(turn, -5, 1);
+      return ((t + 5) / 6) * 320;
+    }
+    function yFromFade(fade){
+      // map 0..5 to 160..0 (up from center line)
+      var f = clamp(fade, 0, 5);
+      return 160 - (f/5)*160;
+    }
 
     // Plot discs
+    var plotted = 0;
     (STATE.discs||[]).forEach(function(d){
       if (!d.flight) return;
-      var t=parseFloat(d.flight.turn||0);
-      var f=parseFloat(d.flight.fade||0);
-      if (isNaN(t)||isNaN(f)) return;
-      var x = 150 + (t*30);
-      var y = 150 - (f*30);
-      var c = document.createElementNS(svg.namespaceURI,'circle');
-      c.setAttribute('cx',x); c.setAttribute('cy',y);
+      var turn=parseFloat(d.flight.turn);
+      var fade=parseFloat(d.flight.fade);
+      if (isNaN(turn) || isNaN(fade)) return;
+      var x = xFromTurn(turn);
+      var y = yFromFade(fade);
+      var c = sEl('circle');
+      c.setAttribute('cx',x);
+      c.setAttribute('cy',y);
       c.setAttribute('r','6');
       c.setAttribute('fill', TYPE_COLORS[d.type]||'#fff');
+      c.setAttribute('stroke','rgba(0,0,0,.35)');
+      c.setAttribute('stroke-width','1');
       svg.appendChild(c);
+
+      var txt = sEl('text');
+      txt.textContent = (d.name||'').split(' ')[0]; // short label (first word)
+      txt.setAttribute('x', x + 8);
+      txt.setAttribute('y', y + 4);
+      txt.setAttribute('fill','rgba(255,255,255,.85)');
+      txt.setAttribute('font-size','10');
+      txt.setAttribute('font-weight','700');
+      svg.appendChild(txt);
+
+      plotted++;
     });
 
-    acc2.body.appendChild(svg);
+    if (!plotted) {
+      var warn = el('div','', 'Mangler flight-data (Turn/Fade) på diskene dine, derfor kan vi ikke plotte dem ennå.');
+      css(warn,'opacity:.85;font-size:12px;');
+      acc2.body.appendChild(warn);
+    } else {
+      acc2.body.appendChild(svg);
+    }
+
     ui.content.appendChild(acc2.wrap);
 
 
