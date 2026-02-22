@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-23.5';
+  var VERSION = 'v2026-02-23.6';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -428,6 +428,8 @@
       for (var i = 0; i < links.length; i++) {
         var href = links[i].getAttribute('href');
         if (!href || href.indexOf('/discgolf/') !== 0) continue;
+        // must look like /discgolf/<category>/<product-slug>
+        if (!/^\/discgolf\/[^\/]+\/[^\/?#]+/.test(href)) continue;
         if (seen[href]) continue;
 
         var name = '';
@@ -435,6 +437,10 @@
         if (t) name = t;
         if (!name) name = links[i].textContent;
         name = safeStr(name).replace(/\s+/g,' ').trim();
+
+        var stop = {'åpne':1,'apne':1,'nytral':1,'nøytral':1,'understabil':1,'overstabil':1,'filtrer':1,'filter':1};
+        if (stop[name.toLowerCase()]) continue;
+
         if (name.length < 3) continue;
 
         var imgUrl = findImgUrl(links[i]);
@@ -450,30 +456,68 @@
     return out;
   }
 
-  function parseProductsFromSearchHtml(html) {
-    return parseProductsFromCategoryHtml(html, '');
-  }
-
   function searchGolfkongenProducts(q) {
-    q = safeStr(q).trim();
+    q = safeStr(q).trim().toLowerCase();
     if (q.length < 2) return Promise.resolve([]);
 
-    var urls = [
-      '/search?query=' + encodeURIComponent(q),
-      '/search?q=' + encodeURIComponent(q),
-      '/sok?query=' + encodeURIComponent(q),
-      '/sok?q=' + encodeURIComponent(q)
+    return ensureAllProductsIndex().then(function(all){
+      var out = [];
+      for (var i=0;i<all.length;i++){
+        var n = (all[i].name||'').toLowerCase();
+        if (n.indexOf(q) !== -1) out.push(all[i]);
+        if (out.length >= 60) break;
+      }
+      return out;
+    });
+  }
+
+  var _ALL_PRODUCTS_CACHE = null;
+  var _ALL_PRODUCTS_PROMISE = null;
+
+  function ensureAllProductsIndex(){
+    if (_ALL_PRODUCTS_CACHE) return Promise.resolve(_ALL_PRODUCTS_CACHE);
+    if (_ALL_PRODUCTS_PROMISE) return _ALL_PRODUCTS_PROMISE;
+
+    var cats = [
+      {name:'Putter', url:'/discgolf/disc-putter', type:'putter'},
+      {name:'Midrange', url:'/discgolf/midrange', type:'midrange'},
+      {name:'Fairway', url:'/discgolf/fairway-driver', type:'fairway'},
+      {name:'Driver', url:'/discgolf/driver', type:'distance'}
     ];
 
-    function tryNext(idx) {
-      if (idx >= urls.length) return Promise.resolve([]);
-      return fetchText(urls[idx]).then(function(html){
-        var items = parseProductsFromSearchHtml(html);
-        if (items && items.length) return items;
-        return tryNext(idx+1);
-      }).catch(function(){ return tryNext(idx+1); });
+    var all = [];
+    function loadOne(i){
+      if (i>=cats.length) {
+        // de-dupe by url
+        var seen = {};
+        var uniq = [];
+        for (var k=0;k<all.length;k++){
+          var u = all[k].url;
+          if (!u || seen[u]) continue;
+          seen[u]=1;
+          uniq.push(all[k]);
+        }
+        _ALL_PRODUCTS_CACHE = uniq;
+        return uniq;
+      }
+      return fetchText(cats[i].url).then(function(html){
+        var items = parseProductsFromCategoryHtml(html, cats[i].type);
+        // ensure type inferred
+        for (var j=0;j<items.length;j++){
+          if (!items[j].type) items[j].type = cats[i].type;
+          all.push(items[j]);
+        }
+        return loadOne(i+1);
+      }).catch(function(){
+        return loadOne(i+1);
+      });
     }
-    return tryNext(0);
+
+    _ALL_PRODUCTS_PROMISE = loadOne(0).then(function(res){
+      _ALL_PRODUCTS_PROMISE = null;
+      return res;
+    });
+    return _ALL_PRODUCTS_PROMISE;
   }
 
   function parseFlightFromProductHtml(html) {
@@ -797,6 +841,9 @@
     var searchWrap = el('div','');
     css(searchWrap,'display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;');
     var q = inputText('Søk i GolfKongen (alle disker)', '');
+    var hint = el('div','', 'Tips: Første søk kan ta litt tid (vi bygger katalogen).');
+    css(hint,'font-size:12px;opacity:.7;margin:-6px 0 10px;');
+    m.body.appendChild(hint);
     css(q,'flex:1;min-width:220px;');
     var clearBtn = btn('Tøm','');
     searchWrap.appendChild(q);
@@ -826,7 +873,7 @@
     function doSearch() {
       var term = safeStr(q.value).trim();
       if (term.length < 2) { return; }
-      toast('Søker etter “' + term + '”…');
+      toast('Søker i GolfKongen-katalogen etter “' + term + '”…');
       searchGolfkongenProducts(term).then(function(items){
         toast('');
         renderProducts(items);
