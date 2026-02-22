@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-22.2-U2';
+  var VERSION = 'v2026-02-22.3-U3';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -609,7 +609,7 @@
       STATE.activeBagId = id;
       syncActiveFromBags();
       toast('Bytter bag…');
-      dbSave(STATE.email).then(function(){ toast(''); renderAll(); }).catch(function(e){ toast('Kunne ikke bytte: ' + (e&&e.message?e.message:e),'err'); });
+      dbSave(STATE.email).then(function(){ toast(''); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke bytte: ' + (e&&e.message?e.message:e),'err'); });
     };
     left.appendChild(ui.bagSel);
 
@@ -621,7 +621,7 @@
       STATE.activeBagId = 'default';
       syncActiveFromBags();
       toast('Sletter…');
-      dbSave(STATE.email).then(function(){ toast(''); renderAll(); }).catch(function(e){ toast('Kunne ikke slette: ' + (e&&e.message?e.message:e),'err'); });
+      dbSave(STATE.email).then(function(){ toast(''); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke slette: ' + (e&&e.message?e.message:e),'err'); });
     };
     ui.delBagBtn.style.display = (STATE.activeBagId === 'bag2' && !!STATE.bags.bag2) ? 'inline-block' : 'none';
     left.appendChild(ui.delBagBtn);
@@ -707,7 +707,7 @@
       bb.name = safeStr(nameIn.value).trim() || (STATE.activeBagId === 'default' ? 'Min bag' : 'Bag 2');
       bb.imageUrl = safeStr(imgIn.value).trim();
       toast('Lagrer…');
-      dbSave(STATE.email).then(function(){ toast('Lagret ✅'); document.body.removeChild(m.overlay); renderAll(); }).catch(function(e){ toast('Kunne ikke lagre: ' + (e&&e.message?e.message:e),'err'); });
+      dbSave(STATE.email).then(function(){ toast('Lagret ✅'); document.body.removeChild(m.overlay); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke lagre: ' + (e&&e.message?e.message:e),'err'); });
     };
 
     m.body.appendChild(wrap);
@@ -776,7 +776,7 @@
         add.onclick = function(){
           addProductToBag(p).then(function(){
             toast('Lagt til ✅');
-            renderAll();
+            loadProfile().then(function(){ renderAll(); });
           }).catch(function(e){
             toast('Kunne ikke legge til: ' + (e&&e.message?e.message:e),'err');
           });
@@ -862,7 +862,7 @@
       writeActiveToBags();
       dbSave(STATE.email).then(function(){
         document.body.removeChild(m.overlay);
-        renderAll();
+        loadProfile().then(function(){ renderAll(); });
       });
     };
     var del = btn('Slett kommentar','danger');
@@ -871,7 +871,7 @@
       writeActiveToBags();
       dbSave(STATE.email).then(function(){
         document.body.removeChild(m.overlay);
-        renderAll();
+        loadProfile().then(function(){ renderAll(); });
       });
     };
     wrap.appendChild(save);
@@ -1038,7 +1038,7 @@
           STATE.discs = (STATE.discs || []).filter(function(x){ return x && x.id !== id; });
           writeActiveToBags();
           toast('Lagrer…');
-          dbSave(STATE.email).then(function(){ toast(''); renderAll(); }).catch(function(e){ toast('Kunne ikke fjerne: ' + (e&&e.message?e.message:e),'err'); });
+          dbSave(STATE.email).then(function(){ toast(''); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke fjerne: ' + (e&&e.message?e.message:e),'err'); });
         };
         css(rm,'padding:9px 10px;border-radius:12px;');
         topRow.appendChild(rm);
@@ -1059,7 +1059,83 @@
     });
   }
 
+  
   // ---------------------------
+  // Player profile (U3)
+  // ---------------------------
+  function loadProfile() {
+    return ensureSupabaseClient().then(function(supa){
+      return supa.from('mybag_profiles')
+        .select('*')
+        .eq('email', STATE.email)
+        .maybeSingle()
+        .then(function(r){
+          if (r && r.data) STATE.profile = r.data;
+        });
+    });
+  }
+
+  function saveProfile(p) {
+    return ensureSupabaseClient().then(function(supa){
+      return supa.from('mybag_profiles')
+        .upsert({
+          email: STATE.email,
+          level: p.level || '',
+          hand: p.hand || '',
+          throw: p.throw || '',
+          course: p.course || '',
+          updated_at: nowIso()
+        }, { onConflict: 'email' });
+    });
+  }
+
+  function openProfileModal(){
+    var m = modal('Bli kjent med spilleren');
+    var wrap = el('div','');
+    css(wrap,'display:grid;grid-template-columns:1fr;gap:10px;');
+
+    var level = selectBox();
+    ['Nybegynner','Litt øvet','Viderekommen','Konkurransespiller'].forEach(function(x){
+      var o=document.createElement('option');o.value=x;o.textContent=x;level.appendChild(o);
+    });
+
+    var power = inputText('Maks distanse (meter)', STATE.profile && STATE.profile.hand || '');
+    var bhfh = inputText('BH/FH prosent (f.eks 70/30)', STATE.profile && STATE.profile.throw || '');
+    var course = selectBox();
+    ['Skog','Åpent','Blandet'].forEach(function(x){
+      var o=document.createElement('option');o.value=x;o.textContent=x;course.appendChild(o);
+    });
+
+    if (STATE.profile){
+      level.value = STATE.profile.level || '';
+      course.value = STATE.profile.course || '';
+    }
+
+    wrap.appendChild(el('div','', 'Nivå')); wrap.appendChild(level);
+    wrap.appendChild(el('div','', 'Armstyrke')); wrap.appendChild(power);
+    wrap.appendChild(el('div','', 'Kastestil')); wrap.appendChild(bhfh);
+    wrap.appendChild(el('div','', 'Banetype')); wrap.appendChild(course);
+
+    var save = btn('Lagre profil','primary');
+    save.onclick = function(){
+      var p = {
+        level: level.value,
+        hand: power.value,
+        throw: bhfh.value,
+        course: course.value
+      };
+      saveProfile(p).then(function(){
+        STATE.profile = p;
+        document.body.removeChild(m.overlay);
+        loadProfile().then(function(){ renderAll(); });
+      });
+    };
+
+    m.body.appendChild(wrap);
+    m.body.appendChild(save);
+    document.body.appendChild(m.overlay);
+  }
+// ---------------------------
   // Recommendations panel (right column)
   // ---------------------------
   var recoState = { lastType: null, lastPicked: null };
@@ -1067,7 +1143,17 @@
   function renderRecommendations() {
     clear(ui.reco);
 
-    var c = card('Anbefalt for deg', 'Forslag basert på hva som mangler i bagen din akkurat nå.');
+    
+    var pcard = card('Spillerprofil', 'Hjelper oss å gi bedre anbefalinger.');
+    var ptxt = el('div','', STATE.profile ?
+      ('Nivå: '+STATE.profile.level+' • Arm: '+STATE.profile.hand+' • Kast: '+STATE.profile.throw+' • Bane: '+STATE.profile.course)
+      : 'Ingen profil lagret ennå.');
+    pcard.appendChild(ptxt);
+    var pbtn = btn('Rediger profil','');
+    pbtn.onclick = function(){ openProfileModal(); };
+    pcard.appendChild(pbtn);
+    ui.reco.appendChild(pcard);
+var c = card('Anbefalt for deg', 'Forslag basert på hva som mangler i bagen din akkurat nå.');
     ui.reco.appendChild(c);
 
     var needed = pickNeededType(STATE.discs || []);
@@ -1129,7 +1215,7 @@
 
       var add = btn('Legg til','primary');
       add.onclick = function(){
-        addProductToBag(p).then(function(){ toast('Lagt til ✅'); renderAll(); }).catch(function(e){ toast('Kunne ikke legge til: ' + (e&&e.message?e.message:e),'err'); });
+        addProductToBag(p).then(function(){ toast('Lagt til ✅'); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke legge til: ' + (e&&e.message?e.message:e),'err'); });
       };
       wrap.appendChild(add);
 
@@ -1358,7 +1444,7 @@
         STATE.activeBagId = parsed.activeBagId || 'default';
         ensureBags();
         syncActiveFromBags();
-        renderAll();
+        loadProfile().then(function(){ renderAll(); });
       }).catch(function(e){
         buildShell();
         toast('Kunne ikke laste: ' + (e&&e.message?e.message:e), 'err');
