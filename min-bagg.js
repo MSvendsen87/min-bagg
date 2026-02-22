@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-23.2';
+  var VERSION = 'v2026-02-23.3';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -1032,9 +1032,9 @@
     var expl = el('div','');
     css(expl,'font-size:12px;opacity:.9;line-height:1.35;margin-bottom:10px;');
     expl.innerHTML = ''
-      + '<div style="margin-bottom:6px;"><b>X-akse:</b> Turn (mer negativ = mer understabil)</div>'
-      + '<div style="margin-bottom:6px;"><b>Y-akse:</b> Fade (høyere = mer overstabil avslutning)</div>'
-      + '<div style="opacity:.85;">Lesing: Punkter til <b>høyre</b> betyr ofte mer understabilt. Punkter høyere opp betyr mer overstabil avslutning.</div>';
+      + '<div style="margin-bottom:6px;"><b>X-akse:</b> Stabilitet (venstre = mer understabil, høyre = mer overstabil)</div>'
+      + '<div style="margin-bottom:6px;"><b>Y-akse:</b> Speed (høyere opp = høyere speed)</div>'
+      + '<div style="opacity:.85;">Vi beregner stabilitet fra flight-tallene (Turn/Fade). Punkter som ligger tett betyr like roller.</div>';
     acc2.body.appendChild(expl);
 
     var legend = el('div','');
@@ -1055,7 +1055,7 @@
     acc2.body.appendChild(legend);
 
     var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-    svg.setAttribute('viewBox','0 0 320 320');
+    svg.setAttribute('viewBox','0 0 360 320');
     svg.style.width='100%';
     svg.style.height='320px';
     svg.style.background='rgba(0,0,0,.25)';
@@ -1064,76 +1064,135 @@
 
     function sEl(name){ return document.createElementNS('http://www.w3.org/2000/svg', name); }
 
-    // Zones (very subtle)
-    var zLeft = sEl('rect'); zLeft.setAttribute('x','0'); zLeft.setAttribute('y','0'); zLeft.setAttribute('width','160'); zLeft.setAttribute('height','320'); zLeft.setAttribute('fill','rgba(255,255,255,.03)'); svg.appendChild(zLeft);
-    var zRight = sEl('rect'); zRight.setAttribute('x','160'); zRight.setAttribute('y','0'); zRight.setAttribute('width','160'); zRight.setAttribute('height','320'); zRight.setAttribute('fill','rgba(255,255,255,.01)'); svg.appendChild(zRight);
+    // Subtle zone background
+    var zU = sEl('rect'); zU.setAttribute('x','0'); zU.setAttribute('y','0'); zU.setAttribute('width','120'); zU.setAttribute('height','320'); zU.setAttribute('fill','rgba(143,211,255,.06)'); svg.appendChild(zU); // understable
+    var zN = sEl('rect'); zN.setAttribute('x','120'); zN.setAttribute('y','0'); zN.setAttribute('width','120'); zN.setAttribute('height','320'); zN.setAttribute('fill','rgba(255,255,255,.03)'); svg.appendChild(zN); // neutral
+    var zO = sEl('rect'); zO.setAttribute('x','240'); zO.setAttribute('y','0'); zO.setAttribute('width','120'); zO.setAttribute('height','320'); zO.setAttribute('fill','rgba(255,226,122,.05)'); svg.appendChild(zO); // overstable
 
-    // Axes (center)
-    var ax = sEl('line'); ax.setAttribute('x1','160'); ax.setAttribute('y1','0'); ax.setAttribute('x2','160'); ax.setAttribute('y2','320'); ax.setAttribute('stroke','rgba(255,255,255,.18)'); svg.appendChild(ax);
-    var ay = sEl('line'); ay.setAttribute('x1','0'); ay.setAttribute('y1','160'); ay.setAttribute('x2','320'); ay.setAttribute('y2','160'); ay.setAttribute('stroke','rgba(255,255,255,.18)'); svg.appendChild(ay);
+    // Grid lines
+    for (var gx=0; gx<=360; gx+=60){
+      var gl = sEl('line'); gl.setAttribute('x1',gx); gl.setAttribute('y1','0'); gl.setAttribute('x2',gx); gl.setAttribute('y2','320');
+      gl.setAttribute('stroke','rgba(255,255,255,.08)'); svg.appendChild(gl);
+    }
+    for (var gy=0; gy<=320; gy+=40){
+      var gl2 = sEl('line'); gl2.setAttribute('x1','0'); gl2.setAttribute('y1',gy); gl2.setAttribute('x2','360'); gl2.setAttribute('y2',gy);
+      gl2.setAttribute('stroke','rgba(255,255,255,.06)'); svg.appendChild(gl2);
+    }
 
-    // Labels
     function label(txt,x,y,anchor){
       var t = sEl('text');
       t.textContent = txt;
       t.setAttribute('x',x);
       t.setAttribute('y',y);
-      t.setAttribute('fill','rgba(255,255,255,.65)');
+      t.setAttribute('fill','rgba(255,255,255,.70)');
       t.setAttribute('font-size','11');
-      t.setAttribute('font-weight','700');
+      t.setAttribute('font-weight','800');
       if (anchor) t.setAttribute('text-anchor',anchor);
       svg.appendChild(t);
     }
-    label('Overstabil (venstre)', 6, 18, 'start');
-    label('Understabil (høyre)', 314, 18, 'end');
-    label('Mer fade ↑', 6, 308, 'start');
-    label('Mindre fade ↓', 6, 178, 'start');
+    label('Understabil', 10, 18, 'start');
+    label('Nøytral', 180, 18, 'middle');
+    label('Overstabil', 350, 18, 'end');
+    label('Speed ↑', 10, 310, 'start');
 
-    // Scale: Turn -5..+1 mapped to 0..320, Fade 0..5 mapped to 160..0 (up)
-    function clamp(v, a, b){ return v<a?a:v>b?b:v; }
-    function xFromTurn(turn){
-      // map -5..+1 to 0..320
-      var t = clamp(turn, -5, 1);
-      return ((t + 5) / 6) * 320;
-    }
-    function yFromFade(fade){
-      // map 0..5 to 160..0 (up from center line)
-      var f = clamp(fade, 0, 5);
-      return 160 - (f/5)*160;
+    function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+
+    // Stability index: higher = more overstable
+    // Simple: stab = fade - turn  (because turn negative increases understability)
+    // Map stab range roughly 0..6 to x 0..360
+    function stabIndex(turn, fade){
+      var t = isNaN(turn)?0:turn;
+      var f = isNaN(fade)?0:fade;
+      return f - t;
     }
 
-    // Plot discs
+    function xFromStab(stab){
+      var s = clamp(stab, 0, 6);
+      return (s/6)*360;
+    }
+
+    // Speed map: 1..14 -> y 300..20
+    function yFromSpeed(speed){
+      var sp = clamp(speed, 1, 14);
+      return 300 - ((sp-1)/13)*280;
+    }
+
+    // Avoid overlap by bucketing and offsetting
+    var buckets = {};
+    function keyFor(x,y){
+      var bx = Math.round(x/14)*14;
+      var by = Math.round(y/14)*14;
+      return bx + '|' + by;
+    }
+    function offsetFor(i){
+      // small spiral offsets
+      var r = 10 + (i*4);
+      var ang = (i*55) * Math.PI/180;
+      return {dx: Math.cos(ang)*r, dy: Math.sin(ang)*r};
+    }
+
     var plotted = 0;
     (STATE.discs||[]).forEach(function(d){
       if (!d.flight) return;
-      var turn=parseFloat(d.flight.turn);
-      var fade=parseFloat(d.flight.fade);
-      if (isNaN(turn) || isNaN(fade)) return;
-      var x = xFromTurn(turn);
-      var y = yFromFade(fade);
+      var sp = parseFloat(d.flight.speed);
+      var tu = parseFloat(d.flight.turn);
+      var fa = parseFloat(d.flight.fade);
+      if (isNaN(sp) || isNaN(tu) || isNaN(fa)) return;
+
+      var stab = stabIndex(tu, fa);
+      var x = xFromStab(stab);
+      var y = yFromSpeed(sp);
+
+      var k = keyFor(x,y);
+      var idx = buckets[k] || 0;
+      buckets[k] = idx + 1;
+      var off = idx ? offsetFor(idx) : {dx:0,dy:0};
+      var px = clamp(x + off.dx, 8, 352);
+      var py = clamp(y + off.dy, 18, 312);
+
+      // dot
       var c = sEl('circle');
-      c.setAttribute('cx',x);
-      c.setAttribute('cy',y);
+      c.setAttribute('cx',px);
+      c.setAttribute('cy',py);
       c.setAttribute('r','6');
       c.setAttribute('fill', TYPE_COLORS[d.type]||'#fff');
       c.setAttribute('stroke','rgba(0,0,0,.35)');
       c.setAttribute('stroke-width','1');
       svg.appendChild(c);
 
+      // label background
+      var name = (d.name||'Disk');
+      // keep label readable: first 2 words
+      var parts = name.split(' ');
+      var short = parts.slice(0,2).join(' ');
+      var tx = px + 10;
+      var ty = py + 4 + (idx%2?10:0);
+
+      var bg = sEl('rect');
+      bg.setAttribute('x', tx-4);
+      bg.setAttribute('y', ty-12);
+      bg.setAttribute('rx','6');
+      bg.setAttribute('ry','6');
+      bg.setAttribute('width', (short.length*6.3)+10);
+      bg.setAttribute('height','16');
+      bg.setAttribute('fill','rgba(0,0,0,.45)');
+      bg.setAttribute('stroke','rgba(255,255,255,.08)');
+      svg.appendChild(bg);
+
       var txt = sEl('text');
-      txt.textContent = (d.name||'').split(' ')[0]; // short label (first word)
-      txt.setAttribute('x', x + 8);
-      txt.setAttribute('y', y + 4);
-      txt.setAttribute('fill','rgba(255,255,255,.85)');
+      txt.textContent = short;
+      txt.setAttribute('x', tx);
+      txt.setAttribute('y', ty);
+      txt.setAttribute('fill','rgba(255,255,255,.92)');
       txt.setAttribute('font-size','10');
-      txt.setAttribute('font-weight','700');
+      txt.setAttribute('font-weight','800');
       svg.appendChild(txt);
 
       plotted++;
     });
 
     if (!plotted) {
-      var warn = el('div','', 'Mangler flight-data (Turn/Fade) på diskene dine, derfor kan vi ikke plotte dem ennå.');
+      var warn = el('div','', 'Mangler flight-data (Speed/Turn/Fade) på diskene dine, derfor kan vi ikke plotte dem ennå.');
       css(warn,'opacity:.85;font-size:12px;');
       acc2.body.appendChild(warn);
     } else {
