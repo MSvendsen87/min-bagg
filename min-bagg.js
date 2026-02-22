@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-23.4';
+  var VERSION = 'v2026-02-23.5';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -408,34 +408,38 @@
     // Returns: [{url,name,image,type}]
     var out = [];
     try {
-      // Use DOMParser for resilience
       var doc = new DOMParser().parseFromString(html, 'text/html');
       var links = doc.querySelectorAll('a[href^="/discgolf/"]');
       var seen = {};
+
+      function findImgUrl(a){
+        var img = a.querySelector('img');
+        if (img) return toAbs(img.getAttribute('src') || img.getAttribute('data-src') || '');
+        var p = a;
+        for (var k=0;k<4;k++){
+          if (!p || !p.parentElement) break;
+          p = p.parentElement;
+          var im = p.querySelector ? p.querySelector('img') : null;
+          if (im) return toAbs(im.getAttribute('src') || im.getAttribute('data-src') || '');
+        }
+        return '';
+      }
+
       for (var i = 0; i < links.length; i++) {
         var href = links[i].getAttribute('href');
         if (!href || href.indexOf('/discgolf/') !== 0) continue;
         if (seen[href]) continue;
 
-        // attempt to find product name
         var name = '';
         var t = links[i].getAttribute('title');
         if (t) name = t;
         if (!name) name = links[i].textContent;
         name = safeStr(name).replace(/\s+/g,' ').trim();
-
-        // ignore very short / nav links
         if (name.length < 3) continue;
 
-        // image
-        var img = links[i].querySelector('img');
-        var imgUrl = img ? (img.getAttribute('src') || img.getAttribute('data-src') || '') : '';
-        imgUrl = toAbs(imgUrl);
+        var imgUrl = findImgUrl(links[i]);
 
-        // type
         var type = inferTypeFromUrl(href) || baseType || '';
-
-        // only accept if looks like a product URL (has slug after category)
         if (href.split('/').length < 4) continue;
 
         out.push({ url: href, name: name, image: imgUrl, type: type });
@@ -444,6 +448,32 @@
       }
     } catch (_) {}
     return out;
+  }
+
+  function parseProductsFromSearchHtml(html) {
+    return parseProductsFromCategoryHtml(html, '');
+  }
+
+  function searchGolfkongenProducts(q) {
+    q = safeStr(q).trim();
+    if (q.length < 2) return Promise.resolve([]);
+
+    var urls = [
+      '/search?query=' + encodeURIComponent(q),
+      '/search?q=' + encodeURIComponent(q),
+      '/sok?query=' + encodeURIComponent(q),
+      '/sok?q=' + encodeURIComponent(q)
+    ];
+
+    function tryNext(idx) {
+      if (idx >= urls.length) return Promise.resolve([]);
+      return fetchText(urls[idx]).then(function(html){
+        var items = parseProductsFromSearchHtml(html);
+        if (items && items.length) return items;
+        return tryNext(idx+1);
+      }).catch(function(){ return tryNext(idx+1); });
+    }
+    return tryNext(0);
   }
 
   function parseFlightFromProductHtml(html) {
@@ -762,10 +792,21 @@
   // ---------------------------
   function openAddDiscModal() {
     var m = modal('Legg til disk');
+
+    // Global search (all discs on GolfKongen)
+    var searchWrap = el('div','');
+    css(searchWrap,'display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;');
+    var q = inputText('Søk i GolfKongen (alle disker)', '');
+    css(q,'flex:1;min-width:220px;');
+    var clearBtn = btn('Tøm','');
+    searchWrap.appendChild(q);
+    searchWrap.appendChild(clearBtn);
+    m.body.appendChild(searchWrap);
+
     var top = el('div','');
     css(top,'display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;');
 
-    // category buttons (mobile-friendly)
+    // category buttons (valgfritt / mobilvennlig)
     CAT.forEach(function(c){
       var b = btn(c.label,'');
       b.onclick = function(){ loadCategory(c); };
@@ -780,6 +821,28 @@
     var list = el('div','');
     css(list,'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;');
     m.body.appendChild(list);
+
+    var _timer = null;
+    function doSearch() {
+      var term = safeStr(q.value).trim();
+      if (term.length < 2) { return; }
+      toast('Søker etter “' + term + '”…');
+      searchGolfkongenProducts(term).then(function(items){
+        toast('');
+        renderProducts(items);
+      }).catch(function(e){
+        toast('Søk feilet: ' + (e&&e.message?e.message:e),'err');
+      });
+    }
+    q.oninput = function(){
+      if (_timer) clearTimeout(_timer);
+      _timer = setTimeout(doSearch, 250);
+    };
+    clearBtn.onclick = function(){
+      q.value = '';
+      clear(list);
+      toast('');
+    };
 
     function renderProducts(items) {
       clear(list);
