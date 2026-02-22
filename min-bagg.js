@@ -1,6 +1,6 @@
 /* ============================================================================
    GOLFKONGEN – MIN BAG
-   Build: v2026-02-21.5  (ES5 safe – no async/await)
+   Build: v2026-02-21.6  (ES5 safe – no async/await)
    Mål i denne versjonen:
    - Få tilbake "bra versjon"-følelsen: tydelige GK-cards, seksjoner, mindre rot
    - Kun 2 bagger (default + bag2), slett Bag 2
@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-21.5';
+  var VERSION = 'v2026-02-21.6';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -397,7 +397,7 @@
 
       // Pattern 1: "Speed 9 Glide 5 Turn -1 Fade 2" (any order)
       function pick(label) {
-        var re = new RegExp(label + r"\\s*[:]?\\s*(-?\\d+(?:[\\.,]\\d+)?)", "i");
+        var re = new RegExp(label + "\\s*[:]?\\s*(-?\\d+(?:[\\.,]\\d+)?)", "i");
         var m = txt.match(re);
         return m ? m[1].replace(',', '.') : null;
       }
