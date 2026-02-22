@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-22.1-U1';
+  var VERSION = 'v2026-02-22.2-U2';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -846,7 +846,40 @@
     });
   }
 
-  // ---------------------------
+  
+  function openCommentModal(disc){
+    var m = modal('Kommentar for ' + (disc.name||'Disk'));
+    var wrap = el('div','');
+    css(wrap,'display:flex;flex-direction:column;gap:10px;');
+    var ta = document.createElement('textarea');
+    ta.maxLength = 140;
+    ta.value = disc.note || '';
+    css(ta,'min-height:100px;padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(0,0,0,.25);color:#fff;');
+    wrap.appendChild(ta);
+    var save = btn('Lagre','primary');
+    save.onclick = function(){
+      disc.note = ta.value;
+      writeActiveToBags();
+      dbSave(STATE.email).then(function(){
+        document.body.removeChild(m.overlay);
+        renderAll();
+      });
+    };
+    var del = btn('Slett kommentar','danger');
+    del.onclick = function(){
+      disc.note = '';
+      writeActiveToBags();
+      dbSave(STATE.email).then(function(){
+        document.body.removeChild(m.overlay);
+        renderAll();
+      });
+    };
+    wrap.appendChild(save);
+    wrap.appendChild(del);
+    m.body.appendChild(wrap);
+    document.body.appendChild(m.overlay);
+  }
+// ---------------------------
   // Discs rendering
   // ---------------------------
   function groupDiscsByType(discs) {
@@ -971,6 +1004,7 @@
 
       arr.forEach(function(d, idx){
         var ccard = el('div','');
+        ccard.onclick = function(){ openCommentModal(d); };
         css(ccard,'border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);border-radius:16px;padding:12px;');
 
         var topRow = el('div','');
@@ -1015,7 +1049,7 @@
         var fbox = el('div','');
         css(fbox,'margin-top:10px;');
         fbox.appendChild(flightSvg(d.flight || null));
-        ccard.appendChild(fbox);
+        // flight chart removed in U2
 
         grid.appendChild(ccard);
       });
