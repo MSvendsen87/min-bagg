@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-22.3-U3';
+  var VERSION = 'v2026-02-22.4-U4';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -524,7 +524,24 @@
     return svg;
   }
 
+  
   // ---------------------------
+  // Recommendations (U4 enhanced)
+  // ---------------------------
+  var recoSeen = {};
+
+  function pickNeededTypeAdvanced(discs, profile) {
+    var c = countByType(discs);
+    if (profile && profile.course === 'Skog') {
+      if (c.fairway < 3) return 'fairway';
+    }
+    if (c.putter < 2) return 'putter';
+    if (c.midrange < 3) return 'midrange';
+    if (c.fairway < 3) return 'fairway';
+    if (c.distance < 2) return 'distance';
+    return 'midrange';
+  }
+// ---------------------------
   // Recommendations (simple)
   // ---------------------------
   function countByType(discs) {
@@ -1156,7 +1173,7 @@
 var c = card('Anbefalt for deg', 'Forslag basert på hva som mangler i bagen din akkurat nå.');
     ui.reco.appendChild(c);
 
-    var needed = pickNeededType(STATE.discs || []);
+    var needed = pickNeededTypeAdvanced(STATE.discs || [], STATE.profile);
     recoState.lastType = needed;
 
     var line = el('div','');
@@ -1282,10 +1299,7 @@ var c = card('Anbefalt for deg', 'Forslag basert på hva som mangler i bagen din
     }
 
     btnPick.onclick = pickSuggestion;
-    btnNo.onclick = function(){
-      // Just pick a new one
-      pickSuggestion();
-    };
+    btnNo.onclick = function(){ recoSeen[needed] = true; pickSuggestion(); };
 
     c.appendChild(box);
 
