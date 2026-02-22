@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-22.1';
+  var VERSION = 'v2026-02-22.1-U1';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -132,22 +132,22 @@
 
   
   // ---------------------------
-  // Accordion helpers (ES5)
+  // Accordion + sorting helpers (ES5)
   // ---------------------------
   function accordion(title, subtitle) {
     var wrap = el('div','gk-acc');
-    css(wrap,'border:1px solid rgba(255,255,255,.10);border-radius:16px;background:rgba(255,255,255,.03);margin-top:10px;');
+    css(wrap,'border:2px solid #2e8b57;border-radius:18px;background:rgba(46,139,87,.10);margin:12px 0;');
     var head = el('div','');
-    css(head,'display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;');
+    css(head,'display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;');
     var t = el('div','', title);
-    css(t,'font-weight:900;');
+    css(t,'font-weight:900;font-size:16px;');
     var s = el('div','', subtitle||'Trykk for å åpne');
-    css(s,'opacity:.7;font-size:12px;');
+    css(s,'opacity:.8;font-size:12px;');
     var che = el('div','', '▸');
-    css(che,'opacity:.8;font-size:14px;');
+    css(che,'opacity:.9;font-size:16px;');
     head.appendChild(t); head.appendChild(s); head.appendChild(che);
     var body = el('div','');
-    css(body,'display:none;padding:12px 14px;border-top:1px solid rgba(255,255,255,.10);');
+    css(body,'display:none;padding:14px 16px;border-top:1px solid rgba(255,255,255,.18);');
     head.onclick = function(){
       var open = body.style.display !== 'none';
       body.style.display = open ? 'none' : 'block';
@@ -910,41 +910,44 @@
 
     top.appendChild(metaRow);
     ui.content.appendChild(top);
-    // Flight overview accordion
+    // ===== FLIGHT OVERSIKT (NY) =====
     var acc1 = accordion('Flight-oversikt','Trykk for å åpne');
     var discsSorted = (STATE.discs||[]).slice().sort(sortBySpeedThenName);
     var dup = {};
     discsSorted.forEach(function(d){
       var f=d.flight||{};
       var k=[f.speed,f.glide,f.turn,f.fade].join('|');
-      if (!k || k==='|||') return;
-      dup[k]=(dup[k]||0)+1;
+      if (k && k!=='|||') dup[k]=(dup[k]||0)+1;
     });
-    discsSorted.forEach(function(d){
-      var row = el('div','');
-      css(row,'display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08);');
-      var nm = el('div','', d.name||'Disk');
-      css(nm,'font-weight:800;flex:1;');
-      row.appendChild(nm);
-      var f=d.flight||{};
-      var tag = el('div','', 'S '+(f.speed||'?')+' G '+(f.glide||'?')+' T '+(f.turn||'?')+' F '+(f.fade||'?'));
-      css(tag,'font-size:12px;opacity:.85;');
-      row.appendChild(tag);
-      var k2=[f.speed,f.glide,f.turn,f.fade].join('|');
-      if (dup[k2]>1) {
-        var obs=el('div','', 'OBS');
-        css(obs,'color:#ff6b6b;font-weight:900;font-size:12px;margin-left:6px;');
-        row.appendChild(obs);
-      }
-      acc1.body.appendChild(row);
-    });
+    if (!discsSorted.length) {
+      acc1.body.appendChild(el('div','', 'Ingen disker i bagen ennå.'));
+    } else {
+      discsSorted.forEach(function(d){
+        var row = el('div','');
+        css(row,'display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.12);');
+        var nm = el('div','', d.name||'Disk');
+        css(nm,'font-weight:900;flex:1;');
+        row.appendChild(nm);
+        var f=d.flight||{};
+        var tag = el('div','', 'S '+(f.speed||'?')+' G '+(f.glide||'?')+' T '+(f.turn||'?')+' F '+(f.fade||'?'));
+        css(tag,'font-size:12px;opacity:.9;');
+        row.appendChild(tag);
+        var k2=[f.speed,f.glide,f.turn,f.fade].join('|');
+        if (dup[k2]>1) {
+          var obs=el('div','', 'OBS – helt lik flight');
+          css(obs,'color:#ff6b6b;font-weight:900;font-size:12px;margin-left:8px;');
+          row.appendChild(obs);
+        }
+        acc1.body.appendChild(row);
+      });
+    }
     ui.content.appendChild(acc1.wrap);
 
-    // Flight map accordion (placeholder grid)
-    var acc2 = accordion('Flight-kart','Trykk for å åpne');
+    // ===== FLIGHT KART (NY) =====
+    var acc2 = accordion('Flight-kart','Turn (X) vs Fade (Y)');
     var map = el('div','');
-    css(map,'height:220px;border-radius:12px;border:1px dashed rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;opacity:.85;');
-    map.textContent = 'Flight-kart (Turn x Fade)';
+    css(map,'height:260px;border-radius:14px;border:2px dashed #888;display:flex;align-items:center;justify-content:center;font-weight:900;');
+    map.textContent = 'HER KOMMER FLIGHT-KART (alle disker som prikker)';
     acc2.body.appendChild(map);
     ui.content.appendChild(acc2.wrap);
 
