@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-22.4-U4';
+  var VERSION = 'v2026-02-23.1';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -157,14 +157,37 @@
     return {wrap:wrap, body:body};
   }
 
-  function sortBySpeedThenName(a,b){
-    var sa = parseFloat((a.flight&&a.flight.speed)||'0')||0;
-    var sb = parseFloat((b.flight&&b.flight.speed)||'0')||0;
-    if (sb!==sa) return sb-sa;
+  
+  function sortByFlight(a,b){
+    function num(x){ var n=parseFloat(x); return isNaN(n)?-999:n; }
+    var fa=a.flight||{}, fb=b.flight||{};
+    var keys=['speed','glide','turn','fade'];
+    for (var i=0;i<keys.length;i++){
+      var ka=num(fa[keys[i]]), kb=num(fb[keys[i]]);
+      if (kb!==ka) return kb-ka;
+    }
     var na=(a.name||'').toLowerCase(), nb=(b.name||'').toLowerCase();
     return na<nb?-1:na>nb?1:0;
   }
-// ---------------------------
+
+
+  // ---------------------------
+  // Flight colors (global)
+  // ---------------------------
+  var FLIGHT_COLORS = {
+    speed: '#7CFFB2',   // light green
+    glide: '#FF9AA2',   // light pink
+    turn:  '#8FD3FF',   // light blue
+    fade:  '#FFE27A'    // light yellow
+  };
+  var TYPE_COLORS = {
+    putter:'#5fd38d',
+    midrange:'#6aa8ff',
+    fairway:'#ffb86b',
+    distance:'#c18cff'
+  };
+
+  // ---------------------------
   // Types / categories (fasit)
   // ---------------------------
   var TYPE_ORDER = ['putter','midrange','fairway','distance'];
@@ -912,16 +935,25 @@
     return g;
   }
 
+  
+  function flightChip(label, val, color){
+    var c = el('span','');
+    css(c,'display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid '+color+';background:rgba(255,255,255,.03);font-size:12px;font-weight:900;color:'+color+';');
+    c.textContent = label + ' ' + (val||'?');
+    return c;
+  }
+
   function flightRow(d) {
+
     var f = d.flight || {};
     var sp = safeStr(f.speed), gl = safeStr(f.glide), tu = safeStr(f.turn), fa = safeStr(f.fade);
     if (!sp && !gl && !tu && !fa) return el('div','', 'Flight: (mangler)');
     var r = el('div','');
     css(r,'display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;');
-    r.appendChild(chip('S ' + (sp||'?')));
-    r.appendChild(chip('G ' + (gl||'?')));
-    r.appendChild(chip('T ' + (tu||'?')));
-    r.appendChild(chip('F ' + (fa||'?')));
+    r.appendChild(flightChip('S', sp, FLIGHT_COLORS.speed));
+    r.appendChild(flightChip('G', gl, FLIGHT_COLORS.glide));
+    r.appendChild(flightChip('T', tu, FLIGHT_COLORS.turn));
+    r.appendChild(flightChip('F', fa, FLIGHT_COLORS.fade));
     return r;
   }
 
@@ -962,7 +994,7 @@
     ui.content.appendChild(top);
     // ===== FLIGHT OVERSIKT (NY) =====
     var acc1 = accordion('Flight-oversikt','Trykk for å åpne');
-    var discsSorted = (STATE.discs||[]).slice().sort(sortBySpeedThenName);
+    var discsSorted = (STATE.discs||[]).slice().sort(sortByFlight);
     var dup = {};
     discsSorted.forEach(function(d){
       var f=d.flight||{};
@@ -993,13 +1025,47 @@
     }
     ui.content.appendChild(acc1.wrap);
 
-    // ===== FLIGHT KART (NY) =====
+    
+    // ===== FLIGHT KART (REAL SVG) =====
     var acc2 = accordion('Flight-kart','Turn (X) vs Fade (Y)');
-    var map = el('div','');
-    css(map,'height:260px;border-radius:14px;border:2px dashed #888;display:flex;align-items:center;justify-content:center;font-weight:900;');
-    map.textContent = 'HER KOMMER FLIGHT-KART (alle disker som prikker)';
-    acc2.body.appendChild(map);
+    var svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('viewBox','0 0 300 300');
+    svg.style.width='100%';
+    svg.style.height='300px';
+    svg.style.background='rgba(0,0,0,.25)';
+    svg.style.borderRadius='12px';
+
+    // Axes
+    var ax = document.createElementNS(svg.namespaceURI,'line');
+    ax.setAttribute('x1','150'); ax.setAttribute('y1','0');
+    ax.setAttribute('x2','150'); ax.setAttribute('y2','300');
+    ax.setAttribute('stroke','#555');
+    svg.appendChild(ax);
+
+    var ay = document.createElementNS(svg.namespaceURI,'line');
+    ay.setAttribute('x1','0'); ay.setAttribute('y1','150');
+    ay.setAttribute('x2','300'); ay.setAttribute('y2','150');
+    ay.setAttribute('stroke','#555');
+    svg.appendChild(ay);
+
+    // Plot discs
+    (STATE.discs||[]).forEach(function(d){
+      if (!d.flight) return;
+      var t=parseFloat(d.flight.turn||0);
+      var f=parseFloat(d.flight.fade||0);
+      if (isNaN(t)||isNaN(f)) return;
+      var x = 150 + (t*30);
+      var y = 150 - (f*30);
+      var c = document.createElementNS(svg.namespaceURI,'circle');
+      c.setAttribute('cx',x); c.setAttribute('cy',y);
+      c.setAttribute('r','6');
+      c.setAttribute('fill', TYPE_COLORS[d.type]||'#fff');
+      svg.appendChild(c);
+    });
+
+    acc2.body.appendChild(svg);
     ui.content.appendChild(acc2.wrap);
+
 
 
     // Sections per type
@@ -1034,7 +1100,14 @@
 
         var mid = el('div','');
         css(mid,'flex:1;min-width:0;');
+        
         var name = el('div','', clampTxt(d.name, 56));
+        if (d.note) {
+          var noteBadge = el('div','', '📝 ' + clampTxt(d.note, 28));
+          css(noteBadge,'font-size:11px;opacity:.8;margin-top:4px;');
+          name.appendChild(noteBadge);
+        }
+
         css(name,'font-weight:900;line-height:1.15;');
         mid.appendChild(name);
 
