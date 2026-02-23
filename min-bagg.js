@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-24.2';
+  var VERSION = 'v2026-02-24.3';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -1312,6 +1312,50 @@
     m.body.appendChild(wrap);
     document.body.appendChild(m.overlay);
   }
+
+
+  function ensureBag2Exists(){
+    if (!STATE.bags) STATE.bags = {};
+    if (!STATE.bags.bag2) {
+      STATE.bags.bag2 = { name:'Bag 2', imageUrl:'', createdAt: nowIso(), items:{ discs:[], bagInfo:{}, profile:null } };
+    }
+    if (!STATE.bags.bag2.items || typeof STATE.bags.bag2.items !== 'object') STATE.bags.bag2.items = { discs:[], bagInfo:{}, profile:null };
+    if (!Array.isArray(STATE.bags.bag2.items.discs)) STATE.bags.bag2.items.discs = [];
+  }
+
+  function moveDiscToBag(disc, targetBagId){
+    if (!disc) return;
+    if (!STATE.bags) STATE.bags = {};
+    if (!STATE.bags.default) {
+      STATE.bags.default = { name:'Min bag', imageUrl:'', createdAt: nowIso(), items:{ discs:[], bagInfo:{}, profile:null } };
+    }
+    if (targetBagId === 'bag2') ensureBag2Exists();
+    if (!STATE.bags[targetBagId]) return;
+
+    // Sync active discs to bags first
+    writeActiveToBags();
+
+    // Remove from active list
+    var id = disc.id;
+    STATE.discs = (STATE.discs||[]).filter(function(x){ return x && x.id !== id; });
+    writeActiveToBags();
+
+    // Add to target bag list (avoid id-collisions)
+    var list = (STATE.bags[targetBagId].items && Array.isArray(STATE.bags[targetBagId].items.discs)) ? STATE.bags[targetBagId].items.discs : [];
+    var exists = false;
+    for (var i=0;i<list.length;i++){ if (list[i] && list[i].id === id) { exists = true; break; } }
+    if (exists) disc.id = uniqId('d');
+    list.push(disc);
+    STATE.bags[targetBagId].items.discs = list;
+
+    toast('Lagrer…');
+    dbSave(STATE.email).then(function(){
+      toast('');
+      loadProfile().then(function(){ renderAll(); });
+    }).catch(function(e){
+      toast('Kunne ikke flytte: ' + (e&&e.message?e.message:e),'err');
+    });
+  }
 // ---------------------------
   // Discs rendering
   // ---------------------------
@@ -1593,17 +1637,37 @@
 
         topRow.appendChild(mid);
 
+        // Actions (Kommentar / Flytt / Fjern)
+        var actions = el('div','');
+        css(actions,'display:flex;gap:8px;align-items:center;margin-left:10px;flex-wrap:wrap;');
+
+        var cm = btn((d.note ? 'Kommentar ✓' : 'Legg til kommentar'),''); 
+        cm.onclick = function(){ openCommentModal(d); };
+        css(cm,'padding:7px 10px;border-radius:12px;font-size:12px;opacity:.95;');
+        actions.appendChild(cm);
+
+        var target = (STATE.activeBagId === 'bag2') ? 'default' : 'bag2';
+        var mvLabel = (target === 'bag2') ? 'Flytt til Bag 2' : 'Flytt til Hovedbag';
+        var mv = btn(mvLabel,'');
+        mv.onclick = function(){
+          if (target === 'bag2') ensureBag2Exists();
+          moveDiscToBag(d, target);
+        };
+        css(mv,'padding:7px 10px;border-radius:12px;font-size:12px;opacity:.95;');
+        actions.appendChild(mv);
+
         var rm = btn('Fjern','');
         rm.onclick = function(){
-          // remove by id
           var id = d.id;
           STATE.discs = (STATE.discs || []).filter(function(x){ return x && x.id !== id; });
           writeActiveToBags();
           toast('Lagrer…');
           dbSave(STATE.email).then(function(){ toast(''); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke fjerne: ' + (e&&e.message?e.message:e),'err'); });
         };
-        css(rm,'padding:9px 10px;border-radius:12px;');
-        topRow.appendChild(rm);
+        css(rm,'padding:6px 8px;border-radius:10px;font-size:12px;opacity:.9;');
+        actions.appendChild(rm);
+
+        topRow.appendChild(actions);
 
         ccard.appendChild(topRow);
 
