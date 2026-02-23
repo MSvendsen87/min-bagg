@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-23.9';
+  var VERSION = 'v2026-02-24.0';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -975,18 +975,51 @@
   function openAddDiscModal() {
     var m = modal('Legg til disk');
 
+    // Tabs
+    var tabs = el('div','');
+    css(tabs,'display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;');
+    var tabSearch = btn('Søk i GolfKongen','');
+    var tabManual = btn('Legg inn manuelt','');
+    tabSearch.className += ' primary';
+    tabs.appendChild(tabSearch);
+    tabs.appendChild(tabManual);
+    m.body.appendChild(tabs);
+
+    var searchPane = el('div','');
+    var manualPane = el('div','');
+    manualPane.style.display = 'none';
+    m.body.appendChild(searchPane);
+    m.body.appendChild(manualPane);
+
+    function setTab(which){
+      if (which === 'manual') {
+        tabSearch.className = tabSearch.className.replace(/\bprimary\b/g,'').trim();
+        tabManual.className = (tabManual.className + ' primary').trim();
+        searchPane.style.display = 'none';
+        manualPane.style.display = '';
+      } else {
+        tabManual.className = tabManual.className.replace(/\bprimary\b/g,'').trim();
+        tabSearch.className = (tabSearch.className + ' primary').trim();
+        manualPane.style.display = 'none';
+        searchPane.style.display = '';
+      }
+    }
+    tabSearch.onclick = function(){ setTab('search'); };
+    tabManual.onclick = function(){ setTab('manual'); };
+
+
     // Global search (all discs on GolfKongen)
     var searchWrap = el('div','');
     css(searchWrap,'display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;');
     var q = inputText('Søk i GolfKongen (alle disker)', '');
     var hint = el('div','', 'Tips: Første søk kan ta litt tid (vi bygger katalogen).');
     css(hint,'font-size:12px;opacity:.7;margin:-6px 0 10px;');
-    m.body.appendChild(hint);
+    searchPane.appendChild(hint);
     css(q,'flex:1;min-width:220px;');
     var clearBtn = btn('Tøm','');
     searchWrap.appendChild(q);
     searchWrap.appendChild(clearBtn);
-    m.body.appendChild(searchWrap);
+    searchPane.appendChild(searchWrap);
 
     var top = el('div','');
     css(top,'display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;');
@@ -1000,12 +1033,12 @@
 
     var hint = el('div','', 'Velg en kategori for å hente produkter. Klikk “Legg til” for å legge i aktiv bag.');
     css(hint,'opacity:.85;margin-bottom:10px;');
-    m.body.appendChild(top);
-    m.body.appendChild(hint);
+    searchPane.appendChild(top);
+    searchPane.appendChild(hint);
 
     var list = el('div','');
     css(list,'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;');
-    m.body.appendChild(list);
+    searchPane.appendChild(list);
 
     var _timer = null;
     function doSearch() {
@@ -1086,7 +1119,116 @@
     }
 
     document.body.appendChild(m.overlay);
-  }
+  
+    // ---- Manual add form ----
+    var manCard = el('div','minbagg-card');
+    css(manCard,'padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.20);');
+    var manTitle = el('div','');
+    css(manTitle,'font-weight:900;margin-bottom:8px;');
+    manTitle.textContent = 'Legg inn disk manuelt';
+    manCard.appendChild(manTitle);
+
+    var row1 = el('div','');
+    css(row1,'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;');
+    var manName = inputText('Navn på disk (påbudt)', '');
+    var manBrand = inputText('Produsent (påbudt)', '');
+    row1.appendChild(manName);
+    row1.appendChild(manBrand);
+    manCard.appendChild(row1);
+
+    var row2 = el('div','');
+    css(row2,'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;');
+    var manType = el('select','');
+    css(manType,'width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.25);color:#fff;');
+    manType.innerHTML = ''
+      + '<option value="putter">Putter</option>'
+      + '<option value="midrange">Midrange</option>'
+      + '<option value="fairway">Fairway</option>'
+      + '<option value="distance">Driver</option>';
+    var manImg = inputText('Bilde-URL (valgfritt)', '');
+    row2.appendChild(manType);
+    row2.appendChild(manImg);
+    manCard.appendChild(row2);
+
+    var row3 = el('div','');
+    css(row3,'display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;');
+    function num(label){
+      var i = inputText(label, '');
+      i.type = 'number';
+      i.step = '0.1';
+      return i;
+    }
+    var fS = num('Speed (påbudt)');
+    var fG = num('Glide (påbudt)');
+    var fT = num('Turn (påbudt)');
+    var fF = num('Fade (påbudt)');
+    row3.appendChild(fS); row3.appendChild(fG); row3.appendChild(fT); row3.appendChild(fF);
+    manCard.appendChild(row3);
+
+    var manActions = el('div','');
+    css(manActions,'display:flex;gap:10px;align-items:center;justify-content:flex-end;');
+    var manAdd = btn('Legg til','');
+    manAdd.className += ' primary';
+    var manReset = btn('Nullstill','');
+    manActions.appendChild(manReset);
+    manActions.appendChild(manAdd);
+    manCard.appendChild(manActions);
+
+    function parseNum(v){
+      var x = parseFloat((''+v).replace(',','.'));
+      return isNaN(x) ? null : x;
+    }
+
+    manReset.onclick = function(){
+      manName.value=''; manBrand.value=''; manImg.value='';
+      fS.value=''; fG.value=''; fT.value=''; fF.value='';
+      manType.value='putter';
+    };
+
+    manAdd.onclick = function(){
+      var name = safeStr(manName.value).trim();
+      var brand = safeStr(manBrand.value).trim();
+      var img = safeStr(manImg.value).trim();
+      var type = safeStr(manType.value).trim();
+
+      var s = parseNum(fS.value);
+      var g = parseNum(fG.value);
+      var t = parseNum(fT.value);
+      var f = parseNum(fF.value);
+
+      if (!name) return toast('Mangler navn på disk','err');
+      if (!brand) return toast('Mangler produsent','err');
+      if (s===null || g===null || t===null || f===null) return toast('Flight (Speed/Glide/Turn/Fade) må fylles ut','err');
+
+      var disc = {
+        url: '',
+        name: name,
+        brand: brand,
+        image: img,
+        type: type,
+        manual: true,
+        addedAt: todayStr(),
+        flight: { speed: s, glide: g, turn: t, fade: f }
+      };
+
+      if (typeof addDiscToActiveBag === 'function') {
+        addDiscToActiveBag(disc);
+      } else if (typeof addDisc === 'function') {
+        addDisc(disc);
+      } else {
+        // fallback: push and save
+        STATE.discs = STATE.discs || [];
+        STATE.discs.push(disc);
+        saveState();
+        render();
+      }
+      toast('Lagt til: ' + name);
+      m.close();
+    };
+
+    manualPane.appendChild(manCard);
+
+}
 
   function addProductToBag(p) {
     // fetch product page to try extract flight
