@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-23.6';
+  var VERSION = 'v2026-02-23.7';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -457,8 +457,29 @@
   }
 
   function searchGolfkongenProducts(q) {
-    q = safeStr(q).trim().toLowerCase();
+    q = safeStr(q).trim();
+    var qRaw = q;
+    q = q.toLowerCase();
     if (q.length < 2) return Promise.resolve([]);
+    // Direct product URL support
+    if (qRaw.indexOf('/discgolf/') !== -1) {
+      var path = qRaw.replace(/^https?:\/\/[^\/]+/,'').trim();
+      if (/^\/discgolf\/[^\/]+\/[^\/?#]+/.test(path)) {
+        return fetchText(path).then(function(html){
+          // Try to pull name + image + type from the product page quickly
+          var doc = new DOMParser().parseFromString(html,'text/html');
+          var title = '';
+          var h1 = doc.querySelector('h1');
+          if (h1) title = safeStr(h1.textContent).trim();
+          if (!title) title = safeStr(doc.title).replace(/\s+\|\s+.*$/,'').trim();
+          var img = doc.querySelector('img');
+          var imgUrl = img ? toAbs(img.getAttribute('src')||img.getAttribute('data-src')||'') : '';
+          var type = inferTypeFromUrl(path) || '';
+          return [{url:path,name:title||path.split('/').pop(),image:imgUrl,type:type}];
+        }).catch(function(){ return []; });
+      }
+    }
+
 
     return ensureAllProductsIndex().then(function(all){
       var out = [];
@@ -486,37 +507,96 @@
     ];
 
     var all = [];
-    function loadOne(i){
-      if (i>=cats.length) {
-        // de-dupe by url
-        var seen = {};
-        var uniq = [];
-        for (var k=0;k<all.length;k++){
-          var u = all[k].url;
-          if (!u || seen[u]) continue;
-          seen[u]=1;
-          uniq.push(all[k]);
-        }
-        _ALL_PRODUCTS_CACHE = uniq;
-        return uniq;
+
+    function addItems(items, fallbackType){
+      if (!items || !items.length) return 0;
+      var added = 0;
+      for (var j=0;j<items.length;j++){
+        if (!items[j].type) items[j].type = fallbackType || '';
+        all.push(items[j]);
+        added++;
       }
-      return fetchText(cats[i].url).then(function(html){
-        var items = parseProductsFromCategoryHtml(html, cats[i].type);
-        // ensure type inferred
-        for (var j=0;j<items.length;j++){
-          if (!items[j].type) items[j].type = cats[i].type;
-          all.push(items[j]);
-        }
-        return loadOne(i+1);
-      }).catch(function(){
-        return loadOne(i+1);
+      return added;
+    }
+
+    function fetchCatPage(baseUrl, pageNum){
+      // Try common pagination params used by store themes
+      var urls = [];
+      if (pageNum === 1) {
+        urls.push(baseUrl);
+      } else {
+        urls.push(baseUrl + (baseUrl.indexOf('?')>-1?'&':'?') + 'page=' + pageNum);
+        urls.push(baseUrl + (baseUrl.indexOf('?')>-1?'&':'?') + 'p=' + pageNum);
+        urls.push(baseUrl.replace(/\/$/,'') + '/' + pageNum); // rare, but cheap to try
+      }
+
+      function tryOne(i){
+        if (i>=urls.length) return Promise.resolve(null);
+        return fetchText(urls[i]).then(function(html){
+          // basic sanity: must contain /discgolf/
+          if (html && html.indexOf('/discgolf/') !== -1) return {html:html, url:urls[i]};
+          return tryOne(i+1);
+        }).catch(function(){ return tryOne(i+1); });
+      }
+      return tryOne(0);
+    }
+
+    function loadCategory(catIdx){
+      if (catIdx>=cats.length) return Promise.resolve();
+
+      var cat = cats[catIdx];
+      var page = 1;
+      var seenUrl = {};
+      var lastCount = 0;
+      var maxPages = 10;
+
+      function loop(){
+        if (page > maxPages) return Promise.resolve();
+
+        return fetchCatPage(cat.url, page).then(function(res){
+          if (!res || !res.html) return Promise.resolve();
+
+          var items = parseProductsFromCategoryHtml(res.html, cat.type) || [];
+          // de-dupe within category quickly
+          var uniq = [];
+          for (var i=0;i<items.length;i++){
+            var u = items[i].url;
+            if (!u || seenUrl[u]) continue;
+            seenUrl[u]=1;
+            uniq.push(items[i]);
+          }
+          addItems(uniq, cat.type);
+
+          // stop condition: no growth
+          if (uniq.length === 0) return Promise.resolve();
+          if (all.length === lastCount) return Promise.resolve();
+          lastCount = all.length;
+
+          page++;
+          return loop();
+        });
+      }
+
+      return loop().then(function(){
+        return loadCategory(catIdx+1);
       });
     }
 
-    _ALL_PRODUCTS_PROMISE = loadOne(0).then(function(res){
+    _ALL_PRODUCTS_PROMISE = loadCategory(0).then(function(){
+      // global de-dupe by url
+      var seen = {};
+      var uniq = [];
+      for (var k=0;k<all.length;k++){
+        var u = all[k].url;
+        if (!u || seen[u]) continue;
+        seen[u]=1;
+        uniq.push(all[k]);
+      }
+      _ALL_PRODUCTS_CACHE = uniq;
       _ALL_PRODUCTS_PROMISE = null;
-      return res;
+      return uniq;
     });
+
     return _ALL_PRODUCTS_PROMISE;
   }
 
