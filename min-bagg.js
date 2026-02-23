@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-23.8';
+  var VERSION = 'v2026-02-23.9';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -506,10 +506,10 @@
               var mm2 = getCachedMeta(candidates[k].url) || candidates[k];
               if (mm2.name && mm2.name.toLowerCase().indexOf(q) !== -1) out2.push(mm2);
             }
-            return out2.slice(0, 40);
+            return out2.filter(function(x){ return x && x.name && x.name.toLowerCase().indexOf(q)!==-1; }).slice(0,40);
           });
         }
-        return out.slice(0, 40);
+        return out.filter(function(x){ return x && x.name && x.name.toLowerCase().indexOf(q)!==-1; }).slice(0,40);
       });
     });
   }
@@ -595,22 +595,31 @@
 
   function getCachedMeta(url){
     try {
-      var map = JSON.parse(localStorage.getItem('MINBAG_META_V1') || '{}');
+      var map = JSON.parse(localStorage.getItem('MINBAG_META_V2') || '{}');
       return map[url] || null;
     } catch(_) { return null; }
   }
 
   function setCachedMeta(url, meta){
     try {
-      var map = JSON.parse(localStorage.getItem('MINBAG_META_V1') || '{}');
+      var map = JSON.parse(localStorage.getItem('MINBAG_META_V2') || '{}');
       map[url] = meta;
-      localStorage.setItem('MINBAG_META_V1', JSON.stringify(map));
+      localStorage.setItem('MINBAG_META_V2', JSON.stringify(map));
     } catch(_) {}
   }
 
   function getProductMeta(url){
     var cached = getCachedMeta(url);
-    if (cached && cached.name) return Promise.resolve(cached);
+    if (cached && cached.name && cached.image) return Promise.resolve(cached);
+
+    function looksLikeLogo(u){
+      u = (u||'').toLowerCase();
+      return (u.indexOf('logo') !== -1) || (u.indexOf('/theme/') !== -1) || (u.indexOf('storage.quickbutik.com/stores/') !== -1);
+    }
+    function looksLikeProductImg(u){
+      u = (u||'').toLowerCase();
+      return (u.indexOf('/products/') !== -1) || (u.indexOf('products/') !== -1) || (u.indexOf('cdn.quickbutik.com/images/') !== -1 && u.indexOf('/products/') !== -1);
+    }
 
     return fetchText(url).then(function(html){
       var doc = new DOMParser().parseFromString(html,'text/html');
@@ -619,12 +628,29 @@
       if (h1) title = safeStr(h1.textContent).trim();
       if (!title) title = safeStr(doc.title).replace(/\s+\|\s+.*$/,'').trim();
 
-      var og = doc.querySelector('meta[property="og:image"], meta[name="og:image"], meta[name="twitter:image"]');
-      var imgUrl = og ? toAbs(og.getAttribute('content')||'') : '';
-      if (!imgUrl) {
-        var img = doc.querySelector('img');
-        imgUrl = img ? toAbs(img.getAttribute('src')||img.getAttribute('data-src')||'') : '';
+      var imgUrl = '';
+
+      // 1) Prefer product images in DOM
+      var imgs = doc.querySelectorAll('img');
+      for (var i=0;i<imgs.length;i++){
+        var s = toAbs(imgs[i].getAttribute('src')||imgs[i].getAttribute('data-src')||'');
+        if (!s) continue;
+        if (looksLikeProductImg(s) && !looksLikeLogo(s)) { imgUrl = s; break; }
       }
+
+      // 2) Meta tags as fallback (skip logo/theme)
+      if (!imgUrl) {
+        var metas = doc.querySelectorAll('meta[property="og:image"], meta[name="og:image"], meta[name="twitter:image"]');
+        for (var j=0;j<metas.length;j++){
+          var c = toAbs(metas[j].getAttribute('content')||'');
+          if (!c) continue;
+          if (looksLikeLogo(c)) continue;
+          if (looksLikeProductImg(c)) { imgUrl = c; break; }
+          if (!imgUrl) imgUrl = c;
+        }
+      }
+
+      if (looksLikeLogo(imgUrl)) imgUrl = '';
 
       var meta = { url:url, name:title||url.split('/').pop(), image:imgUrl||'', type: inferTypeFromUrl(url)||'' };
       setCachedMeta(url, meta);
