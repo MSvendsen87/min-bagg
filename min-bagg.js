@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-24.1';
+  var VERSION = 'v2026-02-24.2';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -1201,29 +1201,32 @@
       if (s===null || g===null || t===null || f===null) return toast('Flight (Speed/Glide/Turn/Fade) må fylles ut','err');
 
       var disc = {
+        id: uniqId('d'),
         url: '',
         name: name,
         brand: brand,
-        image: img,
-        type: type,
+        note: '',
+        type: type || 'midrange',
+        color: '',
+        image: img || '',
         manual: true,
-        addedAt: nowIso().slice(0,10),
-        flight: { speed: s, glide: g, turn: t, fade: f }
+        flight: { speed: s, glide: g, turn: t, fade: f },
+        addedAt: nowIso().slice(0,10)
       };
 
-      if (typeof addDiscToActiveBag === 'function') {
-        addDiscToActiveBag(disc);
-      } else if (typeof addDisc === 'function') {
-        addDisc(disc);
-      } else {
-        // fallback: push and save
-        STATE.discs = STATE.discs || [];
-        STATE.discs.push(disc);
-        saveState();
-        render();
-      }
-      toast('Lagt til: ' + name);
-      m.close();
+      STATE.discs = STATE.discs || [];
+      STATE.discs.push(disc);
+
+      toast('Lagrer…');
+      dbSave(STATE.email).then(function(){
+        toast('');
+        // optional: count manual discs too
+        incPopular(disc).catch(function(){});
+        loadProfile().then(function(){ renderAll(); });
+        m.close();
+      }).catch(function(e){
+        toast('Kunne ikke lagre: ' + (e&&e.message?e.message:e),'err');
+      });
     };
 
     manualPane.appendChild(manCard);
