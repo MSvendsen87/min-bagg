@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-24.3';
+  var VERSION = 'v2026-02-24.4';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -1602,12 +1602,10 @@
       css(grid,'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;');
 
       arr.forEach(function(d, idx){
-        var ccard = el('div','');
-        ccard.onclick = function(){ openCommentModal(d); };
-        css(ccard,'border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);border-radius:16px;padding:12px;');
+        var ccard = el('div','');        css(ccard,'border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);border-radius:16px;padding:12px;');
 
         var topRow = el('div','');
-        css(topRow,'display:flex;gap:10px;align-items:flex-start;');
+        css(topRow,'display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;');
 
         var img = document.createElement('img');
         img.src = d.image || '';
@@ -1639,32 +1637,32 @@
 
         // Actions (Kommentar / Flytt / Fjern)
         var actions = el('div','');
-        css(actions,'display:flex;gap:8px;align-items:center;margin-left:10px;flex-wrap:wrap;');
+        css(actions,'display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap;justify-content:flex-end;');
 
         var cm = btn((d.note ? 'Kommentar ✓' : 'Legg til kommentar'),''); 
-        cm.onclick = function(){ openCommentModal(d); };
-        css(cm,'padding:7px 10px;border-radius:12px;font-size:12px;opacity:.95;');
+        cm.onclick = function(e){ if(e&&e.stopPropagation)e.stopPropagation(); openCommentModal(d); };
+        css(cm,'padding:7px 10px;border-radius:12px;font-size:12px;opacity:.95;white-space:nowrap;');
         actions.appendChild(cm);
 
         var target = (STATE.activeBagId === 'bag2') ? 'default' : 'bag2';
         var mvLabel = (target === 'bag2') ? 'Flytt til Bag 2' : 'Flytt til Hovedbag';
         var mv = btn(mvLabel,'');
-        mv.onclick = function(){
+        mv.onclick = function(e){ if(e&&e.stopPropagation)e.stopPropagation();
           if (target === 'bag2') ensureBag2Exists();
           moveDiscToBag(d, target);
         };
-        css(mv,'padding:7px 10px;border-radius:12px;font-size:12px;opacity:.95;');
+        css(mv,'padding:7px 10px;border-radius:12px;font-size:12px;opacity:.95;white-space:nowrap;');
         actions.appendChild(mv);
 
         var rm = btn('Fjern','');
-        rm.onclick = function(){
+        rm.onclick = function(e){ if(e&&e.stopPropagation)e.stopPropagation();
           var id = d.id;
           STATE.discs = (STATE.discs || []).filter(function(x){ return x && x.id !== id; });
           writeActiveToBags();
           toast('Lagrer…');
           dbSave(STATE.email).then(function(){ toast(''); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke fjerne: ' + (e&&e.message?e.message:e),'err'); });
         };
-        css(rm,'padding:6px 8px;border-radius:10px;font-size:12px;opacity:.9;');
+        css(rm,'padding:6px 8px;border-radius:10px;font-size:12px;opacity:.9;white-space:nowrap;');
         actions.appendChild(rm);
 
         topRow.appendChild(actions);
