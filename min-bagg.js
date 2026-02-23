@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-24.0';
+  var VERSION = 'v2026-02-24.1';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -1207,7 +1207,7 @@
         image: img,
         type: type,
         manual: true,
-        addedAt: todayStr(),
+        addedAt: nowIso().slice(0,10),
         flight: { speed: s, glide: g, turn: t, fade: f }
       };
 
