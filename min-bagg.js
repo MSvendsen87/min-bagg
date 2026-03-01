@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-03-01.1';
+  var VERSION = 'v2026-03-01.2';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -327,9 +327,12 @@
   // DB: mybag_bags
   // ---------------------------
   function parseRow(row) {
-    var out = { bags: {}, activeBagId: 'default' };
+    var out = { bags: {}, activeBagId: 'default', profileExt: null };
     if (row && row.bag_json && typeof row.bag_json === 'object' && row.bag_json.bags && typeof row.bag_json.bags === 'object') {
       out.bags = row.bag_json.bags;
+    }
+    if (row && row.bag_json && typeof row.bag_json === 'object' && row.bag_json.profile && typeof row.bag_json.profile === 'object') {
+      out.profileExt = row.bag_json.profile;
     }
     out.activeBagId = (row && row.selected_bag) ? row.selected_bag : 'default';
 
@@ -659,40 +662,80 @@
   }
 
   function parseFlightFromProductHtml(html) {
-    // Best effort: tries to detect four numbers in common patterns
-    // Returns {speed, glide, turn, fade} as strings or null
-    try {
-      var txt = safeStr(html);
+  // Robust best effort:
+  // 1) Prefer GK flight chips if present on page HTML (gk-speed/gk-glide/gk-turn/gk-fade)
+  // 2) Fall back to label picking (Speed/Glide/Turn/Fade)
+  // 3) Fall back to "flight .... 4 numbers" pattern
+  // Always validate ranges to avoid capturing SKU/IDs (e.g. 3037)
+  try {
+    var txt = safeStr(html);
+    var f = null;
 
-      // Pattern 1: "Speed 9 Glide 5 Turn -1 Fade 2" (any order)
+    function normNum(x){
+      x = safeStr(x).replace(',', '.').trim();
+      return x;
+    }
+    function toNum(x){
+      var n = parseFloat(normNum(x));
+      return isNaN(n) ? null : n;
+    }
+    function validFlightObj(o){
+      if (!o) return false;
+      var sp = toNum(o.speed), gl = toNum(o.glide), tu = toNum(o.turn), fa = toNum(o.fade);
+      if (sp === null || gl === null || tu === null || fa === null) return false;
+      // Common disc golf ranges (loose, but blocks nonsense like 3037)
+      if (sp < 0.5 || sp > 16) return false;
+      if (gl < 0.5 || gl > 8) return false;
+      if (tu < -7 || tu > 2) return false;
+      if (fa < 0 || fa > 7) return false;
+      return true;
+    }
+    function asStrObj(o){
+      return {
+        speed: normNum(o.speed),
+        glide: normNum(o.glide),
+        turn:  normNum(o.turn),
+        fade:  normNum(o.fade)
+      };
+    }
+
+    // 1) GK chips
+    try {
+      var doc = new DOMParser().parseFromString(txt, 'text/html');
+      var spEl = doc.querySelector('.gk-flight-chip.gk-speed');
+      var glEl = doc.querySelector('.gk-flight-chip.gk-glide');
+      var tuEl = doc.querySelector('.gk-flight-chip.gk-turn');
+      var faEl = doc.querySelector('.gk-flight-chip.gk-fade');
+      if (spEl && glEl && tuEl && faEl) {
+        var o1 = { speed: spEl.textContent, glide: glEl.textContent, turn: tuEl.textContent, fade: faEl.textContent };
+        if (validFlightObj(o1)) f = asStrObj(o1);
+      }
+    } catch(_e1){}
+
+    // 2) Label pick
+    if (!f) {
       function pick(label) {
         var re = new RegExp(label + "\\s*[:]?\\s*(-?\\d+(?:[\\.,]\\d+)?)", "i");
         var m = txt.match(re);
-        return m ? m[1].replace(',', '.') : null;
+        return m ? normNum(m[1]) : null;
       }
+      var o2 = { speed: pick('speed'), glide: pick('glide'), turn: pick('turn'), fade: pick('fade') };
+      if (validFlightObj(o2)) f = asStrObj(o2);
+    }
 
-      var speed = pick('speed');
-      var glide = pick('glide');
-      var turn = pick('turn');
-      var fade = pick('fade');
-
-      // Pattern 2: "9 | 5 | -1 | 2" near word "Flight"
-      if (!speed || !glide || !turn || !fade) {
-        var m2 = txt.match(/flight[^0-9-]{0,60}(-?\d+(?:[\.,]\d+)?)\D+(-?\d+(?:[\.,]\d+)?)\D+(-?\d+(?:[\.,]\d+)?)\D+(-?\d+(?:[\.,]\d+)?)/i);
-        if (m2) {
-          speed = speed || m2[1].replace(',', '.');
-          glide = glide || m2[2].replace(',', '.');
-          turn = turn || m2[3].replace(',', '.');
-          fade = fade || m2[4].replace(',', '.');
-        }
+    // 3) Near "flight": 4 numbers
+    if (!f) {
+      var m2 = txt.match(/flight[^0-9-]{0,80}(-?\d+(?:[\.,]\d+)?)\D+(-?\d+(?:[\.,]\d+)?)\D+(-?\d+(?:[\.,]\d+)?)\D+(-?\d+(?:[\.,]\d+)?)/i);
+      if (m2) {
+        var o3 = { speed: m2[1], glide: m2[2], turn: m2[3], fade: m2[4] };
+        if (validFlightObj(o3)) f = asStrObj(o3);
       }
+    }
 
-      if (speed || glide || turn || fade) {
-        return { speed: speed || '', glide: glide || '', turn: turn || '', fade: fade || '' };
-      }
-    } catch (_) {}
-    return null;
-  }
+    return f;
+  } catch (_) {}
+  return null;
+}
 
   // ---------------------------
   // Flight visuals (inline SVG)
@@ -1222,8 +1265,28 @@
   function addProductToBag(p) {
     // fetch product page to try extract flight
     return fetchText(p.url).then(function(html){
-      var flight = parseFlightFromProductHtml(html);
-      var disc = {
+var flight = parseFlightFromProductHtml(html);
+
+// Flight is mandatory for discs in bag (prevents broken UI / wrong recs)
+function flightOk(f){
+  if (!f) return false;
+  var sp = parseFloat(String(f.speed).replace(',','.'));
+  var gl = parseFloat(String(f.glide).replace(',','.'));
+  var tu = parseFloat(String(f.turn).replace(',','.'));
+  var fa = parseFloat(String(f.fade).replace(',','.'));
+  if (isNaN(sp)||isNaN(gl)||isNaN(tu)||isNaN(fa)) return false;
+  if (sp < 0.5 || sp > 16) return false;
+  if (gl < 0.5 || gl > 8) return false;
+  if (tu < -7 || tu > 2) return false;
+  if (fa < 0 || fa > 7) return false;
+  return true;
+}
+
+if (!flightOk(flight)) {
+  throw new Error('Mangler gyldig flight på produktsiden. Denne disken kan ikke legges i bagen før flight er tilgjengelig.');
+}
+
+var disc = {
         id: uniqId('d'),
         url: p.url,
         name: p.name,
@@ -1760,7 +1823,7 @@
     progWrap.appendChild(progBar);
 
     function calcProgress(){
-      var total = 8; // recommended questions
+      var total = 9; // recommended questions (inkl putt)
       var done = 0;
       if (level.value) done++;
       if (hand.value) done++;
@@ -1770,7 +1833,7 @@
       if (pref.value) done++;
       if (wind.value) done++;
       if (lines.value) done++;
-      // (putt is extra, not counted)
+      if (putt.value) done++;
       var pct = Math.round((done/total)*100);
       progTxt.textContent = 'Profil fullført: ' + pct + '% (anbefalt)';
       progFill.style.width = pct + '%';
@@ -1839,7 +1902,9 @@
     var p = STATE.profileExt || STATE.profile || {};
     var pcard = card('Spillerprofil', 'Valgfritt, men anbefalt – gir bedre forslag.');
     var pct = (function(){
-      var total = 8, done = 0;
+      // Progress is based on the fields we actually ask in the profile modal.
+      // We include putting as well (9 fields) so 100% stays 100% after reload.
+      var total = 9, done = 0;
       if (p.level) done++;
       if (p.hand) done++;
       if (p.throw) done++;
@@ -1848,6 +1913,7 @@
       if (p.preference) done++;
       if (p.wind) done++;
       if (p.lines) done++;
+      if (p.putt) done++;
       return Math.round((done/total)*100);
     })();
 
@@ -1879,6 +1945,52 @@
     var c = card('Anbefalt for deg', 'To forslag om gangen – med konkrete begrunnelser.');
     ui.reco.appendChild(c);
 
+
+// Reco preferences (persisted in Supabase via profileExt -> bag_json.profile)
+if (!STATE.profileExt) STATE.profileExt = {};
+if (!STATE.profileExt.recoExcludeTypes) STATE.profileExt.recoExcludeTypes = [];
+
+function hasEx(t){
+  var arr = STATE.profileExt.recoExcludeTypes || [];
+  for (var i=0;i<arr.length;i++){ if (arr[i]===t) return true; }
+  return false;
+}
+function setEx(t, on){
+  var arr = STATE.profileExt.recoExcludeTypes || [];
+  var next = [];
+  for (var i=0;i<arr.length;i++){ if (arr[i]!==t) next.push(arr[i]); }
+  if (on) next.push(t);
+  STATE.profileExt.recoExcludeTypes = next;
+  // Persist immediately so it sticks across devices/logins
+  dbSave(STATE.email).catch(function(e){ console.log('[MINBAG] recoExclude save failed', e); });
+}
+
+var prefRow = el('div','');
+css(prefRow,'margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;');
+var prefLbl = el('div','', 'Ikke vis anbefalinger for:');
+css(prefLbl,'font-weight:800;opacity:.9;margin-right:4px;');
+prefRow.appendChild(prefLbl);
+
+function chk(type, label){
+  var w = el('label','');
+  css(w,'display:flex;gap:6px;align-items:center;cursor:pointer;user-select:none;');
+  var ckb = document.createElement('input');
+  ckb.type='checkbox';
+  ckb.checked = hasEx(type);
+  ckb.onchange = function(){ setEx(type, ckb.checked); renderAll(); };
+  w.appendChild(ckb);
+  var t = el('span','', label);
+  w.appendChild(t);
+  return w;
+}
+
+prefRow.appendChild(chk('putter','Putter'));
+prefRow.appendChild(chk('midrange','Midrange'));
+prefRow.appendChild(chk('fairway','Fairway'));
+prefRow.appendChild(chk('distance','Distance'));
+
+c.appendChild(prefRow);
+
     var box = el('div','');
     css(box,'margin-top:12px;');
     c.appendChild(box);
@@ -1889,15 +2001,38 @@
       return safeStr(s).toLowerCase().replace(/[^a-z0-9æøå]+/g,' ').replace(/\s+/g,' ').trim();
     }
 
-    function bucketFromFlight(f){
-      if (!f) return 'unknown';
-      var t = parseFloat(f.turn), fa = parseFloat(f.fade);
-      if (isNaN(t) || isNaN(fa)) return 'unknown';
-      var score = t + fa;
-      if (score <= -1) return 'US';
-      if (score >= 1) return 'OS';
-      return 'N';
+    function normalizeFlightAny(f){
+  if (!f) return null;
+  // object {speed,glide,turn,fade}
+  if (typeof f === 'object' && !Array.isArray(f)) {
+    if (f.speed!==undefined && f.glide!==undefined && f.turn!==undefined && f.fade!==undefined) return f;
+  }
+  // array [s,g,t,fa]
+  if (Array.isArray(f) && f.length>=4){
+    return { speed: f[0], glide: f[1], turn: f[2], fade: f[3] };
+  }
+  // string "s/g/t/f" or "s|g|t|f"
+  if (typeof f === 'string') {
+    var parts = f.split('/');
+    if (parts.length<4) parts = f.split('|');
+    if (parts.length>=4){
+      return { speed: parts[0], glide: parts[1], turn: parts[2], fade: parts[3] };
     }
+  }
+  return null;
+}
+
+function bucketFromFlight(f){
+  var ff = normalizeFlightAny(f);
+  if (!ff) return 'unknown';
+  var t = parseFloat(String(ff.turn).replace(',','.'));
+  var fa = parseFloat(String(ff.fade).replace(',','.'));
+  if (isNaN(t) || isNaN(fa)) return 'unknown';
+  var score = t + fa;
+  if (score <= -1) return 'US';
+  if (score >= 1) return 'OS';
+  return 'N';
+}
 
     function countByType(discs){
       var out = { putter:0, midrange:0, fairway:0, distance:0 };
@@ -2124,18 +2259,36 @@
     var gaps = [];
 
     // First: missing types
+    var ex = (STATE.profileExt && STATE.profileExt.recoExcludeTypes) ? STATE.profileExt.recoExcludeTypes : [];
+    function isEx(t){
+      for (var i=0;i<ex.length;i++){ if (ex[i]===t) return true; }
+      return false;
+    }
+
     ['putter','midrange','fairway','distance'].forEach(function(t){
+      if (isEx(t)) return;
       if ((counts[t]||0) === 0) gaps.push({ kind:'type_missing', type:t });
     });
 
     // Then: missing stability per type (only if type exists)
     ['putter','midrange','fairway','distance'].forEach(function(t){
+      if (isEx(t)) return;
       if ((counts[t]||0) > 0) {
         if ((stab[t].US||0) === 0) gaps.push({ kind:'stability_missing', type:t, bucket:'US' });
         if ((stab[t].N||0) === 0) gaps.push({ kind:'stability_missing', type:t, bucket:'N' });
         if ((stab[t].OS||0) === 0) gaps.push({ kind:'stability_missing', type:t, bucket:'OS' });
       }
     });
+
+
+// If user excluded all types, show info and stop.
+if (isEx('putter') && isEx('midrange') && isEx('fairway') && isEx('distance')) {
+  var inf = el('div','');
+  css(inf,'opacity:.9;line-height:1.35;');
+  inf.textContent = 'Du har skrudd av anbefalinger for alle kategorier. Huk av minst én kategori for å få forslag.';
+  box.appendChild(inf);
+  return;
+}
 
     if (!gaps.length) {
       var ok = el('div','');
@@ -2191,8 +2344,24 @@
 
         var sub = el('div','');
         css(sub,'opacity:.85;font-size:12px;margin-top:4px;');
-        var extra = '';
-        if (p.flight && p.flight.speed != null) extra = ' • Flight: ' + p.flight.speed + '/' + p.flight.glide + '/' + p.flight.turn + '/' + p.flight.fade;
+
+var extra = '';
+function flightShort(f){
+  if (!f) return '';
+  var sp = parseFloat(String(f.speed).replace(',','.'));
+  var gl = parseFloat(String(f.glide).replace(',','.'));
+  var tu = parseFloat(String(f.turn).replace(',','.'));
+  var fa = parseFloat(String(f.fade).replace(',','.'));
+  if (isNaN(sp)||isNaN(gl)||isNaN(tu)||isNaN(fa)) return '';
+  if (sp < 0.5 || sp > 16) return '';
+  if (gl < 0.5 || gl > 8) return '';
+  if (tu < -7 || tu > 2) return '';
+  if (fa < 0 || fa > 7) return '';
+  // keep simple formatting
+  return sp + '/' + gl + '/' + tu + '/' + fa;
+}
+var fs = flightShort(p.flight);
+if (fs) extra = ' • Flight: ' + fs;
         sub.textContent = 'Forslag ' + (idx+1) + extra;
         mid.appendChild(sub);
 
@@ -2548,6 +2717,7 @@ supaGetUser().then(function(user){
         var parsed = parseRow(row || {});
         STATE.bags = parsed.bags;
         STATE.activeBagId = parsed.activeBagId || 'default';
+        STATE.profileExt = parsed.profileExt || null;
         ensureBags();
         syncActiveFromBags();
         loadProfile().then(function(){ renderAll(); });
