@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-24.4';
+  var VERSION = 'v2026-02-24.6';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -374,7 +374,7 @@
 
   function dbSave(email) {
     writeActiveToBags();
-    var bj = { bags: STATE.bags };
+    var bj = { bags: STATE.bags, profile: (STATE.profileExt || null) };
     var selected = STATE.activeBagId;
     var active = STATE.bags[selected] || STATE.bags.default;
     var legacyBagArray = (active && active.items && Array.isArray(active.items.discs)) ? active.items.discs : [];
@@ -1700,6 +1700,7 @@
   }
 
   function saveProfile(p) {
+    // Persist basic fields to mybag_profiles (for reporting/SQL) and full profile in bag_json via dbSave.
     return ensureSupabaseClient().then(function(supa){
       return supa.from('mybag_profiles')
         .upsert({
@@ -1714,44 +1715,125 @@
   }
 
   function openProfileModal(){
-    var m = modal('Bli kjent med spilleren');
+    var m = modal('Spillerprofil');
     var wrap = el('div','');
-    css(wrap,'display:grid;grid-template-columns:1fr;gap:10px;');
+    css(wrap,'display:grid;grid-template-columns:1fr;gap:12px;');
 
-    var level = selectBox();
-    ['Nybegynner','Litt øvet','Viderekommen','Konkurransespiller'].forEach(function(x){
-      var o=document.createElement('option');o.value=x;o.textContent=x;level.appendChild(o);
-    });
-
-    var power = inputText('Maks distanse (meter)', STATE.profile && STATE.profile.hand || '');
-    var bhfh = inputText('BH/FH prosent (f.eks 70/30)', STATE.profile && STATE.profile.throw || '');
-    var course = selectBox();
-    ['Skog','Åpent','Blandet'].forEach(function(x){
-      var o=document.createElement('option');o.value=x;o.textContent=x;course.appendChild(o);
-    });
-
-    if (STATE.profile){
-      level.value = STATE.profile.level || '';
-      course.value = STATE.profile.course || '';
+    // Helpers
+    function mkRow(label, node){
+      var r = el('div','');
+      css(r,'display:grid;grid-template-columns:1fr;gap:6px;');
+      var t = el('div','', label);
+      css(t,'font-weight:800;opacity:.9;');
+      r.appendChild(t);
+      r.appendChild(node);
+      return r;
+    }
+    function optSel(options){
+      var s = selectBox();
+      options.forEach(function(x){
+        var o=document.createElement('option');o.value=x;o.textContent=x;s.appendChild(o);
+      });
+      return s;
     }
 
-    wrap.appendChild(el('div','', 'Nivå')); wrap.appendChild(level);
-    wrap.appendChild(el('div','', 'Armstyrke')); wrap.appendChild(power);
-    wrap.appendChild(el('div','', 'Kastestil')); wrap.appendChild(bhfh);
-    wrap.appendChild(el('div','', 'Banetype')); wrap.appendChild(course);
+    var p0 = STATE.profileExt || STATE.profile || {};
+
+    var level = optSel(['','Nybegynner','Litt øvet','Viderekommen','Konkurransespiller']);
+    var hand = optSel(['','Høyrehendt','Venstrehendt']);
+    var thr  = optSel(['','Backhand','Forehand','Begge']);
+    var course = optSel(['','Skog','Åpent','Blandet']);
+
+    var dist = optSel(['','0–80m','80–110m','110–140m','140m+']);
+    var pref = optSel(['','Kontroll','Balansert','Lengde']);
+    var wind = optSel(['','Lite vind','Litt vind','Mye vind']);
+    var lines = optSel(['','Hyzer','Rett','Anhyzer','Blandet']);
+    var putt = optSel(['','Spinn','Push','Blandet']);
+
+    level.value = p0.level || '';
+    hand.value  = p0.hand || '';
+    thr.value   = p0.throw || '';
+    course.value= p0.course || '';
+    dist.value  = p0.distance || '';
+    pref.value  = p0.preference || '';
+    wind.value  = p0.wind || '';
+    lines.value = p0.lines || '';
+    putt.value  = p0.putt || '';
+
+    // progress
+    var progWrap = el('div','');
+    css(progWrap,'padding:10px;border:1px solid rgba(255,255,255,.10);border-radius:14px;background:rgba(255,255,255,.03);');
+    var progTxt = el('div','');
+    css(progTxt,'font-weight:900;margin-bottom:6px;');
+    var progBar = el('div','');
+    css(progBar,'height:10px;border-radius:999px;background:rgba(255,255,255,.10);overflow:hidden;');
+    var progFill = el('div','');
+    css(progFill,'height:100%;width:0%;background:#2dd;opacity:.9;');
+    progBar.appendChild(progFill);
+    progWrap.appendChild(progTxt);
+    progWrap.appendChild(progBar);
+
+    function calcProgress(){
+      var total = 8; // recommended questions
+      var done = 0;
+      if (level.value) done++;
+      if (hand.value) done++;
+      if (thr.value) done++;
+      if (course.value) done++;
+      if (dist.value) done++;
+      if (pref.value) done++;
+      if (wind.value) done++;
+      if (lines.value) done++;
+      // (putt is extra, not counted)
+      var pct = Math.round((done/total)*100);
+      progTxt.textContent = 'Profil fullført: ' + pct + '% (anbefalt)';
+      progFill.style.width = pct + '%';
+    }
+
+    // Update progress on change
+    [level,hand,thr,course,dist,pref,wind,lines,putt].forEach(function(x){
+      x.onchange = calcProgress;
+    });
+    calcProgress();
+
+    wrap.appendChild(progWrap);
+    wrap.appendChild(mkRow('Nivå', level));
+    wrap.appendChild(mkRow('Hånd', hand));
+    wrap.appendChild(mkRow('Kastestil', thr));
+    wrap.appendChild(mkRow('Banetype', course));
+    wrap.appendChild(mkRow('Maks distanse', dist));
+    wrap.appendChild(mkRow('Preferanse', pref));
+    wrap.appendChild(mkRow('Vindforhold du spiller i', wind));
+    wrap.appendChild(mkRow('Typiske linjer', lines));
+    wrap.appendChild(mkRow('Putting-stil (valgfritt)', putt));
 
     var save = btn('Lagre profil','primary');
     save.onclick = function(){
       var p = {
-        level: level.value,
-        hand: power.value,
-        throw: bhfh.value,
-        course: course.value
+        level: level.value || '',
+        hand: hand.value || '',
+        throw: thr.value || '',
+        course: course.value || '',
+        distance: dist.value || '',
+        preference: pref.value || '',
+        wind: wind.value || '',
+        lines: lines.value || '',
+        putt: putt.value || ''
       };
-      saveProfile(p).then(function(){
-        STATE.profile = p;
+      STATE.profileExt = p;
+      // Keep legacy STATE.profile for compact UI
+      STATE.profile = { level:p.level, hand:p.hand, throw:p.throw, course:p.course };
+
+      toast('Lagrer…');
+      // Save basic to mybag_profiles + full to bag_json
+      saveProfile(STATE.profile).then(function(){
+        return dbSave(STATE.email);
+      }).then(function(){
+        toast('');
         document.body.removeChild(m.overlay);
         loadProfile().then(function(){ renderAll(); });
+      }).catch(function(e){
+        toast('Kunne ikke lagre: ' + (e&&e.message?e.message:e),'err');
       });
     };
 
@@ -1767,155 +1849,416 @@
   function renderRecommendations() {
     clear(ui.reco);
 
-    
-    var pcard = card('Spillerprofil', 'Hjelper oss å gi bedre anbefalinger.');
-    var ptxt = el('div','', STATE.profile ?
-      ('Nivå: '+STATE.profile.level+' • Arm: '+STATE.profile.hand+' • Kast: '+STATE.profile.throw+' • Bane: '+STATE.profile.course)
-      : 'Ingen profil lagret ennå.');
+    // -------- Profile card with progress --------
+    var p = STATE.profileExt || STATE.profile || {};
+    var pcard = card('Spillerprofil', 'Valgfritt, men anbefalt – gir bedre forslag.');
+    var pct = (function(){
+      var total = 8, done = 0;
+      if (p.level) done++;
+      if (p.hand) done++;
+      if (p.throw) done++;
+      if (p.course) done++;
+      if (p.distance) done++;
+      if (p.preference) done++;
+      if (p.wind) done++;
+      if (p.lines) done++;
+      return Math.round((done/total)*100);
+    })();
+
+    var bar = el('div','');
+    css(bar,'height:10px;border-radius:999px;background:rgba(255,255,255,.10);overflow:hidden;margin-top:8px;');
+    var fill = el('div','');
+    css(fill,'height:100%;width:'+pct+'%;background:#2dd;opacity:.9;');
+    bar.appendChild(fill);
+
+    var ptxt = el('div','');
+    css(ptxt,'opacity:.9;line-height:1.35;');
+    ptxt.innerHTML =
+      '<div style="font-weight:900;">Profil: '+pct+'%</div>' +
+      '<div style="opacity:.85;margin-top:4px;">' +
+      (p.level ? ('Nivå: '+p.level) : 'Nivå: –') + ' • ' +
+      (p.hand ? ('Hånd: '+p.hand) : 'Hånd: –') + ' • ' +
+      (p.throw ? ('Kast: '+p.throw) : 'Kast: –') + ' • ' +
+      (p.course ? ('Bane: '+p.course) : 'Bane: –') +
+      '</div>';
     pcard.appendChild(ptxt);
+    pcard.appendChild(bar);
+
     var pbtn = btn('Rediger profil','');
     pbtn.onclick = function(){ openProfileModal(); };
     pcard.appendChild(pbtn);
     ui.reco.appendChild(pcard);
-var c = card('Anbefalt for deg', 'Forslag basert på hva som mangler i bagen din akkurat nå.');
+
+    // -------- Recommendation engine --------
+    var c = card('Anbefalt for deg', 'To forslag om gangen – med konkrete begrunnelser.');
     ui.reco.appendChild(c);
-
-    var needed = pickNeededTypeAdvanced(STATE.discs || [], STATE.profile);
-    recoState.lastType = needed;
-
-    var line = el('div','');
-    css(line,'display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;');
-
-    var left = el('div','');
-    css(left,'opacity:.9;line-height:1.35;');
-    left.innerHTML =
-      '<div style="font-weight:900;">Neste steg: ' + (TYPE_LABEL[needed] || needed) + '</div>' +
-      '<div style="opacity:.85;margin-top:4px;">Vi prøver å bygge en mer komplett sekk (mål: 85%+ kommer).</div>';
-    line.appendChild(left);
-
-    var right = el('div','');
-    css(right,'display:flex;gap:10px;flex-wrap:wrap;align-items:center;');
-
-    var btnPick = btn('Finn forslag','primary');
-    var btnNo = btn('Nei takk','');
-
-    right.appendChild(btnPick);
-    right.appendChild(btnNo);
-    line.appendChild(right);
-
-    c.appendChild(line);
 
     var box = el('div','');
     css(box,'margin-top:12px;');
+    c.appendChild(box);
 
-    function showPick(p) {
-      clear(box);
-      if (!p) {
-        var t = el('div','', 'Fant ingen forslag akkurat nå.');
-        css(t,'opacity:.85;');
-        box.appendChild(t);
-        return;
-      }
-      recoState.lastPicked = p;
+    var discList = STATE.discs || [];
 
-      var wrap = el('div','');
-      css(wrap,'border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);border-radius:16px;padding:12px;display:flex;gap:10px;align-items:flex-start;');
-
-      var img = document.createElement('img');
-      img.src = p.image || '';
-      css(img,'width:58px;height:58px;border-radius:16px;object-fit:cover;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);');
-      wrap.appendChild(img);
-
-      var mid = el('div','');
-      css(mid,'flex:1;min-width:0;');
-      var n = el('div','', clampTxt(p.name, 60));
-      css(n,'font-weight:900;');
-      mid.appendChild(n);
-      var l = el('a','', 'Åpne produkt');
-      l.href = p.url; l.target='_blank';
-      css(l,'display:inline-block;margin-top:6px;font-size:12px;color:#cfe;text-decoration:none;opacity:.9;');
-      mid.appendChild(l);
-      wrap.appendChild(mid);
-
-      var add = btn('Legg til','primary');
-      add.onclick = function(){
-        addProductToBag(p).then(function(){ toast('Lagt til ✅'); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke legge til: ' + (e&&e.message?e.message:e),'err'); });
-      };
-      wrap.appendChild(add);
-
-      box.appendChild(wrap);
+    function normName(s){
+      return safeStr(s).toLowerCase().replace(/[^a-z0-9æøå]+/g,' ').replace(/\s+/g,' ').trim();
     }
 
-    function pickSuggestion() {
-      // Best effort: fetch category page and pick first "straight-ish" if possible, else first product
-      var cat = null;
-      for (var i=0;i<CAT.length;i++) if (CAT[i].type === needed) cat = CAT[i];
-      if (!cat) cat = CAT[1];
+    function bucketFromFlight(f){
+      if (!f) return 'unknown';
+      var t = parseFloat(f.turn), fa = parseFloat(f.fade);
+      if (isNaN(t) || isNaN(fa)) return 'unknown';
+      var score = t + fa;
+      if (score <= -1) return 'US';
+      if (score >= 1) return 'OS';
+      return 'N';
+    }
 
-      toast('Henter forslag…');
-      fetchText(cat.url).then(function(html){
-        var items = parseProductsFromCategoryHtml(html, cat.type);
-        if (!items.length) { toast(''); showPick(null); return; }
+    function countByType(discs){
+      var out = { putter:0, midrange:0, fairway:0, distance:0 };
+      for (var i=0;i<discs.length;i++){
+        var d=discs[i]; if(!d) continue;
+        var t = (d.type||inferTypeFromUrl(d.url)||'').toLowerCase();
+        if (t==='driver') t='distance';
+        if (out.hasOwnProperty(t)) out[t]++;
+      }
+      return out;
+    }
 
-        // try pick something not already in bag (by url)
-        var existing = {};
-        (STATE.discs || []).forEach(function(d){ if (d && d.url) existing[d.url] = true; });
+    function stabilityByType(discs){
+      var out = { putter:{US:0,N:0,OS:0,unknown:0}, midrange:{US:0,N:0,OS:0,unknown:0}, fairway:{US:0,N:0,OS:0,unknown:0}, distance:{US:0,N:0,OS:0,unknown:0} };
+      for (var i=0;i<discs.length;i++){
+        var d=discs[i]; if(!d) continue;
+        var t=(d.type||inferTypeFromUrl(d.url)||'').toLowerCase();
+        if (t==='driver') t='distance';
+        if (!out[t]) continue;
+        var b = bucketFromFlight(d.flight);
+        if (!out[t][b]) b='unknown';
+        out[t][b] += 1;
+      }
+      return out;
+    }
 
-        var candidate = null;
-        for (var j=0;j<items.length;j++) {
-          if (!existing[items[j].url]) { candidate = items[j]; break; }
+    function gapLabel(g){
+      var tl = TYPE_LABEL[g.type] || g.type;
+      if (g.kind==='type_missing') return 'Du mangler: ' + tl;
+      if (g.kind==='stability_missing') {
+        var bl = (g.bucket==='US') ? 'Understabil' : (g.bucket==='OS') ? 'Overstabil' : 'Nøytral';
+        return 'Du mangler: ' + bl + ' ' + tl;
+      }
+      return 'Neste steg';
+    }
+
+    function buildEvidence(g, cnt, stab){
+      var tl = TYPE_LABEL[g.type] || g.type;
+      if (g.kind==='type_missing'){
+        return 'Du har 0 ' + tl.toLowerCase() + ' i bagen akkurat nå.';
+      }
+      if (g.kind==='stability_missing'){
+        var s = stab[g.type];
+        var bl = (g.bucket==='US') ? 'understabile' : (g.bucket==='OS') ? 'overstabile' : 'nøytrale';
+        return 'Du har ' + cnt[g.type] + ' ' + tl.toLowerCase() + ' totalt: ' +
+          (s.US||0) + ' understabile, ' + (s.N||0) + ' nøytrale, ' + (s.OS||0) + ' overstabile.';
+      }
+      return '';
+    }
+
+    // Banlist (30 days)
+    function banKey(email){ return 'MINBAG_BANS_V1_' + (email||''); }
+    function getBans(){
+      try {
+        var raw = localStorage.getItem(banKey(STATE.email));
+        var obj = raw ? JSON.parse(raw) : {};
+        var now = Date.now();
+        Object.keys(obj).forEach(function(k){ if (obj[k] && obj[k] < now) delete obj[k]; });
+        return obj;
+      } catch(e){ return {}; }
+    }
+    function setBans(obj){
+      try { localStorage.setItem(banKey(STATE.email), JSON.stringify(obj||{})); } catch(e){}
+    }
+    function banProduct(p){
+      var b = getBans();
+      var key = (p && (p.url||p.name)) ? (p.url||p.name) : '';
+      if (!key) return;
+      b[key] = Date.now() + (30*24*60*60*1000);
+      setBans(b);
+    }
+    function isBanned(p){
+      var b = getBans();
+      var key = (p && (p.url||p.name)) ? (p.url||p.name) : '';
+      return !!(key && b[key]);
+    }
+
+    // Flight cache (from product page parsing)
+    function flightCacheKey(){ return 'MINBAG_FLIGHT_V1'; }
+    function getFlightCache(){
+      try { return JSON.parse(localStorage.getItem(flightCacheKey())||'{}'); } catch(e){ return {}; }
+    }
+    function setFlightCache(obj){
+      try { localStorage.setItem(flightCacheKey(), JSON.stringify(obj||{})); } catch(e){}
+    }
+    function getFlightForUrl(url){
+      var c = getFlightCache();
+      if (c[url]) return Promise.resolve(c[url]);
+      return fetchText(url).then(function(html){
+        var f = parseFlightFromProductHtml(html);
+        c[url] = f || null;
+        setFlightCache(c);
+        return f;
+      }).catch(function(){ return null; });
+    }
+
+    function fetchPopular(type, limit){
+      var urlBase = window.GK_SUPABASE_URL;
+      var key = window.GK_SUPABASE_ANON_KEY;
+      if (!urlBase || !key) return Promise.resolve([]);
+      var url = urlBase.replace(/\/$/,'') + '/rest/v1/popular_discs?select=type,name,product_url,image_url,count&type=eq.' + encodeURIComponent(type) + '&order=count.desc&limit=' + (limit||50);
+      return fetch(url, { headers:{ apikey:key, Authorization:'Bearer ' + key } })
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(function(rows){
+          return (rows||[]).map(function(r){
+            return { name:r.name, url:r.product_url||'', image:r.image_url||'', count:r.count||0, type:r.type||type };
+          });
+        }).catch(function(){ return []; });
+    }
+
+    function chooseTwoForGap(gap){
+      var existingNames = {};
+      discList.forEach(function(d){ if(d&&d.name) existingNames[normName(d.name)] = true; });
+
+      return fetchPopular(gap.type, 60).then(function(rows){
+        // filter bans + existing
+        var cand = [];
+        for (var i=0;i<rows.length;i++){
+          var p = rows[i];
+          if (!p || !p.url) continue;
+          if (existingNames[normName(p.name)]) continue;
+          if (isBanned(p)) continue;
+          cand.push(p);
         }
-        if (!candidate) candidate = items[0];
+        if (!cand.length) return [];
 
-        // optional: pull flight and prefer straight
-        fetchText(candidate.url).then(function(ph){
-          var f = parseFlightFromProductHtml(ph);
-          candidate.flight = f;
-          if (f && isApproxStraight(f)) {
-            toast('');
-            showPick(candidate);
-            return;
-          }
-          // try scan a few to find straight
-          var tries = Math.min(6, items.length);
+        // If this gap is stability-based, try to find matching bucket by reading flight from product pages (best effort).
+        if (gap.kind === 'stability_missing') {
+          var want = gap.bucket;
+          var picked = [];
           var idx = 0;
-          function next() {
-            idx++;
-            if (idx >= tries) { toast(''); showPick(candidate); return; }
-            var it = items[idx];
-            if (existing[it.url]) return next();
-            fetchText(it.url).then(function(h2){
-              var f2 = parseFlightFromProductHtml(h2);
-              if (f2 && isApproxStraight(f2)) {
-                it.flight = f2;
-                toast('');
-                showPick(it);
-              } else {
-                next();
-              }
-            }).catch(function(){ next(); });
+          function step(){
+            if (picked.length >= 2) return Promise.resolve(picked);
+            if (idx >= cand.length || idx >= 12) return Promise.resolve(picked); // cap fetches
+            var p = cand[idx++];
+            return getFlightForUrl(p.url).then(function(f){
+              p.flight = f;
+              var b = bucketFromFlight(f);
+              if (b === want) picked.push(p);
+              return step();
+            });
           }
-          next();
-        }).catch(function(){
-          toast('');
-          showPick(candidate);
-        });
-      }).catch(function(e){
-        toast('Kunne ikke hente forslag: ' + (e&&e.message?e.message:e),'err');
+          return step().then(function(picked){
+            if (picked.length >= 2) return picked.slice(0,2);
+            // fallback: top two even if bucket unknown
+            var rest = [];
+            for (var j=0;j<cand.length && rest.length<2;j++){
+              var pp=cand[j];
+              var already=false;
+              for (var k=0;k<picked.length;k++) if (picked[k].url===pp.url) already=true;
+              if (!already) rest.push(pp);
+            }
+            return picked.concat(rest).slice(0,2);
+          });
+        }
+
+        // Type missing: just take top two
+        return cand.slice(0,2);
+      }).then(function(list){
+        if (list.length >= 2) return list;
+        // fallback to search (Q4=B)
+        var q = (gap.kind==='stability_missing')
+          ? ((gap.bucket==='OS'?'overstable ':gap.bucket==='US'?'understable ':'straight ') + (TYPE_LABEL[gap.type]||gap.type))
+          : (TYPE_LABEL[gap.type]||gap.type);
+        return searchGolfkongenProducts(q).then(function(items){
+          // items already contain url/name/image
+          var out = [];
+          for (var i=0;i<items.length && out.length<2;i++){
+            var it=items[i];
+            if (!it || !it.url) continue;
+            if (existingNames[normName(it.name)]) continue;
+            if (isBanned(it)) continue;
+            out.push(it);
+          }
+          return out;
+        }).catch(function(){ return list; });
       });
     }
 
-    btnPick.onclick = pickSuggestion;
-    btnNo.onclick = function(){ recoSeen[needed] = true; pickSuggestion(); };
+    // Build gaps (Q3=A)
+    var counts = countByType(discList);
+    var stab = stabilityByType(discList);
+    var gaps = [];
 
-    c.appendChild(box);
+    // First: missing types
+    ['putter','midrange','fairway','distance'].forEach(function(t){
+      if ((counts[t]||0) === 0) gaps.push({ kind:'type_missing', type:t });
+    });
 
-    // Start with one suggestion automatically
-    pickSuggestion();
+    // Then: missing stability per type (only if type exists)
+    ['putter','midrange','fairway','distance'].forEach(function(t){
+      if ((counts[t]||0) > 0) {
+        if ((stab[t].US||0) === 0) gaps.push({ kind:'stability_missing', type:t, bucket:'US' });
+        if ((stab[t].N||0) === 0) gaps.push({ kind:'stability_missing', type:t, bucket:'N' });
+        if ((stab[t].OS||0) === 0) gaps.push({ kind:'stability_missing', type:t, bucket:'OS' });
+      }
+    });
+
+    if (!gaps.length) {
+      var ok = el('div','');
+      css(ok,'opacity:.9;line-height:1.35;');
+      ok.innerHTML = '<div style="font-weight:900;">Ser bra ut! 👌</div><div style="opacity:.85;margin-top:4px;">Jeg finner ingen åpenbare mangler akkurat nå. Neste steg blir “mer personlig” rolle-analyse.</div>';
+      box.appendChild(ok);
+      return;
+    }
+
+    // State for rounds
+    if (!recoState) recoState = {};
+    recoState.gapIndex = recoState.gapIndex || 0;
+    recoState.altIndex = recoState.altIndex || 0;
+
+    function clampIdx(){
+      if (recoState.gapIndex >= gaps.length) recoState.gapIndex = 0;
+      if (recoState.gapIndex < 0) recoState.gapIndex = 0;
+      if (recoState.altIndex > 1) recoState.altIndex = 0;
+      if (recoState.altIndex < 0) recoState.altIndex = 0;
+    }
+    clampIdx();
+
+    function renderGap(gap, suggestions){
+      clear(box);
+
+      var title = el('div','');
+      css(title,'font-weight:900;margin-bottom:6px;');
+      title.textContent = gapLabel(gap);
+      box.appendChild(title);
+
+      var ev = el('div','');
+      css(ev,'opacity:.85;line-height:1.35;margin-bottom:10px;');
+      ev.textContent = buildEvidence(gap, counts, stab);
+      box.appendChild(ev);
+
+      var sugWrap = el('div','');
+      css(sugWrap,'display:grid;grid-template-columns:1fr;gap:10px;');
+      box.appendChild(sugWrap);
+
+      function sugCard(p, idx){
+        var w = el('div','');
+        css(w,'border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);border-radius:16px;padding:12px;display:flex;gap:10px;align-items:flex-start;');
+        var img = document.createElement('img');
+        img.src = p.image || '';
+        css(img,'width:54px;height:54px;border-radius:16px;object-fit:cover;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);');
+        w.appendChild(img);
+
+        var mid = el('div','');
+        css(mid,'flex:1;min-width:0;');
+        var n = el('div','', clampTxt(p.name, 70));
+        css(n,'font-weight:900;');
+        mid.appendChild(n);
+
+        var sub = el('div','');
+        css(sub,'opacity:.85;font-size:12px;margin-top:4px;');
+        var extra = '';
+        if (p.flight && p.flight.speed != null) extra = ' • Flight: ' + p.flight.speed + '/' + p.flight.glide + '/' + p.flight.turn + '/' + p.flight.fade;
+        sub.textContent = 'Forslag ' + (idx+1) + extra;
+        mid.appendChild(sub);
+
+        var a = el('a','', 'Åpne produkt');
+        a.href = p.url || '#'; a.target='_blank';
+        css(a,'display:inline-block;margin-top:6px;font-size:12px;color:#cfe;text-decoration:none;opacity:.9;');
+        mid.appendChild(a);
+
+        w.appendChild(mid);
+
+        var btns = el('div','');
+        css(btns,'display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;');
+        var add = btn('Legg til','primary');
+        add.onclick = function(){
+          addProductToBag(p).then(function(){
+            toast('Lagt til ✅');
+            loadProfile().then(function(){ renderAll(); });
+          }).catch(function(e){
+            toast('Kunne ikke legge til: ' + (e&&e.message?e.message:e),'err');
+          });
+        };
+        var no = btn('Nei takk','');
+        no.onclick = function(){
+          banProduct(p);
+          // if first suggestion rejected -> show second, else next gap
+          if (idx === 0 && suggestions[1]) {
+            recoState.altIndex = 1;
+            renderGap(gap, suggestions);
+          } else {
+            recoState.gapIndex++;
+            recoState.altIndex = 0;
+            refresh();
+          }
+        };
+        btns.appendChild(add);
+        btns.appendChild(no);
+        w.appendChild(btns);
+
+        return w;
+      }
+
+      if (!suggestions || !suggestions.length) {
+        var t = el('div','');
+        css(t,'opacity:.85;');
+        t.textContent = 'Fant ingen forslag akkurat nå. Prøv igjen om litt.';
+        sugWrap.appendChild(t);
+        var next = btn('Neste mangel','');
+        next.onclick = function(){ recoState.gapIndex++; recoState.altIndex=0; refresh(); };
+        box.appendChild(next);
+        return;
+      }
+
+      // show one at a time (two total)
+      var showIdx = recoState.altIndex || 0;
+      sugWrap.appendChild(sugCard(suggestions[showIdx], showIdx));
+
+      // small helper to switch between 1 and 2 if both exist
+      if (suggestions.length > 1) {
+        var switcher = el('div','');
+        css(switcher,'display:flex;gap:8px;justify-content:flex-end;margin-top:6px;opacity:.9;');
+        var s1 = btn('Vis 1','');
+        var s2 = btn('Vis 2','');
+        s1.onclick=function(){ recoState.altIndex=0; renderGap(gap, suggestions); };
+        s2.onclick=function(){ recoState.altIndex=1; renderGap(gap, suggestions); };
+        switcher.appendChild(s1); switcher.appendChild(s2);
+        box.appendChild(switcher);
+      }
+    }
+
+    function refresh(){
+      clampIdx();
+      var gap = gaps[recoState.gapIndex];
+      toast('Henter forslag…');
+      chooseTwoForGap(gap).then(function(list){
+        toast('');
+        renderGap(gap, list || []);
+      }).catch(function(e){
+        toast('');
+        clear(box);
+        var t = el('div','');
+        css(t,'opacity:.85;');
+        t.textContent = 'Kunne ikke hente forslag.';
+        box.appendChild(t);
+      });
+    }
+
+    refresh();
   }
 
   // ---------------------------
   // Top 3 per type (popular_discs)
+  // ---------------------------
+ (popular_discs)
   // ---------------------------
   function renderTop3PerType() {
     // Top 3 lives under recommendations panel for now
@@ -2049,8 +2392,124 @@ var c = card('Anbefalt for deg', 'Forslag basert på hva som mangler i bagen din
   // ---------------------------
   // Boot
   // ---------------------------
+  
+  // ===========================
+  // Public Top 3 widget (for forsiden / public pages)
+  // Place a div with id="gk-top3-widget" anywhere, and ensure GK_SUPABASE_URL + GK_SUPABASE_ANON_KEY are available on window.
+  // ===========================
+  function renderTop3WidgetIfPresent(){
+    var root = document.getElementById('gk-top3-widget');
+    if (!root) return;
+
+    var urlBase = window.GK_SUPABASE_URL;
+    var key = window.GK_SUPABASE_ANON_KEY;
+    if (!urlBase || !key) {
+      root.innerHTML = '<div style="opacity:.8">Toppliste utilgjengelig (mangler Supabase-nøkkel).</div>';
+      return;
+    }
+
+    root.innerHTML = '';
+    var wrap = el('div','');
+    css(wrap,'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;');
+    root.appendChild(wrap);
+
+    function niceType(t){
+      if (t==='putter') return 'Puttere';
+      if (t==='midrange') return 'Midrange';
+      if (t==='fairway') return 'Fairway';
+      if (t==='distance') return 'Drivere';
+      return t;
+    }
+
+    function fetchTop3(type){
+      var url = urlBase.replace(/\/$/,'') + '/rest/v1/popular_discs?select=type,name,product_url,image_url,count&type=eq.' + encodeURIComponent(type) + '&order=count.desc&limit=3';
+      return fetch(url, {
+        headers: { apikey: key, Authorization: 'Bearer ' + key }
+      }).then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    }
+
+    var types = ['putter','midrange','fairway','distance'];
+    var ps = [];
+    for (var i=0;i<types.length;i++){
+      (function(tt){
+        ps.push(fetchTop3(tt).then(function(rows){
+          var card = el('div','minbagg-card');
+          css(card,'padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:14px;background:rgba(0,0,0,.20);');
+          var h = el('div','');
+          css(h,'font-weight:900;margin-bottom:8px;');
+          h.textContent = 'Topp 3 – ' + niceType(tt);
+          card.appendChild(h);
+
+          if (!rows || !rows.length) {
+            var empty = el('div','');
+            empty.style.opacity = '.8';
+            empty.textContent = 'Ingen data enda.';
+            card.appendChild(empty);
+            wrap.appendChild(card);
+            return;
+          }
+
+          for (var j=0;j<rows.length;j++){
+            var r = rows[j] || {};
+            var a = el('a','');
+            a.href = r.product_url || '#';
+            a.style.textDecoration = 'none';
+            a.style.color = 'inherit';
+            a.style.display = 'flex';
+            a.style.gap = '10px';
+            a.style.alignItems = 'center';
+            a.style.padding = '8px';
+            a.style.borderRadius = '12px';
+            a.style.border = '1px solid rgba(255,255,255,.10)';
+            a.style.background = 'rgba(255,255,255,.03)';
+            a.style.marginBottom = '8px';
+
+            var img = el('img','');
+            img.src = r.image_url || '';
+            img.alt = r.name || '';
+            css(img,'width:44px;height:44px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.2);');
+            a.appendChild(img);
+
+            var meta = el('div','');
+            meta.style.flex = '1';
+            var n = el('div','');
+            n.style.fontWeight = '800';
+            n.textContent = r.name || '(uten navn)';
+            meta.appendChild(n);
+
+            var sub = el('div','');
+            sub.style.opacity = '.8';
+            sub.style.fontSize = '12px';
+            sub.textContent = 'Valgt ' + (r.count||0) + ' ganger';
+            meta.appendChild(sub);
+
+            a.appendChild(meta);
+            card.appendChild(a);
+          }
+
+          wrap.appendChild(card);
+        }).catch(function(){
+          var card = el('div','minbagg-card');
+          css(card,'padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:14px;background:rgba(0,0,0,.20);');
+          var h = el('div','');
+          css(h,'font-weight:900;margin-bottom:8px;');
+          h.textContent = 'Topp 3 – ' + niceType(tt);
+          card.appendChild(h);
+          var err = el('div','');
+          err.style.opacity = '.8';
+          err.textContent = 'Kunne ikke laste toppliste.';
+          card.appendChild(err);
+          wrap.appendChild(card);
+        }));
+      })(types[i]);
+    }
+
+    // no need to wait; UI fills as it loads
+  }
+
   function boot() {
-    supaGetUser().then(function(user){
+    renderTop3WidgetIfPresent();
+supaGetUser().then(function(user){
       if (!user || !user.email) {
         renderConnectView();
         return;
