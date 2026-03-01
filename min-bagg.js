@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-24.7';
+  var VERSION = 'v2026-03-01.1';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -813,7 +813,6 @@
     shell: null,
     toast: null,
     bagSel: null,
-    delBagBtn: null,
     content: null,
     top3: null,
     reco: null
@@ -864,19 +863,6 @@
       dbSave(STATE.email).then(function(){ toast(''); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke bytte: ' + (e&&e.message?e.message:e),'err'); });
     };
     left.appendChild(ui.bagSel);
-
-    ui.delBagBtn = btn('Slett Bag 2','danger');
-    ui.delBagBtn.onclick = function(){
-      if (STATE.activeBagId !== 'bag2') return;
-      if (!confirm('Slette Bag 2? Dette kan ikke angres.')) return;
-      try { delete STATE.bags.bag2; } catch(_) {}
-      STATE.activeBagId = 'default';
-      syncActiveFromBags();
-      toast('Sletter…');
-      dbSave(STATE.email).then(function(){ toast(''); loadProfile().then(function(){ renderAll(); }); }).catch(function(e){ toast('Kunne ikke slette: ' + (e&&e.message?e.message:e),'err'); });
-    };
-    ui.delBagBtn.style.display = (STATE.activeBagId === 'bag2' && !!STATE.bags.bag2) ? 'inline-block' : 'none';
-    left.appendChild(ui.delBagBtn);
 
     row.appendChild(left);
 
@@ -2016,11 +2002,52 @@
       return fetch(url, { headers:{ apikey:key, Authorization:'Bearer ' + key } })
         .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
         .then(function(rows){
-          return (rows||[]).map(function(r){
+          var list = (rows||[]).map(function(r){
             return { name:r.name, url:r.product_url||'', image:r.image_url||'', count:r.count||0, type:r.type||type };
           });
+          // Best effort: popular_discs kan mangle product_url/image_url (eldre rader).
+          // Vi forsøker å slå opp i nettbutikken basert på navn, slik at "Legg til" alltid funker.
+          return enrichPopularMissing(list, type);
         }).catch(function(){ return []; });
     }
+
+    function enrichPopularMissing(list, fallbackType){
+      list = list || [];
+      // Begrens oppslag (for å unngå treghet)
+      var MAX_LOOKUPS = 10;
+      var lookups = [];
+      for (var i=0;i<list.length && lookups.length<MAX_LOOKUPS;i++){
+        (function(p){
+          if (!p) return;
+          if (p.url && p.image) return;
+          var name = safeStr(p.name).trim();
+          if (!name) return;
+          lookups.push(
+            searchGolfkongenProducts(name).then(function(items){
+              items = items || [];
+              if (!items.length) return;
+              // Prøv å finne "samme" navn først
+              var want = normName(name);
+              var best = null;
+              for (var j=0;j<items.length;j++){
+                var it = items[j];
+                if (!it || !it.name) continue;
+                if (normName(it.name) === want) { best = it; break; }
+              }
+              if (!best) best = items[0];
+              if (best) {
+                if (!p.url) p.url = best.url || '';
+                if (!p.image) p.image = best.image || '';
+                if (!p.type) p.type = best.type || fallbackType || '';
+              }
+            }).catch(function(){})
+          );
+        })(list[i]);
+      }
+      if (!lookups.length) return Promise.resolve(list);
+      return Promise.all(lookups).then(function(){ return list; });
+    }
+
 
     function chooseTwoForGap(gap){
       var existingNames = {};
