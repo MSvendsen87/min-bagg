@@ -2517,10 +2517,6 @@ function renderRecommendations() {
       }
       return sc;
     }
-        sc.appendChild(row);
-      }
-      return sc;
-    }
 
     // ---- build content ----
     var box = el('div','');
