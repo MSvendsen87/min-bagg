@@ -1,6 +1,6 @@
 /* ============================================================================
    GOLFKONGEN – MIN BAG
-   Build: v2026-02-21.6  (ES5 safe – no async/await)
+   Build: v2026-03-01.7  (ES5 safe – no async/await)
    Mål i denne versjonen:
    - Få tilbake "bra versjon"-følelsen: tydelige GK-cards, seksjoner, mindre rot
    - Kun 2 bagger (default + bag2), slett Bag 2
@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-03-01.4';
+  var VERSION = 'v2026-03-01.7';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -2458,6 +2458,39 @@ function renderRecommendations() {
     }
 
     // pick a popular disc to buy that matches (type + bucket + speed)
+
+  // ---------------------------
+  // Flight fetch helper (used by recommendations)
+  // ---------------------------
+  var FLIGHT_URL_CACHE = {};
+  function getFlightForUrl(url){
+    url = safeStr(url).trim();
+    if (!url) return Promise.resolve(null);
+    if (FLIGHT_URL_CACHE[url] !== undefined) {
+      return Promise.resolve(FLIGHT_URL_CACHE[url]);
+    }
+    return fetchText(url).then(function(html){
+      var f = parseFlightFromProductHtml(html);
+      // normalize to {speed,glide,turn,fade} with numbers if possible
+      f = normalizeFlightAny(f);
+      if (!f) { FLIGHT_URL_CACHE[url] = null; return null; }
+      var s = parseFloat(String(f.speed).replace(',','.'));
+      var g = parseFloat(String(f.glide).replace(',','.'));
+      var t = parseFloat(String(f.turn).replace(',','.'));
+      var fa = parseFloat(String(f.fade).replace(',','.'));
+      if (isNaN(s)||isNaN(g)||isNaN(t)||isNaN(fa)) { FLIGHT_URL_CACHE[url]=null; return null; }
+      // range validation
+      if (s<1 || s>15 || g<1 || g>7 || t<-6 || t>2 || fa<0 || fa>6) { FLIGHT_URL_CACHE[url]=null; return null; }
+      var out = { speed:s, glide:g, turn:t, fade:fa };
+      FLIGHT_URL_CACHE[url]=out;
+      return out;
+    }).catch(function(){
+      FLIGHT_URL_CACHE[url]=null;
+      return null;
+    });
+  }
+
+
     function pickBuyCandidate(type, bucket, maxSpeed, bagAll){
       return fetchPopular(type, 60).then(function(list){
         list = list || [];
