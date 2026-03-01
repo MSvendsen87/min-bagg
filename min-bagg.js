@@ -40,6 +40,15 @@
     if (txt !== undefined && txt !== null) e.textContent = txt;
     return e;
   }
+
+
+  function elHtml(tag, cls, html) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (html !== undefined && html !== null) e.innerHTML = html;
+    return e;
+  }
+
   function css(e, s) { e.style.cssText = s; return e; }
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
   function safeStr(v) { return (v === null || v === undefined) ? '' : String(v); }
@@ -225,6 +234,71 @@
     bagInfo: {},
     profile: null
   };
+
+
+  // --- Bans (Nei takk 30 dager) ---
+  function _banKey(){
+    var em = (STATE && STATE.email) ? String(STATE.email).toLowerCase() : 'anon';
+    return 'MINBAG_BANS_V1_' + em;
+  }
+  function _readBans(){
+    // Prefer Supabase-persisted bans in profileExt (bag_json.profile)
+    var arr = (STATE && STATE.profileExt && STATE.profileExt.bans) ? STATE.profileExt.bans : null;
+    if (arr && arr.length) return arr;
+    // fallback localStorage
+    var out = [];
+    try { out = JSON.parse(localStorage.getItem(_banKey()) || '[]') || []; } catch(_){}
+    return out;
+  }
+  function _writeBans(arr){
+    arr = arr || [];
+    // persist to profileExt so it's remembered across devices
+    if (!STATE.profileExt) STATE.profileExt = {};
+    STATE.profileExt.bans = arr;
+    try { localStorage.setItem(_banKey(), JSON.stringify(arr)); } catch(_){}
+    // best effort save to Supabase
+    try { dbSave(); } catch(_){}
+  }
+  function banProduct(p){
+    var url = (p && p.url) ? String(p.url) : '';
+    var name = (p && p.name) ? String(p.name) : '';
+    var key = url || (name ? name.toLowerCase().trim() : '');
+    if (!key) return;
+    var ts = Date.now ? Date.now() : (new Date()).getTime();
+    var arr = _readBans();
+    // remove old
+    var keep = [];
+    for (var i=0;i<arr.length;i++){
+      var b = arr[i]; if (!b) continue;
+      if ((ts - (b.ts||0)) > 1000*60*60*24*31) continue;
+      if (b.key === key) continue;
+      keep.push(b);
+    }
+    keep.push({ key:key, ts:ts });
+    _writeBans(keep);
+  }
+  function isBanned(p){
+    var url = (p && p.url) ? String(p.url) : '';
+    var name = (p && p.name) ? String(p.name) : '';
+    var key = url || (name ? name.toLowerCase().trim() : '');
+    if (!key) return false;
+    var ts = Date.now ? Date.now() : (new Date()).getTime();
+    var arr = _readBans();
+    for (var i=0;i<arr.length;i++){
+      var b = arr[i]; if (!b) continue;
+      if (b.key !== key) continue;
+      if ((ts - (b.ts||0)) <= 1000*60*60*24*30) return true;
+    }
+    return false;
+  }
+
+  // Backward compat alias used in renderAll
+  function renderTop3PerType(){
+    try { return renderTop3WidgetIfPresent(); } catch(_){}
+    return Promise.resolve();
+  }
+
+
   window.__MINBAGG_STATE__ = STATE;
 
   function ensureBags() {
@@ -2074,7 +2148,7 @@ function renderRecommendations() {
 
     var settings = el('div','');
     css(settings,'margin-top:10px;padding:10px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.18);');
-    settings.appendChild(el('div','', '<span style="font-weight:900;">Mål (Bag 1)</span> <span style="opacity:.8;">– du kan endre dette.</span>'));
+    settings.appendChild(elHtml('div','', '<span style="font-weight:900;">Mål (Bag 1)</span> <span style="opacity:.8;">– du kan endre dette.</span>'));
     function smallInput(val){
       var inp = document.createElement('input');
       inp.type='number';
@@ -2434,13 +2508,15 @@ function renderRecommendations() {
     function renderSuggestionCard(kind, title, subtitle, actions){
       var sc = el('div','gk-card');
       css(sc,'margin-top:12px;');
-      sc.appendChild(el('div','', '<div style="font-weight:950;font-size:16px;">'+esc(title)+'</div><div style="opacity:.85;margin-top:4px;line-height:1.4;">'+subtitle+'</div>'));
+      sc.appendChild(elHtml('div','', '<div style="font-weight:950;font-size:16px;">'+esc(title)+'</div><div style="opacity:.85;margin-top:4px;line-height:1.4;">'+(subtitle||'')+'</div>'));
       if (actions && actions.length){
         var row = el('div','');
-        css(row,'margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;');
-        for (var i=0;i<actions.length;i++){
-          row.appendChild(actions[i]);
-        }
+        css(row,'display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;');
+        for (var i=0;i<actions.length;i++) row.appendChild(actions[i]);
+        sc.appendChild(row);
+      }
+      return sc;
+    }
         sc.appendChild(row);
       }
       return sc;
