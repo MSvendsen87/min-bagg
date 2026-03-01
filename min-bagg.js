@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-02-24.6';
+  var VERSION = 'v2026-02-24.7';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -2258,7 +2258,6 @@
   // ---------------------------
   // Top 3 per type (popular_discs)
   // ---------------------------
- (popular_discs)
   // ---------------------------
   function renderTop3PerType() {
     // Top 3 lives under recommendations panel for now
