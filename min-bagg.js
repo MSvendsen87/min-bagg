@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-03-01.2';
+  var VERSION = 'v2026-03-01.4';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -1896,7 +1896,79 @@ var disc = {
   var recoState = { lastType: null, lastPicked: null };
 
   
-  function renderRecommendations() {
+  
+
+  // ---------------------------
+  // Popular discs (Supabase) – used for Top/Recommendations
+  // ---------------------------
+  function fetchPopular(type, limit){
+    var urlBase = window.GK_SUPABASE_URL;
+    var key = window.GK_SUPABASE_ANON_KEY;
+    if (!urlBase || !key) return Promise.resolve([]);
+    type = safeStr(type).toLowerCase();
+    limit = limit || 50;
+    var url = urlBase.replace(/\/$/,'') + '/rest/v1/popular_discs?select=type,name,product_url,image_url,count&type=eq.' + encodeURIComponent(type) + '&order=count.desc&limit=' + limit;
+    return fetch(url, { headers:{ apikey:key, Authorization:'Bearer ' + key } })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(rows){
+        var list = (rows||[]).map(function(r){
+          return { name:r.name||'', url:r.product_url||'', image:r.image_url||'', count:r.count||0, type:(r.type||type) };
+        });
+        return enrichPopularMissing(list, type);
+      })
+      .catch(function(){ return []; });
+  }
+
+  // Best effort: eldre popular_discs kan mangle product_url/image_url. Vi fyller fra nettbutikken.
+  function enrichPopularMissing(list, fallbackType){
+    list = list || [];
+    var MAX_LOOKUPS = 10;
+    var todo = [];
+    for (var i=0;i<list.length && todo.length<MAX_LOOKUPS;i++){
+      if (!list[i]) continue;
+      if (list[i].url && list[i].image) continue;
+      if (!safeStr(list[i].name).trim()) continue;
+      todo.push(list[i]);
+    }
+    if (!todo.length) return Promise.resolve(list);
+
+    var chain = Promise.resolve(true);
+    todo.forEach(function(p){
+      chain = chain.then(function(){
+        return searchGolfkongenProducts(p.name).then(function(matches){
+          var best = pickBestNameMatch(p.name, matches || []);
+          if (best && best.url){
+            p.url = p.url || best.url;
+            p.image = p.image || best.image || '';
+            p.type = p.type || best.type || fallbackType || '';
+          }
+          return true;
+        }).catch(function(){ return true; });
+      });
+    });
+
+    return chain.then(function(){ return list; });
+  }
+
+  function pickBestNameMatch(name, matches){
+    name = safeStr(name).trim().toLowerCase();
+    if (!name) return null;
+    var best = null;
+    for (var i=0;i<matches.length;i++){
+      var m = matches[i];
+      if (!m || !m.url) continue;
+      var n = safeStr(m.name).trim().toLowerCase();
+      if (!n) continue;
+      if (n === name) return m; // perfect
+      // close match: contain or contained
+      if (!best){
+        if (n.indexOf(name) !== -1 || name.indexOf(n) !== -1) best = m;
+      }
+    }
+    return best || (matches.length ? matches[0] : null);
+  }
+
+function renderRecommendations() {
     clear(ui.reco);
 
     // -------- Profile card with progress --------
