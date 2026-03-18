@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-03-01.7';
+  var VERSION = 'v2026-03-01.8';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -2282,6 +2282,27 @@ function renderRecommendations() {
       }
       return false;
     }
+    function containsSameFlight(list, disc){
+      var df = flightObj(disc);
+      var dk = flightKey(df);
+      if (!dk) return false;
+      for (var i=0;i<(list||[]).length;i++){
+        var lf = flightObj(list[i]);
+        if (!lf) continue;
+        if (flightKey(lf) === dk) return true;
+      }
+      return false;
+    }
+    function existsInBag1Strict(disc){
+      var bag1 = getBag1();
+      if (containsDisc(bag1, disc)) return true;
+      if (containsSameFlight(bag1, disc)) return true;
+      return false;
+    }
+    function existsInAnyBagByIdentity(disc){
+      var all = getBag1().concat(getBag2());
+      return containsDisc(all, disc);
+    }
 
     function getBag1(){ return (STATE.bags && STATE.bags.default && STATE.bags.default.items && Array.isArray(STATE.bags.default.items.discs)) ? STATE.bags.default.items.discs : []; }
     function getBag2(){ return (STATE.bags && STATE.bags.bag2 && STATE.bags.bag2.items && Array.isArray(STATE.bags.bag2.items.discs)) ? STATE.bags.bag2.items.discs : []; }
@@ -2500,7 +2521,7 @@ function renderRecommendations() {
           var p2 = list[i];
           if (!p2 || !p2.url) continue;
           if (isBanned(p2)) continue;
-          if (containsDisc(bagAll, p2)) continue;
+          if (existsInAnyBagByIdentity(p2)) continue;
           cand.push(p2);
         }
         // evaluate top N by fetching flight
@@ -2513,9 +2534,10 @@ function renderRecommendations() {
             var ff = flightObj({flight:fx});
             if (!ff) return tryIdx(ix+1);
             if (ff.speed > maxSpeed) return tryIdx(ix+1);
+            p3.flight = fx;
+            if (existsInBag1Strict(p3)) return tryIdx(ix+1);
             var b = bucketFromFlightObj(ff);
             if (b !== bucket) return tryIdx(ix+1);
-            p3.flight = fx;
             return p3;
           }).catch(function(){ return tryIdx(ix+1); });
         }
@@ -2530,6 +2552,7 @@ function renderRecommendations() {
               if (!ff) return tryAny(ix+1);
               if (ff.speed > maxSpeed) return tryAny(ix+1);
               p4.flight = fx;
+              if (existsInBag1Strict(p4)) return tryAny(ix+1);
               return p4;
             }).catch(function(){ return tryAny(ix+1); });
           }
