@@ -398,15 +398,29 @@
   // Supabase client / auth
   // ---------------------------
   function ensureSupabaseClient() {
-    return new Promise(function (resolve, reject) {
-      try {
-        if (!SUPA_URL || !SUPA_KEY) return reject(new Error('Supabase URL/KEY mangler i loader'));
-        if (!window.supabase || !window.supabase.createClient) return reject(new Error('Supabase SDK mangler'));
-        if (!STATE.supa) STATE.supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
-        resolve(STATE.supa);
-      } catch (e) { reject(e); }
-    });
-  }
+  return new Promise(function (resolve, reject) {
+    try {
+      if (!SUPA_URL || !SUPA_KEY) return reject(new Error('Supabase URL/KEY mangler i loader'));
+      if (!window.supabase || !window.supabase.createClient) return reject(new Error('Supabase SDK mangler'));
+
+      // Bruk delt client fra loader hvis den finnes
+      if (window.__GK_MIN_BAG_SUPA__) {
+        STATE.supa = window.__GK_MIN_BAG_SUPA__;
+        return resolve(STATE.supa);
+      }
+
+      // Fallback dersom loader av en eller annen grunn ikke har laget den
+      if (!STATE.supa) {
+        STATE.supa = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+        window.__GK_MIN_BAG_SUPA__ = STATE.supa;
+      }
+
+      resolve(STATE.supa);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
 
   function supaGetUser() {
     return ensureSupabaseClient().then(function (supa) {
