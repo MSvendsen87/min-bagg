@@ -1,6 +1,6 @@
 /* ============================================================================
    GOLFKONGEN – MIN BAG
-   Build: v2026-03-01.7  (ES5 safe – no async/await)
+   Build: v2026-04-06.1  (ES5 safe – no async/await)
    Mål i denne versjonen:
    - Få tilbake "bra versjon"-følelsen: tydelige GK-cards, seksjoner, mindre rot
    - Kun 2 bagger (default + bag2), slett Bag 2
@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'v2026-03-01.8';
+  var VERSION = 'v2026-04-06.1';
   console.log('[MINBAG] boot ' + VERSION);
 
   // Root
@@ -234,6 +234,38 @@
     bagInfo: {},
     profile: null
   };
+
+
+  var ACTIVE_USER_KEY = 'MINBAG_ACTIVE_USER';
+
+  function resetRuntimeStateForUser(email) {
+    STATE.user = null;
+    STATE.email = normEmail(email || '');
+    STATE.bags = null;
+    STATE.activeBagId = 'default';
+    STATE.discs = [];
+    STATE.bagInfo = {};
+    STATE.profile = null;
+    STATE.profileExt = null;
+    try { window.__MINBAG_SESSION_EMAIL__ = STATE.email; } catch (_) {}
+  }
+
+  function handleUserSwitch(email) {
+    var next = normEmail(email || '');
+    var prev = '';
+    try { prev = normEmail(localStorage.getItem(ACTIVE_USER_KEY) || ''); } catch (_) {}
+
+    if (prev && next && prev !== next) {
+      console.log('[MINBAG] user switch', prev, '->', next);
+    }
+
+    resetRuntimeStateForUser(next);
+
+    try {
+      if (next) localStorage.setItem(ACTIVE_USER_KEY, next);
+      else localStorage.removeItem(ACTIVE_USER_KEY);
+    } catch (_) {}
+  }
 
 
   // --- Bans (Nei takk 30 dager) ---
@@ -2885,14 +2917,16 @@ function renderRecommendations() {
 
   function boot() {
     renderTop3WidgetIfPresent();
-supaGetUser().then(function(user){
+
+    supaGetUser().then(function(user){
       if (!user || !user.email) {
+        handleUserSwitch('');
         renderConnectView();
         return;
       }
 
+      handleUserSwitch(user.email);
       STATE.user = user;
-      STATE.email = normEmail(user.email);
 
       dbLoad(STATE.email).then(function(row){
         var parsed = parseRow(row || {});
@@ -2907,6 +2941,7 @@ supaGetUser().then(function(user){
         toast('Kunne ikke laste: ' + (e&&e.message?e.message:e), 'err');
       });
     }).catch(function(e){
+      handleUserSwitch('');
       buildShell();
       toast('Kunne ikke starte: ' + (e&&e.message?e.message:e), 'err');
     });
