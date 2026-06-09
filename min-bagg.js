@@ -1,13 +1,18 @@
 /* ============================================================================
-   GOLFKONGEN – MIN BAG V2 TEST
+   GOLFKONGEN – MIN BAG V2
    Fil: min-bagg.js
-   Steg: Test Supabase Auth + minbag_ensure_user()
+   Build: 2026-06-09.2
+   Første ekte versjon:
+   - Supabase Auth
+   - Opprett/hent standardbag
+   - Vis bag
+   - Legg til disc manuelt
    ============================================================================ */
 
 (function () {
   'use strict';
 
-  var VERSION = '2026-06-09.1-test';
+  var VERSION = '2026-06-09.2';
 
   var SUPABASE_URL = 'https://fwztrnxhfvrlceicctlv.supabase.co';
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3enRybnhoZnZybGNlaWNjdGx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MTgwMjYsImV4cCI6MjA5NTI5NDAyNn0.q4QthdBWEtUi_Fdz_Ge88E_5CpJMtUvjWhMAa0R0zmE';
@@ -17,6 +22,13 @@
 
   var root = null;
   var supabaseClient = null;
+
+  var STATE = {
+    user: null,
+    bag: null,
+    discs: [],
+    loading: false
+  };
 
   console.log('[GK MIN BAG V2] boot', VERSION);
 
@@ -31,30 +43,15 @@
     while (node && node.firstChild) node.removeChild(node.firstChild);
   }
 
-  function injectCss() {
-    if (document.getElementById('gk-minbag-v2-css')) return;
+  function safe(v) {
+    return v === null || v === undefined ? '' : String(v);
+  }
 
-    var style = document.createElement('style');
-    style.id = 'gk-minbag-v2-css';
-    style.textContent =
-      '#min-bag-root{max-width:980px;margin:0 auto;padding:20px 14px;color:#fff;font-family:inherit;}' +
-      '.gkmb-card{border:1px solid rgba(34,197,94,.28);background:linear-gradient(135deg,#061109,#102719 60%,#07140d);border-radius:24px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.35);}' +
-      '.gkmb-eyebrow{display:inline-flex;padding:6px 10px;border-radius:999px;background:rgba(34,197,94,.16);border:1px solid rgba(34,197,94,.35);font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#b8ffd0;margin-bottom:12px;}' +
-      '.gkmb-card h1{font-size:clamp(34px,7vw,60px);line-height:.95;margin:0 0 10px;font-weight:1000;letter-spacing:-.05em;}' +
-      '.gkmb-card p{color:rgba(255,255,255,.75);line-height:1.55;margin:0 0 14px;}' +
-      '.gkmb-box{margin-top:14px;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.07);border-radius:18px;padding:14px;}' +
-      '.gkmb-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}' +
-      '.gkmb-input{min-height:44px;flex:1;min-width:240px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.28);color:#fff;padding:11px 13px;outline:none;}' +
-      '.gkmb-input:focus{border-color:rgba(34,197,94,.7);box-shadow:0 0 0 3px rgba(34,197,94,.13);}' +
-      '.gkmb-btn{border:0;border-radius:14px;padding:12px 14px;font-weight:950;cursor:pointer;color:#fff;background:linear-gradient(135deg,#22c55e,#15803d);}' +
-      '.gkmb-btn.secondary{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);}' +
-      '.gkmb-status{margin-top:14px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.13);color:rgba(255,255,255,.86);font-weight:800;}' +
-      '.gkmb-status.ok{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35);}' +
-      '.gkmb-status.err{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.35);}' +
-      '.gkmb-small{font-size:13px;color:rgba(255,255,255,.65);margin-top:10px;}' +
-      '.gkmb-data{font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.30);border-radius:14px;padding:12px;margin-top:10px;color:#b8ffd0;}';
-
-    document.head.appendChild(style);
+  function numOrNull(v) {
+    v = safe(v).replace(',', '.').trim();
+    if (v === '') return null;
+    var n = parseFloat(v);
+    return isNaN(n) ? null : n;
   }
 
   function setStatus(text, type) {
@@ -62,6 +59,69 @@
     if (!box) return;
     box.className = 'gkmb-status' + (type ? ' ' + type : '');
     box.textContent = text || '';
+  }
+
+  function injectCss() {
+    if (document.getElementById('gk-minbag-v2-css')) return;
+
+    var style = document.createElement('style');
+    style.id = 'gk-minbag-v2-css';
+    style.textContent =
+      '#min-bag-root{max-width:1120px;margin:0;padding:0;color:#fff;font-family:inherit;}' +
+      '#min-bag-root *{box-sizing:border-box;}' +
+
+      '.gkmb-card{border:1px solid rgba(34,197,94,.28);background:radial-gradient(circle at top left,rgba(34,197,94,.28),transparent 34%),linear-gradient(135deg,#061109,#102719 60%,#07140d);border-radius:24px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.35);margin-bottom:16px;}' +
+      '.gkmb-eyebrow{display:inline-flex;padding:6px 10px;border-radius:999px;background:rgba(34,197,94,.16);border:1px solid rgba(34,197,94,.35);font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#b8ffd0;margin-bottom:12px;}' +
+      '.gkmb-card h1{font-size:clamp(34px,7vw,60px);line-height:.95;margin:0 0 10px;font-weight:1000;letter-spacing:-.05em;}' +
+      '.gkmb-card h2{font-size:22px;margin:0 0 8px;font-weight:1000;}' +
+      '.gkmb-card h3{font-size:16px;margin:0 0 8px;font-weight:1000;}' +
+      '.gkmb-card p{color:rgba(255,255,255,.75);line-height:1.55;margin:0 0 14px;}' +
+
+      '.gkmb-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px;align-items:start;}' +
+      '.gkmb-panel{border:1px solid rgba(255,255,255,.13);background:linear-gradient(180deg,rgba(255,255,255,.085),rgba(255,255,255,.045));border-radius:22px;padding:16px;box-shadow:0 14px 42px rgba(0,0,0,.18);margin-bottom:14px;}' +
+
+      '.gkmb-box{margin-top:14px;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.07);border-radius:18px;padding:14px;}' +
+      '.gkmb-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}' +
+      '.gkmb-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}' +
+      '.gkmb-grid-four{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}' +
+
+      '.gkmb-field{display:grid;gap:5px;font-size:12px;font-weight:900;color:rgba(255,255,255,.75);}' +
+      '.gkmb-input,.gkmb-select,.gkmb-textarea{width:100%;min-height:44px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.28);color:#fff;padding:11px 13px;outline:none;font-family:inherit;}' +
+      '.gkmb-textarea{min-height:86px;resize:vertical;}' +
+      '.gkmb-input:focus,.gkmb-select:focus,.gkmb-textarea:focus{border-color:rgba(34,197,94,.7);box-shadow:0 0 0 3px rgba(34,197,94,.13);}' +
+
+      '.gkmb-btn{border:0;border-radius:14px;padding:12px 14px;font-weight:950;cursor:pointer;color:#fff;background:linear-gradient(135deg,#22c55e,#15803d);}' +
+      '.gkmb-btn.secondary{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);}' +
+      '.gkmb-btn.danger{background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.35);}' +
+      '.gkmb-btn:disabled{opacity:.55;cursor:not-allowed;}' +
+
+      '.gkmb-status{margin-top:14px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.13);color:rgba(255,255,255,.86);font-weight:800;}' +
+      '.gkmb-status.ok{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35);}' +
+      '.gkmb-status.err{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.35);}' +
+
+      '.gkmb-small{font-size:13px;color:rgba(255,255,255,.65);margin-top:6px;}' +
+      '.gkmb-pill{display:inline-flex;align-items:center;padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.13);font-size:12px;font-weight:900;color:rgba(255,255,255,.82);margin:4px 5px 4px 0;}' +
+
+      '.gkmb-disc-list{display:grid;gap:10px;margin-top:12px;}' +
+      '.gkmb-disc{display:flex;gap:12px;align-items:flex-start;padding:12px;border-radius:18px;background:rgba(0,0,0,.16);border:1px solid rgba(255,255,255,.10);}' +
+      '.gkmb-disc-img{width:72px;height:72px;flex:0 0 72px;border-radius:18px;overflow:hidden;background:radial-gradient(circle at top left,rgba(34,197,94,.28),rgba(255,255,255,.06));border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-weight:1000;color:#b8ffd0;}' +
+      '.gkmb-disc-img img{width:100%;height:100%;object-fit:cover;display:block;}' +
+      '.gkmb-disc-body{min-width:0;flex:1;}' +
+      '.gkmb-disc-title{font-weight:1000;font-size:16px;margin-bottom:3px;}' +
+      '.gkmb-disc-sub{font-size:12px;color:rgba(255,255,255,.65);margin-bottom:8px;}' +
+
+      '.gkmb-flight{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}' +
+      '.gkmb-flight span{display:inline-flex;gap:5px;align-items:center;padding:6px 8px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.11);font-size:11px;}' +
+      '.gkmb-flight b{color:rgba(255,255,255,.65);}' +
+      '.gkmb-flight em{font-style:normal;font-weight:1000;color:#b8ffd0;}' +
+
+      '.gkmb-empty{padding:28px;text-align:center;border:1px dashed rgba(255,255,255,.18);border-radius:20px;background:rgba(255,255,255,.035);}' +
+      '.gkmb-empty strong{display:block;font-size:20px;margin-bottom:6px;}' +
+
+      '@media(max-width:900px){.gkmb-layout{grid-template-columns:1fr}.gkmb-grid,.gkmb-grid-four{grid-template-columns:1fr 1fr;}}' +
+      '@media(max-width:560px){.gkmb-card{padding:16px;border-radius:20px}.gkmb-grid,.gkmb-grid-four{grid-template-columns:1fr}.gkmb-disc{flex-direction:column}.gkmb-disc-img{width:100%;height:160px;flex-basis:auto}}';
+
+    document.head.appendChild(style);
   }
 
   function loadSupabaseSdk() {
@@ -89,17 +149,54 @@
     });
   }
 
-  function renderBase() {
+  function render() {
     clear(root);
 
-    var card = el('section', 'gkmb-card');
+    var hero = el('section', 'gkmb-card');
+    hero.appendChild(el('div', 'gkmb-eyebrow', 'GolfKongen verktøy'));
+    hero.appendChild(el('h1', '', 'Min bag'));
 
-    card.appendChild(el('div', 'gkmb-eyebrow', 'GolfKongen verktøy'));
-    card.appendChild(el('h1', '', 'Min bag'));
-    card.appendChild(el('p', '', 'Dette er første test av ny og trygg Min bag. Her tester vi bare innlogging og oppretting av standardbag.'));
+    if (!STATE.user) {
+      hero.appendChild(el('p', '', 'Logg inn med e-post for å bygge og lagre discgolf-bagen din.'));
+      hero.appendChild(renderLoginBox());
+      var statusLoggedOut = el('div', 'gkmb-status', 'Ikke innlogget.');
+      statusLoggedOut.id = 'gkmb-status';
+      hero.appendChild(statusLoggedOut);
+      root.appendChild(hero);
+      return;
+    }
 
-    var loginBox = el('div', 'gkmb-box');
-    loginBox.id = 'gkmb-login-box';
+    hero.appendChild(el('p', '', 'Bygg discgolf-bagen din, hold oversikt over flight-tall og lagre alt trygt på GolfKongen-kontoen din.'));
+
+    var meta = el('div', '');
+    meta.appendChild(el('span', 'gkmb-pill', 'Innlogget: ' + STATE.user.email));
+    if (STATE.bag) meta.appendChild(el('span', 'gkmb-pill', 'Bag: ' + STATE.bag.name));
+    meta.appendChild(el('span', 'gkmb-pill', 'Disker: ' + STATE.discs.length));
+    hero.appendChild(meta);
+
+    var status = el('div', 'gkmb-status ok', 'Klar');
+    status.id = 'gkmb-status';
+    hero.appendChild(status);
+
+    root.appendChild(hero);
+
+    var layout = el('div', 'gkmb-layout');
+
+    var main = el('main', '');
+    main.appendChild(renderBagPanel());
+
+    var side = el('aside', '');
+    side.appendChild(renderAddDiscPanel());
+    side.appendChild(renderTipPanel());
+
+    layout.appendChild(main);
+    layout.appendChild(side);
+
+    root.appendChild(layout);
+  }
+
+  function renderLoginBox() {
+    var box = el('div', 'gkmb-box');
 
     var row = el('div', 'gkmb-row');
 
@@ -108,102 +205,183 @@
     input.placeholder = 'Din e-postadresse';
     input.id = 'gkmb-email';
 
-    var loginBtn = el('button', 'gkmb-btn', 'Send innloggingslenke');
-    loginBtn.type = 'button';
-    loginBtn.onclick = sendMagicLink;
+    var btn = el('button', 'gkmb-btn', 'Send innloggingslenke');
+    btn.type = 'button';
+    btn.onclick = sendMagicLink;
 
     row.appendChild(input);
-    row.appendChild(loginBtn);
+    row.appendChild(btn);
 
-    loginBox.appendChild(row);
-    loginBox.appendChild(el('div', 'gkmb-small', 'Du får en e-post med innloggingslenke. Etter innlogging kommer du tilbake til denne siden.'));
-    card.appendChild(loginBox);
+    box.appendChild(row);
+    box.appendChild(el('div', 'gkmb-small', 'Du får en e-post med innloggingslenke. Etter innlogging kommer du tilbake til denne siden.'));
 
-    var appBox = el('div', 'gkmb-box');
-    appBox.id = 'gkmb-app-box';
-    appBox.style.display = 'none';
-
-    var userInfo = el('div', '', '');
-    userInfo.id = 'gkmb-user-info';
-    appBox.appendChild(userInfo);
-
-    var ensureBtn = el('button', 'gkmb-btn', 'Test/opprett Min bag');
-    ensureBtn.type = 'button';
-    ensureBtn.onclick = ensureUser;
-    appBox.appendChild(ensureBtn);
-
-    var logoutBtn = el('button', 'gkmb-btn secondary', 'Logg ut');
-    logoutBtn.type = 'button';
-    logoutBtn.style.marginLeft = '8px';
-    logoutBtn.onclick = logout;
-    appBox.appendChild(logoutBtn);
-
-    var data = el('div', 'gkmb-data', '');
-    data.id = 'gkmb-data';
-    data.style.display = 'none';
-    appBox.appendChild(data);
-
-    card.appendChild(appBox);
-
-    var status = el('div', 'gkmb-status', 'Laster Supabase…');
-    status.id = 'gkmb-status';
-    card.appendChild(status);
-
-    root.appendChild(card);
+    return box;
   }
 
-  function refreshAuthState() {
-    setStatus('Sjekker innlogging…');
+  function renderBagPanel() {
+    var panel = el('section', 'gkmb-panel');
+    panel.appendChild(el('h2', '', STATE.bag ? STATE.bag.name : 'Min bag'));
 
-    supabaseClient.auth.getUser().then(function (res) {
-      if (res.error) {
-        setStatus('Auth-feil: ' + res.error.message, 'err');
-        return;
-      }
-
-      var user = res.data ? res.data.user : null;
-
-      if (!user) {
-        showLoggedOut();
-        return;
-      }
-
-      showLoggedIn(user);
-    });
-  }
-
-  function showLoggedOut() {
-    var loginBox = document.getElementById('gkmb-login-box');
-    var appBox = document.getElementById('gkmb-app-box');
-
-    if (loginBox) loginBox.style.display = '';
-    if (appBox) appBox.style.display = 'none';
-
-    setStatus('Ikke innlogget. Skriv inn e-post og send innloggingslenke.');
-  }
-
-  function showLoggedIn(user) {
-    var loginBox = document.getElementById('gkmb-login-box');
-    var appBox = document.getElementById('gkmb-app-box');
-    var info = document.getElementById('gkmb-user-info');
-
-    if (loginBox) loginBox.style.display = 'none';
-    if (appBox) appBox.style.display = '';
-    if (info) {
-      info.innerHTML =
-        '<strong>Innlogget:</strong> ' +
-        (user.email || 'ukjent') +
-        '<br><span class="gkmb-small">User ID: ' +
-        user.id +
-        '</span>';
+    if (!STATE.discs.length) {
+      var empty = el('div', 'gkmb-empty');
+      empty.appendChild(el('strong', '', 'Bagen er tom'));
+      empty.appendChild(el('div', 'gkmb-small', 'Legg til en disc manuelt først. Produktsøk kobler vi på etterpå.'));
+      panel.appendChild(empty);
+      return panel;
     }
 
-    setStatus('Innlogging OK. Nå kan du teste/opprette Min bag.', 'ok');
+    var list = el('div', 'gkmb-disc-list');
+
+    for (var i = 0; i < STATE.discs.length; i++) {
+      list.appendChild(renderDisc(STATE.discs[i]));
+    }
+
+    panel.appendChild(list);
+    return panel;
+  }
+
+  function renderDisc(disc) {
+    var card = el('article', 'gkmb-disc');
+
+    var imgBox = el('div', 'gkmb-disc-img');
+    if (disc.image_url) {
+      var img = document.createElement('img');
+      img.src = disc.image_url;
+      img.alt = disc.name || '';
+      imgBox.appendChild(img);
+    } else {
+      imgBox.textContent = 'GK';
+    }
+
+    var body = el('div', 'gkmb-disc-body');
+    body.appendChild(el('div', 'gkmb-disc-title', disc.name || 'Ukjent disc'));
+
+    var sub = safe(disc.brand);
+    if (sub) sub += ' · ';
+    sub += discTypeLabel(disc.disc_type);
+    body.appendChild(el('div', 'gkmb-disc-sub', sub));
+
+    var flight = el('div', 'gkmb-flight');
+    flight.appendChild(flightChip('Speed', disc.speed));
+    flight.appendChild(flightChip('Glide', disc.glide));
+    flight.appendChild(flightChip('Turn', disc.turn));
+    flight.appendChild(flightChip('Fade', disc.fade));
+    body.appendChild(flight);
+
+    if (disc.note) {
+      body.appendChild(el('div', 'gkmb-small', disc.note));
+    }
+
+    card.appendChild(imgBox);
+    card.appendChild(body);
+
+    return card;
+  }
+
+  function flightChip(label, value) {
+    var c = el('span', '');
+    c.appendChild(el('b', '', label));
+    c.appendChild(el('em', '', value !== null && value !== undefined && value !== '' ? String(value) : '?'));
+    return c;
+  }
+
+  function renderAddDiscPanel() {
+    var panel = el('section', 'gkmb-panel');
+    panel.appendChild(el('h2', '', 'Legg til disc'));
+    panel.appendChild(el('p', '', 'Første versjon lagrer manuelle discer. Produktsøk fra GolfKongen kobles på etterpå.'));
+
+    var form = el('div', '');
+
+    var grid1 = el('div', 'gkmb-grid');
+    grid1.appendChild(field('Navn på disc', input('disc-name', 'F.eks. Buzzz')));
+    grid1.appendChild(field('Merke', input('disc-brand', 'F.eks. Discraft')));
+    form.appendChild(grid1);
+
+    var grid2 = el('div', 'gkmb-grid');
+    grid2.appendChild(field('Type', selectType('disc-type')));
+    grid2.appendChild(field('Bilde-URL', input('disc-image', 'Valgfritt')));
+    form.appendChild(grid2);
+
+    var grid3 = el('div', 'gkmb-grid-four');
+    grid3.appendChild(field('Speed', input('disc-speed', '5')));
+    grid3.appendChild(field('Glide', input('disc-glide', '4')));
+    grid3.appendChild(field('Turn', input('disc-turn', '-1')));
+    grid3.appendChild(field('Fade', input('disc-fade', '1')));
+    form.appendChild(grid3);
+
+    form.appendChild(field('Kommentar', textarea('disc-note', 'Valgfritt')));
+
+    var btn = el('button', 'gkmb-btn', 'Lagre disc');
+    btn.type = 'button';
+    btn.onclick = addManualDisc;
+    form.appendChild(btn);
+
+    panel.appendChild(form);
+
+    return panel;
+  }
+
+  function renderTipPanel() {
+    var panel = el('section', 'gkmb-panel');
+    panel.appendChild(el('h2', '', 'Neste steg'));
+    panel.appendChild(el('p', '', 'Når manuell lagring fungerer stabilt, kobler vi på produktsøk fra GolfKongen og Topp 3 per kategori.'));
+    return panel;
+  }
+
+  function field(label, control) {
+    var wrap = el('label', 'gkmb-field');
+    wrap.appendChild(el('span', '', label));
+    wrap.appendChild(control);
+    return wrap;
+  }
+
+  function input(id, placeholder) {
+    var i = el('input', 'gkmb-input');
+    i.id = id;
+    i.type = 'text';
+    i.placeholder = placeholder || '';
+    return i;
+  }
+
+  function textarea(id, placeholder) {
+    var t = el('textarea', 'gkmb-textarea');
+    t.id = id;
+    t.placeholder = placeholder || '';
+    return t;
+  }
+
+  function selectType(id) {
+    var s = el('select', 'gkmb-select');
+    s.id = id;
+
+    var options = [
+      ['putter', 'Putter'],
+      ['midrange', 'Midrange'],
+      ['fairway', 'Fairway driver'],
+      ['distance', 'Distance driver']
+    ];
+
+    for (var i = 0; i < options.length; i++) {
+      var o = document.createElement('option');
+      o.value = options[i][0];
+      o.textContent = options[i][1];
+      s.appendChild(o);
+    }
+
+    return s;
+  }
+
+  function discTypeLabel(type) {
+    if (type === 'putter') return 'Putter';
+    if (type === 'midrange') return 'Midrange';
+    if (type === 'fairway') return 'Fairway driver';
+    if (type === 'distance') return 'Distance driver';
+    return 'Disc';
   }
 
   function sendMagicLink() {
-    var input = document.getElementById('gkmb-email');
-    var email = input ? String(input.value || '').trim().toLowerCase() : '';
+    var inputEl = document.getElementById('gkmb-email');
+    var email = inputEl ? String(inputEl.value || '').trim().toLowerCase() : '';
 
     if (!email || email.indexOf('@') === -1) {
       setStatus('Skriv inn en gyldig e-postadresse.', 'err');
@@ -227,31 +405,142 @@
     });
   }
 
-  function ensureUser() {
-    setStatus('Kjører minbag_ensure_user()…');
-
-    supabaseClient.rpc('minbag_ensure_user').then(function (res) {
-      if (res.error) {
-        setStatus('Feil fra minbag_ensure_user: ' + res.error.message, 'err');
-        return;
-      }
-
-      var dataBox = document.getElementById('gkmb-data');
-      if (dataBox) {
-        dataBox.style.display = 'block';
-        dataBox.textContent = JSON.stringify(res.data, null, 2);
-      }
-
-      setStatus('Success! Profil og standardbag er opprettet/hentet.', 'ok');
-    });
-  }
-
   function logout() {
     setStatus('Logger ut…');
 
     supabaseClient.auth.signOut().then(function () {
-      setStatus('Du er logget ut.');
-      refreshAuthState();
+      STATE.user = null;
+      STATE.bag = null;
+      STATE.discs = [];
+      render();
+    });
+  }
+
+  function ensureUserAndLoadBag() {
+    setStatus('Laster Min bag…');
+
+    return supabaseClient.rpc('minbag_ensure_user')
+      .then(function (res) {
+        if (res.error) throw res.error;
+        return loadDefaultBag();
+      });
+  }
+
+  function loadDefaultBag() {
+    return supabaseClient.rpc('minbag_get_default_bag_with_discs')
+      .then(function (res) {
+        if (res.error) throw res.error;
+
+        var data = res.data || {};
+        STATE.bag = data.bag || null;
+        STATE.discs = data.discs || [];
+
+        render();
+        setStatus('Min bag er lastet.', 'ok');
+      });
+  }
+
+  function addManualDisc() {
+    if (!STATE.bag || !STATE.bag.id) {
+      setStatus('Mangler aktiv bag. Last inn siden på nytt.', 'err');
+      return;
+    }
+
+    var name = getVal('disc-name');
+    var brand = getVal('disc-brand');
+    var discType = getVal('disc-type');
+    var imageUrl = getVal('disc-image');
+    var note = getVal('disc-note');
+
+    if (!name) {
+      setStatus('Navn på disc mangler.', 'err');
+      return;
+    }
+
+    setStatus('Lagrer disc…');
+
+    var row = {
+      bag_id: STATE.bag.id,
+      user_id: STATE.user.id,
+      name: name,
+      brand: brand || null,
+      disc_type: discType || 'midrange',
+      image_url: imageUrl || null,
+      speed: numOrNull(getVal('disc-speed')),
+      glide: numOrNull(getVal('disc-glide')),
+      turn: numOrNull(getVal('disc-turn')),
+      fade: numOrNull(getVal('disc-fade')),
+      note: note || null
+    };
+
+    supabaseClient
+      .from('minbag_discs')
+      .insert(row)
+      .select('*')
+      .single()
+      .then(function (res) {
+        if (res.error) {
+          setStatus('Kunne ikke lagre disc: ' + res.error.message, 'err');
+          return;
+        }
+
+        clearForm();
+        return loadDefaultBag().then(function () {
+          setStatus('Disc lagret i Min bag.', 'ok');
+        });
+      });
+  }
+
+  function getVal(id) {
+    var node = document.getElementById(id);
+    return node ? String(node.value || '').trim() : '';
+  }
+
+  function clearForm() {
+    var ids = [
+      'disc-name',
+      'disc-brand',
+      'disc-image',
+      'disc-speed',
+      'disc-glide',
+      'disc-turn',
+      'disc-fade',
+      'disc-note'
+    ];
+
+    for (var i = 0; i < ids.length; i++) {
+      var node = document.getElementById(ids[i]);
+      if (node) node.value = '';
+    }
+
+    var type = document.getElementById('disc-type');
+    if (type) type.value = 'putter';
+  }
+
+  function refreshAuthState() {
+    supabaseClient.auth.getUser().then(function (res) {
+      if (res.error) {
+        STATE.user = null;
+        render();
+        setStatus('Auth-feil: ' + res.error.message, 'err');
+        return;
+      }
+
+      STATE.user = res.data ? res.data.user : null;
+
+      if (!STATE.user) {
+        STATE.bag = null;
+        STATE.discs = [];
+        render();
+        return;
+      }
+
+      render();
+
+      ensureUserAndLoadBag().catch(function (err) {
+        render();
+        setStatus('Kunne ikke laste Min bag: ' + (err.message || String(err)), 'err');
+      });
     });
   }
 
@@ -264,7 +553,6 @@
     }
 
     injectCss();
-    renderBase();
 
     loadSupabaseSdk()
       .then(function () {
@@ -277,9 +565,15 @@
         refreshAuthState();
       })
       .catch(function (err) {
-        setStatus(err.message || String(err), 'err');
+        clear(root);
+        root.appendChild(el('div', 'gkmb-status err', err.message || String(err)));
       });
   }
+
+  window.GK_MINBAG_V2 = {
+    version: VERSION,
+    state: STATE
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
