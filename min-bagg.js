@@ -24,11 +24,12 @@
   var supabaseClient = null;
 
   var STATE = {
-    user: null,
-    bag: null,
-    discs: [],
-    loading: false
-  };
+  user: null,
+  bag: null,
+  discs: [],
+  searchResults: [],
+  loading: false
+};
 
   console.log('[GK MIN BAG V2] boot', VERSION);
 
@@ -186,8 +187,9 @@
     main.appendChild(renderBagPanel());
 
     var side = el('aside', '');
-    side.appendChild(renderAddDiscPanel());
-    side.appendChild(renderTipPanel());
+side.appendChild(renderProductSearchPanel());
+side.appendChild(renderAddDiscPanel());
+side.appendChild(renderTipPanel());
 
     layout.appendChild(main);
     layout.appendChild(side);
@@ -304,6 +306,84 @@
 
   return card;
 }
+
+function renderProductSearchPanel() {
+  var panel = el('section', 'gkmb-panel');
+  panel.appendChild(el('h2', '', 'Søk i GolfKongen'));
+  panel.appendChild(el('p', '', 'Søk etter disc i GolfKongen-katalogen og legg den direkte i Min bag.'));
+
+  var row = el('div', 'gkmb-row');
+
+  var search = input('product-search', 'F.eks. Buzzz, P2, Crave');
+  search.style.flex = '1';
+
+  var btn = el('button', 'gkmb-btn', 'Søk');
+  btn.type = 'button';
+  btn.onclick = function () {
+    searchGolfKongenProducts();
+  };
+
+  row.appendChild(search);
+  row.appendChild(btn);
+  panel.appendChild(row);
+
+  var results = el('div', '');
+  results.id = 'gkmb-product-results';
+  results.style.marginTop = '12px';
+
+  if (STATE.searchResults && STATE.searchResults.length) {
+    for (var i = 0; i < STATE.searchResults.length; i++) {
+      results.appendChild(renderProductResult(STATE.searchResults[i]));
+    }
+  }
+
+  panel.appendChild(results);
+
+  return panel;
+}
+
+function renderProductResult(product) {
+  var card = el('div', 'gkmb-disc');
+  card.style.marginBottom = '8px';
+
+  var imgBox = el('div', 'gkmb-disc-img');
+  if (product.image_url) {
+    var img = document.createElement('img');
+    img.src = product.image_url;
+    img.alt = product.name || '';
+    imgBox.appendChild(img);
+  } else {
+    imgBox.textContent = 'GK';
+  }
+
+  var body = el('div', 'gkmb-disc-body');
+  body.appendChild(el('div', 'gkmb-disc-title', product.name || 'Ukjent produkt'));
+  body.appendChild(el('div', 'gkmb-disc-sub', discTypeLabel(product.disc_type)));
+
+  var actions = el('div', 'gkmb-row');
+
+  var open = el('a', 'gkmb-btn secondary', 'Åpne');
+  open.href = product.product_url;
+  open.target = '_blank';
+  open.rel = 'noopener';
+  open.style.textDecoration = 'none';
+  actions.appendChild(open);
+
+  var add = el('button', 'gkmb-btn', 'Legg til');
+  add.type = 'button';
+  add.onclick = function () {
+    addProductToBag(product);
+  };
+  actions.appendChild(add);
+
+  body.appendChild(actions);
+
+  card.appendChild(imgBox);
+  card.appendChild(body);
+
+  return card;
+}
+   
   function flightChip(label, value) {
     var c = el('span', '');
     c.appendChild(el('b', '', label));
@@ -432,6 +512,258 @@
       setStatus('Innloggingslenke sendt. Sjekk e-posten din.', 'ok');
     });
   }
+
+   function inferDiscTypeFromUrl(url) {
+  url = safe(url).toLowerCase();
+
+  if (url.indexOf('/discgolf/disc-putter') === 0) return 'putter';
+  if (url.indexOf('/discgolf/midrange') === 0) return 'midrange';
+  if (url.indexOf('/discgolf/fairway-driver') === 0) return 'fairway';
+  if (url.indexOf('/discgolf/driver') === 0) return 'distance';
+
+  return 'midrange';
+}
+
+function titleFromUrl(url) {
+  var last = safe(url).split('/').pop() || '';
+  last = decodeURIComponent(last);
+  last = last.replace(/-/g, ' ');
+  last = last.replace(/\s+/g, ' ').trim();
+
+  return last.replace(/\b\w/g, function (m) {
+    return m.toUpperCase();
+  });
+}
+
+function absUrl(url) {
+  url = safe(url).trim();
+
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.indexOf('//') === 0) return location.protocol + url;
+  if (url.charAt(0) === '/') return location.origin + url;
+
+  return url;
+}
+
+function fetchText(url) {
+  return fetch(url, { credentials: 'include' }).then(function (res) {
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.text();
+  });
+}
+
+   function searchGolfKongenProducts() {
+  var q = getVal('product-search').toLowerCase();
+
+  if (!q || q.length < 2) {
+    setStatus('Skriv minst 2 tegn for å søke.', 'err');
+    return;
+  }
+
+  setStatus('Søker i GolfKongen…');
+
+  fetchText('/sitemap.xml')
+    .then(function (xml) {
+      var urls = [];
+      var re = /<loc>([^<]+)<\/loc>/g;
+      var match;
+
+      while ((match = re.exec(xml))) {
+        var path = safe(match[1]).replace(/^https?:\/\/[^\/]+/i, '');
+
+        if (!/^\/discgolf\/[^\/]+\/[^\/?#]+/.test(path)) continue;
+
+        var lower = path.toLowerCase();
+        var slug = lower.split('/').pop().replace(/-/g, ' ');
+
+        if (lower.indexOf(q) !== -1 || slug.indexOf(q) !== -1) {
+          urls.push(path);
+        }
+
+        if (urls.length >= 20) break;
+      }
+
+      if (!urls.length) {
+        STATE.searchResults = [];
+        render();
+        setStatus('Fant ingen produkter på søket.', 'err');
+        return;
+      }
+
+      var products = [];
+
+      for (var i = 0; i < urls.length; i++) {
+        products.push({
+          name: titleFromUrl(urls[i]),
+          product_url: urls[i],
+          image_url: '',
+          disc_type: inferDiscTypeFromUrl(urls[i]),
+          speed: null,
+          glide: null,
+          turn: null,
+          fade: null
+        });
+      }
+
+      STATE.searchResults = products;
+      render();
+      setStatus('Fant ' + products.length + ' produkter.', 'ok');
+    })
+    .catch(function (err) {
+      setStatus('Produktsøk feilet: ' + (err.message || String(err)), 'err');
+    });
+}
+
+   function addProductToBag(product) {
+  if (!STATE.bag || !STATE.bag.id) {
+    setStatus('Mangler aktiv bag. Last inn siden på nytt.', 'err');
+    return;
+  }
+
+  setStatus('Henter produktinfo…');
+
+  fetchProductMeta(product)
+    .then(function (meta) {
+      var row = {
+        bag_id: STATE.bag.id,
+        user_id: STATE.user.id,
+        name: meta.name,
+        brand: meta.brand || null,
+        disc_type: meta.disc_type || 'midrange',
+        product_url: meta.product_url || null,
+        image_url: meta.image_url || null,
+        speed: numOrNull(meta.speed),
+        glide: numOrNull(meta.glide),
+        turn: numOrNull(meta.turn),
+        fade: numOrNull(meta.fade),
+        note: null
+      };
+
+      return supabaseClient
+        .from('minbag_discs')
+        .insert(row)
+        .select('*')
+        .single();
+    })
+    .then(function (res) {
+      if (res.error) {
+        setStatus('Kunne ikke legge til produkt: ' + res.error.message, 'err');
+        return;
+      }
+
+      STATE.searchResults = [];
+
+      return loadDefaultBag().then(function () {
+        setStatus('Produkt lagt til i Min bag.', 'ok');
+      });
+    })
+    .catch(function (err) {
+      setStatus('Kunne ikke legge til produkt: ' + (err.message || String(err)), 'err');
+    });
+}
+
+function fetchProductMeta(product) {
+  return fetchText(product.product_url)
+    .then(function (html) {
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+
+      var name = product.name || '';
+      var h1 = doc.querySelector('h1');
+
+      if (h1 && h1.textContent) {
+        name = h1.textContent.replace(/\s+/g, ' ').trim();
+      }
+
+      var imageUrl = product.image_url || '';
+
+      var metaImg =
+        doc.querySelector('meta[property="og:image"]') ||
+        doc.querySelector('meta[name="twitter:image"]');
+
+      if (metaImg && metaImg.getAttribute('content')) {
+        imageUrl = absUrl(metaImg.getAttribute('content'));
+      }
+
+      var flight = parseFlightFromHtml(html);
+
+      return {
+        name: name || product.name,
+        brand: guessBrandFromName(name || product.name),
+        disc_type: product.disc_type || inferDiscTypeFromUrl(product.product_url),
+        product_url: product.product_url,
+        image_url: imageUrl,
+        speed: flight.speed,
+        glide: flight.glide,
+        turn: flight.turn,
+        fade: flight.fade
+      };
+    })
+    .catch(function () {
+      return product;
+    });
+}
+
+function parseFlightFromHtml(html) {
+  html = safe(html);
+
+  function pick(label) {
+    var re = new RegExp(label + '\\s*:?\\s*(-?\\d+(?:[\\.,]\\d+)?)', 'i');
+    var m = html.match(re);
+    return m ? m[1].replace(',', '.') : null;
+  }
+
+  var speed = pick('speed');
+  var glide = pick('glide');
+  var turn = pick('turn');
+  var fade = pick('fade');
+
+  if (speed || glide || turn || fade) {
+    return {
+      speed: speed,
+      glide: glide,
+      turn: turn,
+      fade: fade
+    };
+  }
+
+  return {
+    speed: null,
+    glide: null,
+    turn: null,
+    fade: null
+  };
+}
+
+function guessBrandFromName(name) {
+  name = safe(name).toLowerCase();
+
+  var brands = [
+    'Discraft',
+    'Discmania',
+    'Axiom',
+    'MVP',
+    'Innova',
+    'Latitude 64',
+    'Kastaplast',
+    'Disctroyer',
+    'Dynamic Discs',
+    'Westside Discs',
+    'Prodigy Disc',
+    'Thought Space Athletics',
+    'Streamline Discs',
+    'Guru',
+    'Alfa Discs'
+  ];
+
+  for (var i = 0; i < brands.length; i++) {
+    if (name.indexOf(brands[i].toLowerCase()) !== -1) {
+      return brands[i];
+    }
+  }
+
+  return '';
+}
 
   function logout() {
     setStatus('Logger ut…');
