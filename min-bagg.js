@@ -28,6 +28,7 @@
   bag: null,
   discs: [],
   searchResults: [],
+  top3: [],
   loading: false
 };
 
@@ -188,6 +189,7 @@
 
     var side = el('aside', '');
 side.appendChild(renderProductSearchPanel());
+side.appendChild(renderTop3Panel());
 side.appendChild(renderAddDiscPanel());
 side.appendChild(renderTipPanel());
 
@@ -341,6 +343,94 @@ function renderProductSearchPanel() {
 
   return panel;
 }
+
+ function renderTop3Panel() {
+  var panel = el('section', 'gkmb-panel');
+  panel.appendChild(el('h2', '', 'Topp 3 hos GolfKongen'));
+  panel.appendChild(el('p', '', 'Mest valgte discer blant Min bag-brukere.'));
+
+  var types = [
+    ['putter', 'Puttere'],
+    ['midrange', 'Midrange'],
+    ['fairway', 'Fairway drivere'],
+    ['distance', 'Distance drivere']
+  ];
+
+  for (var i = 0; i < types.length; i++) {
+    panel.appendChild(renderTop3Group(types[i][0], types[i][1]));
+  }
+
+  return panel;
+}
+
+function renderTop3Group(type, label) {
+  var wrap = el('div', '');
+  wrap.style.marginTop = '12px';
+
+  var title = el('h3', '', label);
+  title.style.marginBottom = '8px';
+  wrap.appendChild(title);
+
+  var items = [];
+
+  for (var i = 0; i < STATE.top3.length; i++) {
+    if (STATE.top3[i].disc_type === type) {
+      items.push(STATE.top3[i]);
+    }
+  }
+
+  if (!items.length) {
+    wrap.appendChild(el('div', 'gkmb-small', 'Ingen data ennå'));
+    return wrap;
+  }
+
+  for (var j = 0; j < items.length; j++) {
+    wrap.appendChild(renderTop3Item(items[j], j + 1));
+  }
+
+  return wrap;
+}
+
+function renderTop3Item(item, place) {
+  var row = el('div', 'gkmb-disc');
+  row.style.padding = '9px';
+  row.style.marginBottom = '7px';
+
+  var imgBox = el('div', 'gkmb-disc-img');
+  imgBox.style.width = '46px';
+  imgBox.style.height = '46px';
+  imgBox.style.flexBasis = '46px';
+  imgBox.style.borderRadius = '14px';
+
+  if (item.image_url) {
+    var img = document.createElement('img');
+    img.src = item.image_url;
+    img.alt = item.name || '';
+    imgBox.appendChild(img);
+  } else {
+    imgBox.textContent = String(place);
+  }
+
+  var body = el('div', 'gkmb-disc-body');
+  body.appendChild(el('div', 'gkmb-disc-title', place + '. ' + (item.name || 'Ukjent disc')));
+  body.appendChild(el('div', 'gkmb-disc-sub', 'Valgt ' + (item.count || 0) + ' ganger'));
+
+  if (item.product_url) {
+    var open = el('a', 'gkmb-btn secondary', 'Åpne');
+    open.href = item.product_url;
+    open.target = '_blank';
+    open.rel = 'noopener';
+    open.style.textDecoration = 'none';
+    open.style.marginTop = '6px';
+    open.style.display = 'inline-flex';
+    body.appendChild(open);
+  }
+
+  row.appendChild(imgBox);
+  row.appendChild(body);
+
+  return row;
+}  
 
 function renderProductResult(product) {
   var card = el('div', 'gkmb-disc');
@@ -654,12 +744,33 @@ function fetchText(url) {
 
       STATE.searchResults = [];
 
-      return loadDefaultBag().then(function () {
-        setStatus('Produkt lagt til i Min bag.', 'ok');
-      });
+return incrementPopularForDisc(res.data)
+  .then(loadTop3)
+  .then(loadDefaultBag)
+  .then(function () {
+    setStatus('Produkt lagt til i Min bag.', 'ok');
+  });
     })
     .catch(function (err) {
       setStatus('Kunne ikke legge til produkt: ' + (err.message || String(err)), 'err');
+    });
+}
+
+function incrementPopularForDisc(disc) {
+  if (!disc) return Promise.resolve();
+
+  return supabaseClient
+    .rpc('minbag_increment_popular_disc', {
+      p_disc_type: disc.disc_type || 'midrange',
+      p_name: disc.name || '',
+      p_brand: disc.brand || null,
+      p_product_url: disc.product_url || null,
+      p_image_url: disc.image_url || null
+    })
+    .then(function (res) {
+      if (res.error) {
+        console.warn('[GK MIN BAG] Kunne ikke øke popular', res.error);
+      }
     });
 }
 
@@ -777,14 +888,17 @@ function guessBrandFromName(name) {
   }
 
   function ensureUserAndLoadBag() {
-    setStatus('Laster Min bag…');
+  setStatus('Laster Min bag…');
 
-    return supabaseClient.rpc('minbag_ensure_user')
-      .then(function (res) {
-        if (res.error) throw res.error;
-        return loadDefaultBag();
-      });
-  }
+  return supabaseClient.rpc('minbag_ensure_user')
+    .then(function (res) {
+      if (res.error) throw res.error;
+      return loadTop3();
+    })
+    .then(function () {
+      return loadDefaultBag();
+    });
+}
 
   function loadDefaultBag() {
     return supabaseClient.rpc('minbag_get_default_bag_with_discs')
@@ -799,6 +913,20 @@ function guessBrandFromName(name) {
         setStatus('Min bag er lastet.', 'ok');
       });
   }
+
+   function loadTop3() {
+  return supabaseClient
+    .rpc('minbag_get_top3')
+    .then(function (res) {
+      if (res.error) {
+        console.warn('[GK MIN BAG] Kunne ikke hente topp 3', res.error);
+        STATE.top3 = [];
+        return;
+      }
+
+      STATE.top3 = res.data || [];
+    });
+}
 
   function addManualDisc() {
   if (!STATE.bag || !STATE.bag.id) {
@@ -848,9 +976,12 @@ function guessBrandFromName(name) {
 
       clearForm();
 
-      return loadDefaultBag().then(function () {
-        setStatus('Disc lagret i Min bag.', 'ok');
-      });
+return incrementPopularForDisc(res.data)
+  .then(loadTop3)
+  .then(loadDefaultBag)
+  .then(function () {
+    setStatus('Disc lagret i Min bag.', 'ok');
+  });
     });
 }
            
