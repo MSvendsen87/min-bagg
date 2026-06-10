@@ -241,53 +241,53 @@
   }
 
   function renderDisc(disc) {
-    var card = el('article', 'gkmb-disc');
+  var card = el('article', 'gkmb-disc');
 
-    var imgBox = el('div', 'gkmb-disc-img');
-    if (disc.image_url) {
-      var img = document.createElement('img');
-      img.src = disc.image_url;
-      img.alt = disc.name || '';
-      imgBox.appendChild(img);
-    } else {
-      imgBox.textContent = 'GK';
-    }
-
-    var body = el('div', 'gkmb-disc-body');
-    body.appendChild(el('div', 'gkmb-disc-title', disc.name || 'Ukjent disc'));
-
-    var sub = safe(disc.brand);
-    if (sub) sub += ' · ';
-    sub += discTypeLabel(disc.disc_type);
-    body.appendChild(el('div', 'gkmb-disc-sub', sub));
-
-    var flight = el('div', 'gkmb-flight');
-    flight.appendChild(flightChip('Speed', disc.speed));
-    flight.appendChild(flightChip('Glide', disc.glide));
-    flight.appendChild(flightChip('Turn', disc.turn));
-    flight.appendChild(flightChip('Fade', disc.fade));
-    body.appendChild(flight);
-
-    if (disc.note) {
-  body.appendChild(el('div', 'gkmb-small', disc.note));
-}
-
-var actions = el('div', 'gkmb-row');
-
-var deleteBtn = el('button', 'gkmb-btn danger', 'Slett');
-deleteBtn.type = 'button';
-deleteBtn.onclick = function () {
-  deleteDisc(disc.id);
-};
-
-actions.appendChild(deleteBtn);
-body.appendChild(actions);
-
-card.appendChild(imgBox);
-card.appendChild(body);
-
-return card;
+  var imgBox = el('div', 'gkmb-disc-img');
+  if (disc.image_url) {
+    var img = document.createElement('img');
+    img.src = disc.image_url;
+    img.alt = disc.name || '';
+    imgBox.appendChild(img);
+  } else {
+    imgBox.textContent = 'GK';
   }
+
+  var body = el('div', 'gkmb-disc-body');
+  body.appendChild(el('div', 'gkmb-disc-title', disc.name || 'Ukjent disc'));
+
+  var sub = safe(disc.brand);
+  if (sub) sub += ' · ';
+  sub += discTypeLabel(disc.disc_type);
+  body.appendChild(el('div', 'gkmb-disc-sub', sub));
+
+  var flight = el('div', 'gkmb-flight');
+  flight.appendChild(flightChip('Speed', disc.speed));
+  flight.appendChild(flightChip('Glide', disc.glide));
+  flight.appendChild(flightChip('Turn', disc.turn));
+  flight.appendChild(flightChip('Fade', disc.fade));
+  body.appendChild(flight);
+
+  if (disc.note) {
+    body.appendChild(el('div', 'gkmb-small', disc.note));
+  }
+
+  var actions = el('div', 'gkmb-row');
+
+  var deleteBtn = el('button', 'gkmb-btn danger', 'Slett');
+  deleteBtn.type = 'button';
+  deleteBtn.onclick = function () {
+    deleteDisc(disc.id);
+  };
+
+  actions.appendChild(deleteBtn);
+  body.appendChild(actions);
+
+  card.appendChild(imgBox);
+  card.appendChild(body);
+
+  return card;
+}
 
   function flightChip(label, value) {
     var c = el('span', '');
@@ -452,54 +452,54 @@ return card;
   }
 
   function addManualDisc() {
-    if (!STATE.bag || !STATE.bag.id) {
-      setStatus('Mangler aktiv bag. Last inn siden på nytt.', 'err');
-      return;
-    }
+  if (!STATE.bag || !STATE.bag.id) {
+    setStatus('Mangler aktiv bag. Last inn siden på nytt.', 'err');
+    return;
+  }
 
-    var name = getVal('disc-name');
-    var brand = getVal('disc-brand');
-    var discType = getVal('disc-type');
-    var imageUrl = getVal('disc-image');
-    var note = getVal('disc-note');
+  var name = getVal('disc-name');
+  var brand = getVal('disc-brand');
+  var discType = getVal('disc-type');
+  var imageUrl = getVal('disc-image');
+  var note = getVal('disc-note');
 
-    if (!name) {
-      setStatus('Navn på disc mangler.', 'err');
-      return;
-    }
+  if (!name) {
+    setStatus('Navn på disc mangler.', 'err');
+    return;
+  }
 
-    setStatus('Lagrer disc…');
+  setStatus('Lagrer disc…');
 
-    var row = {
-      bag_id: STATE.bag.id,
-      user_id: STATE.user.id,
-      name: name,
-      brand: brand || null,
-      disc_type: discType || 'midrange',
-      image_url: imageUrl || null,
-      speed: numOrNull(getVal('disc-speed')),
-      glide: numOrNull(getVal('disc-glide')),
-      turn: numOrNull(getVal('disc-turn')),
-      fade: numOrNull(getVal('disc-fade')),
-      note: note || null
-    };
+  var row = {
+    bag_id: STATE.bag.id,
+    user_id: STATE.user.id,
+    name: name,
+    brand: brand || null,
+    disc_type: discType || 'midrange',
+    image_url: imageUrl || null,
+    speed: numOrNull(getVal('disc-speed')),
+    glide: numOrNull(getVal('disc-glide')),
+    turn: numOrNull(getVal('disc-turn')),
+    fade: numOrNull(getVal('disc-fade')),
+    note: note || null
+  };
 
-    supabaseClient
-      .from('minbag_discs')
-      .insert(row)
-      .select('*')
-      .single()
-      .then(function (res) {
-        if (res.error) {
-          setStatus('Kunne ikke lagre disc: ' + res.error.message, 'err');
-          return;
-        }
+  supabaseClient
+    .from('minbag_discs')
+    .insert(row)
+    .select('*')
+    .single()
+    .then(function (res) {
+      if (res.error) {
+        setStatus('Kunne ikke lagre disc: ' + res.error.message, 'err');
+        return;
+      }
 
-        clearForm();
-        return loadDefaultBag().then(function () {
-          setStatus('Disc lagret i Min bag.', 'ok');
+      clearForm();
 
-           });
+      return loadDefaultBag().then(function () {
+        setStatus('Disc lagret i Min bag.', 'ok');
+      });
     });
 }
            
