@@ -498,6 +498,10 @@ return card;
         clearForm();
         return loadDefaultBag().then(function () {
           setStatus('Disc lagret i Min bag.', 'ok');
+
+           });
+    });
+}
            
         function deleteDisc(discId) {
   if (!discId) {
