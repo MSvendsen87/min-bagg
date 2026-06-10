@@ -269,13 +269,24 @@
     body.appendChild(flight);
 
     if (disc.note) {
-      body.appendChild(el('div', 'gkmb-small', disc.note));
-    }
+  body.appendChild(el('div', 'gkmb-small', disc.note));
+}
 
-    card.appendChild(imgBox);
-    card.appendChild(body);
+var actions = el('div', 'gkmb-row');
 
-    return card;
+var deleteBtn = el('button', 'gkmb-btn danger', 'Slett');
+deleteBtn.type = 'button';
+deleteBtn.onclick = function () {
+  deleteDisc(disc.id);
+};
+
+actions.appendChild(deleteBtn);
+body.appendChild(actions);
+
+card.appendChild(imgBox);
+card.appendChild(body);
+
+return card;
   }
 
   function flightChip(label, value) {
@@ -487,9 +498,35 @@
         clearForm();
         return loadDefaultBag().then(function () {
           setStatus('Disc lagret i Min bag.', 'ok');
-        });
-      });
+           
+        function deleteDisc(discId) {
+  if (!discId) {
+    setStatus('Mangler disc-ID.', 'err');
+    return;
   }
+
+  if (!confirm('Vil du slette denne disken fra Min bag?')) {
+    return;
+  }
+
+  setStatus('Sletter disc…');
+
+  supabaseClient
+    .from('minbag_discs')
+    .delete()
+    .eq('id', discId)
+    .eq('user_id', STATE.user.id)
+    .then(function (res) {
+      if (res.error) {
+        setStatus('Kunne ikke slette disc: ' + res.error.message, 'err');
+        return;
+      }
+
+      loadDefaultBag().then(function () {
+        setStatus('Disc slettet fra Min bag.', 'ok');
+      });
+    });
+}
 
   function getVal(id) {
     var node = document.getElementById(id);
