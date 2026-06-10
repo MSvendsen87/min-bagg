@@ -274,13 +274,29 @@
 
   var actions = el('div', 'gkmb-row');
 
+  if (disc.product_url) {
+    var openLink = el('a', 'gkmb-btn secondary', 'Åpne produkt');
+    openLink.href = disc.product_url;
+    openLink.target = '_blank';
+    openLink.rel = 'noopener';
+    openLink.style.textDecoration = 'none';
+    actions.appendChild(openLink);
+  }
+
+  var editBtn = el('button', 'gkmb-btn secondary', 'Rediger');
+  editBtn.type = 'button';
+  editBtn.onclick = function () {
+    openEditDiscModal(disc);
+  };
+  actions.appendChild(editBtn);
+
   var deleteBtn = el('button', 'gkmb-btn danger', 'Slett');
   deleteBtn.type = 'button';
   deleteBtn.onclick = function () {
     deleteDisc(disc.id);
   };
-
   actions.appendChild(deleteBtn);
+
   body.appendChild(actions);
 
   card.appendChild(imgBox);
@@ -288,7 +304,6 @@
 
   return card;
 }
-
   function flightChip(label, value) {
     var c = el('span', '');
     c.appendChild(el('b', '', label));
@@ -297,40 +312,42 @@
   }
 
   function renderAddDiscPanel() {
-    var panel = el('section', 'gkmb-panel');
-    panel.appendChild(el('h2', '', 'Legg til disc'));
-    panel.appendChild(el('p', '', 'Første versjon lagrer manuelle discer. Produktsøk fra GolfKongen kobles på etterpå.'));
+  var panel = el('section', 'gkmb-panel');
+  panel.appendChild(el('h2', '', 'Legg til disc'));
+  panel.appendChild(el('p', '', 'Legg inn disc manuelt. Produktsøk fra GolfKongen kobles på etterpå.'));
 
-    var form = el('div', '');
+  var form = el('div', '');
 
-    var grid1 = el('div', 'gkmb-grid');
-    grid1.appendChild(field('Navn på disc', input('disc-name', 'F.eks. Buzzz')));
-    grid1.appendChild(field('Merke', input('disc-brand', 'F.eks. Discraft')));
-    form.appendChild(grid1);
+  var grid1 = el('div', 'gkmb-grid');
+  grid1.appendChild(field('Navn på disc', input('disc-name', 'F.eks. Buzzz')));
+  grid1.appendChild(field('Merke', input('disc-brand', 'F.eks. Discraft')));
+  form.appendChild(grid1);
 
-    var grid2 = el('div', 'gkmb-grid');
-    grid2.appendChild(field('Type', selectType('disc-type')));
-    grid2.appendChild(field('Bilde-URL', input('disc-image', 'Valgfritt')));
-    form.appendChild(grid2);
+  var grid2 = el('div', 'gkmb-grid');
+  grid2.appendChild(field('Type', selectType('disc-type')));
+  grid2.appendChild(field('Bilde-URL', input('disc-image', 'Valgfritt')));
+  form.appendChild(grid2);
 
-    var grid3 = el('div', 'gkmb-grid-four');
-    grid3.appendChild(field('Speed', input('disc-speed', '5')));
-    grid3.appendChild(field('Glide', input('disc-glide', '4')));
-    grid3.appendChild(field('Turn', input('disc-turn', '-1')));
-    grid3.appendChild(field('Fade', input('disc-fade', '1')));
-    form.appendChild(grid3);
+  form.appendChild(field('Produktlenke', input('disc-product-url', 'Valgfritt')));
 
-    form.appendChild(field('Kommentar', textarea('disc-note', 'Valgfritt')));
+  var grid3 = el('div', 'gkmb-grid-four');
+  grid3.appendChild(field('Speed', input('disc-speed', '5')));
+  grid3.appendChild(field('Glide', input('disc-glide', '4')));
+  grid3.appendChild(field('Turn', input('disc-turn', '-1')));
+  grid3.appendChild(field('Fade', input('disc-fade', '1')));
+  form.appendChild(grid3);
 
-    var btn = el('button', 'gkmb-btn', 'Lagre disc');
-    btn.type = 'button';
-    btn.onclick = addManualDisc;
-    form.appendChild(btn);
+  form.appendChild(field('Kommentar', textarea('disc-note', 'Valgfritt')));
 
-    panel.appendChild(form);
+  var btn = el('button', 'gkmb-btn', 'Lagre disc');
+  btn.type = 'button';
+  btn.onclick = addManualDisc;
+  form.appendChild(btn);
 
-    return panel;
-  }
+  panel.appendChild(form);
+
+  return panel;
+}
 
   function renderTipPanel() {
     var panel = el('section', 'gkmb-panel');
@@ -461,6 +478,7 @@
   var brand = getVal('disc-brand');
   var discType = getVal('disc-type');
   var imageUrl = getVal('disc-image');
+  var productUrl = getVal('disc-product-url');
   var note = getVal('disc-note');
 
   if (!name) {
@@ -476,6 +494,7 @@
     name: name,
     brand: brand || null,
     disc_type: discType || 'midrange',
+    product_url: productUrl || null,
     image_url: imageUrl || null,
     speed: numOrNull(getVal('disc-speed')),
     glide: numOrNull(getVal('disc-glide')),
@@ -532,32 +551,190 @@
     });
 }
 
+   function openEditDiscModal(disc) {
+  if (!disc || !disc.id) {
+    setStatus('Mangler disc-data.', 'err');
+    return;
+  }
+
+  var overlay = el('div', '');
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;';
+
+  var modal = el('div', '');
+  modal.style.cssText =
+    'width:min(760px,100%);max-height:88vh;overflow:auto;border-radius:24px;background:#0b140e;border:1px solid rgba(255,255,255,.15);box-shadow:0 28px 90px rgba(0,0,0,.55);color:white;padding:16px;';
+
+  var head = el('div', 'gkmb-row');
+  head.style.justifyContent = 'space-between';
+  head.appendChild(el('h2', '', 'Rediger disc'));
+
+  var closeBtn = el('button', 'gkmb-btn secondary', 'Lukk');
+  closeBtn.type = 'button';
+  closeBtn.onclick = function () {
+    document.body.removeChild(overlay);
+  };
+  head.appendChild(closeBtn);
+  modal.appendChild(head);
+
+  var form = el('div', '');
+
+  var name = input('edit-disc-name', '');
+  name.value = safe(disc.name);
+
+  var brand = input('edit-disc-brand', '');
+  brand.value = safe(disc.brand);
+
+  var image = input('edit-disc-image', '');
+  image.value = safe(disc.image_url);
+
+  var productUrl = input('edit-disc-product-url', '');
+  productUrl.value = safe(disc.product_url);
+
+  var type = selectType('edit-disc-type');
+  type.value = disc.disc_type || 'midrange';
+
+  var speed = input('edit-disc-speed', '');
+  speed.value = disc.speed !== null && disc.speed !== undefined ? String(disc.speed) : '';
+
+  var glide = input('edit-disc-glide', '');
+  glide.value = disc.glide !== null && disc.glide !== undefined ? String(disc.glide) : '';
+
+  var turn = input('edit-disc-turn', '');
+  turn.value = disc.turn !== null && disc.turn !== undefined ? String(disc.turn) : '';
+
+  var fade = input('edit-disc-fade', '');
+  fade.value = disc.fade !== null && disc.fade !== undefined ? String(disc.fade) : '';
+
+  var note = textarea('edit-disc-note', '');
+  note.value = safe(disc.note);
+
+  var grid1 = el('div', 'gkmb-grid');
+  grid1.appendChild(field('Navn på disc', name));
+  grid1.appendChild(field('Merke', brand));
+  form.appendChild(grid1);
+
+  var grid2 = el('div', 'gkmb-grid');
+  grid2.appendChild(field('Type', type));
+  grid2.appendChild(field('Bilde-URL', image));
+  form.appendChild(grid2);
+
+  form.appendChild(field('Produktlenke', productUrl));
+
+  var grid3 = el('div', 'gkmb-grid-four');
+  grid3.appendChild(field('Speed', speed));
+  grid3.appendChild(field('Glide', glide));
+  grid3.appendChild(field('Turn', turn));
+  grid3.appendChild(field('Fade', fade));
+  form.appendChild(grid3);
+
+  form.appendChild(field('Kommentar', note));
+
+  var saveBtn = el('button', 'gkmb-btn', 'Lagre endringer');
+  saveBtn.type = 'button';
+  saveBtn.onclick = function () {
+    updateDisc(disc.id, {
+      name: name.value,
+      brand: brand.value,
+      disc_type: type.value,
+      image_url: image.value,
+      product_url: productUrl.value,
+      speed: speed.value,
+      glide: glide.value,
+      turn: turn.value,
+      fade: fade.value,
+      note: note.value
+    }, overlay);
+  };
+
+  form.appendChild(saveBtn);
+  modal.appendChild(form);
+  overlay.appendChild(modal);
+
+  overlay.onclick = function (e) {
+    if (e.target === overlay) {
+      document.body.removeChild(overlay);
+    }
+  };
+
+  document.body.appendChild(overlay);
+}
+
+function updateDisc(discId, values, overlay) {
+  if (!discId) {
+    setStatus('Mangler disc-ID.', 'err');
+    return;
+  }
+
+  var name = safe(values.name).trim();
+
+  if (!name) {
+    setStatus('Navn på disc mangler.', 'err');
+    return;
+  }
+
+  setStatus('Lagrer endringer…');
+
+  var row = {
+    name: name,
+    brand: safe(values.brand).trim() || null,
+    disc_type: safe(values.disc_type).trim() || 'midrange',
+    image_url: safe(values.image_url).trim() || null,
+    product_url: safe(values.product_url).trim() || null,
+    speed: numOrNull(values.speed),
+    glide: numOrNull(values.glide),
+    turn: numOrNull(values.turn),
+    fade: numOrNull(values.fade),
+    note: safe(values.note).trim() || null
+  };
+
+  supabaseClient
+    .from('minbag_discs')
+    .update(row)
+    .eq('id', discId)
+    .eq('user_id', STATE.user.id)
+    .then(function (res) {
+      if (res.error) {
+        setStatus('Kunne ikke lagre endringer: ' + res.error.message, 'err');
+        return;
+      }
+
+      if (overlay && overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+
+      loadDefaultBag().then(function () {
+        setStatus('Disc oppdatert.', 'ok');
+      });
+    });
+}
+
   function getVal(id) {
     var node = document.getElementById(id);
     return node ? String(node.value || '').trim() : '';
   }
 
   function clearForm() {
-    var ids = [
-      'disc-name',
-      'disc-brand',
-      'disc-image',
-      'disc-speed',
-      'disc-glide',
-      'disc-turn',
-      'disc-fade',
-      'disc-note'
-    ];
+  var ids = [
+    'disc-name',
+    'disc-brand',
+    'disc-image',
+    'disc-product-url',
+    'disc-speed',
+    'disc-glide',
+    'disc-turn',
+    'disc-fade',
+    'disc-note'
+  ];
 
-    for (var i = 0; i < ids.length; i++) {
-      var node = document.getElementById(ids[i]);
-      if (node) node.value = '';
-    }
-
-    var type = document.getElementById('disc-type');
-    if (type) type.value = 'putter';
+  for (var i = 0; i < ids.length; i++) {
+    var node = document.getElementById(ids[i]);
+    if (node) node.value = '';
   }
 
+  var type = document.getElementById('disc-type');
+  if (type) type.value = 'putter';
+}
   function refreshAuthState() {
     supabaseClient.auth.getUser().then(function (res) {
       if (res.error) {
