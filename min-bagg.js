@@ -1,38 +1,88 @@
 /* ============================================================================
-   GOLFKONGEN – MIN BAG V2
-   Fil: min-bagg.js
-   Build: 2026-06-09.2
-   Første ekte versjon:
-   - Supabase Auth
-   - Opprett/hent standardbag
-   - Vis bag
-   - Legg til disc manuelt
+   GOLFKONGEN – MIN BAG V3 APP
+   Build: 2026-08-06.1
+
+   V3-prinsipper:
+   - Supabase Auth / magic link
+   - Kun Min Bag-tabeller/RPC-er
+   - Ingen service_role i frontend
+   - Ingen user_id fra frontend ved opprettelse av discer
+   - Skriving av discer går via sikre RPC-er
+   - Støtter flere bager
+   - "Legg til fra GolfKongen" via minbag_search_catalog + minbag_add_catalog_disc
+   - "Legg inn egen disc" via minbag_add_manual_disc
+   - Mobil-først, mørkt GolfKongen-design
+
+   Denne filen forutsetter at Quickbutik-loaderen har opprettet:
+   <div id="min-bag-root"></div>
+
+   Leveres som .txt fra ChatGPT. Når den senere legges i GitHub som kjørbar app,
+   brukes innholdet som JavaScript.
    ============================================================================ */
 
 (function () {
   'use strict';
 
-  var VERSION = '2026-06-09.2';
+  var VERSION = '2026-08-06.1';
 
-  var SUPABASE_URL = 'https://fwztrnxhfvrlceicctlv.supabase.co';
-  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3enRybnhoZnZybGNlaWNjdGx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MTgwMjYsImV4cCI6MjA5NTI5NDAyNn0.q4QthdBWEtUi_Fdz_Ge88E_5CpJMtUvjWhMAa0R0zmE';
-
-  var ROOT_ID = 'min-bag-root';
-  var SUPABASE_SDK = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+  var CONFIG = {
+    ROOT_ID: 'min-bag-root',
+    PAGE_PATH: '/sider/min-bag',
+    SUPABASE_URL: 'https://fwztrnxhfvrlceicctlv.supabase.co',
+    SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3enRybnhoZnZybGNlaWNjdGx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MTgwMjYsImV4cCI6MjA5NTI5NDAyNn0.q4QthdBWEtUi_Fdz_Ge88E_5CpJMtUvjWhMAa0R0zmE',
+    SUPABASE_SDK: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+    MAGIC_LINK_REDIRECT: 'https://golfkongen.no/sider/min-bag',
+    CATALOG_LIMIT: 30
+  };
 
   var root = null;
   var supabaseClient = null;
+  var authSubscription = null;
+  var booting = false;
 
   var STATE = {
-  user: null,
-  bag: null,
-  discs: [],
-  searchResults: [],
-  top3: [],
-  loading: false
-};
+    user: null,
+    bags: [],
+    activeBagId: null,
+    discs: [],
+    brands: [],
+    catalogResults: [],
+    catalogQuery: '',
+    catalogType: '',
+    loading: false
+  };
 
-  console.log('[GK MIN BAG V2] boot', VERSION);
+  function safe(value) {
+    return value === null || value === undefined ? '' : String(value);
+  }
+
+  function trim(value) {
+    return safe(value).trim();
+  }
+
+  function numOrNull(value) {
+    var text = trim(value).replace(',', '.');
+    if (!text) return null;
+    var num = Number(text);
+    return isFinite(num) ? num : null;
+  }
+
+  function escHtml(value) {
+    return safe(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function currentPath() {
+    return safe(location.pathname).replace(/\/+$/, '').toLowerCase();
+  }
+
+  function onMinBagPage() {
+    return currentPath() === CONFIG.PAGE_PATH;
+  }
 
   function el(tag, className, text) {
     var node = document.createElement(tag);
@@ -42,86 +92,153 @@
   }
 
   function clear(node) {
-    while (node && node.firstChild) node.removeChild(node.firstChild);
+    while (node && node.firstChild) {
+      node.removeChild(node.firstChild);
+    }
   }
 
-  function safe(v) {
-    return v === null || v === undefined ? '' : String(v);
+  function activeBag() {
+    for (var i = 0; i < STATE.bags.length; i += 1) {
+      if (STATE.bags[i].id === STATE.activeBagId) {
+        return STATE.bags[i];
+      }
+    }
+    return null;
   }
 
-  function numOrNull(v) {
-    v = safe(v).replace(',', '.').trim();
-    if (v === '') return null;
-    var n = parseFloat(v);
-    return isNaN(n) ? null : n;
+  function discTypeLabel(type) {
+    if (type === 'putter') return 'Putter';
+    if (type === 'midrange') return 'Midrange';
+    if (type === 'fairway') return 'Fairway driver';
+    if (type === 'distance') return 'Distance driver';
+    return 'Disc';
   }
 
-  function setStatus(text, type) {
-    var box = document.getElementById('gkmb-status');
+  function status(text, type) {
+    var box = document.getElementById('gkmb3-status');
     if (!box) return;
-    box.className = 'gkmb-status' + (type ? ' ' + type : '');
+
+    box.className = 'gkmb3-status';
+    if (type) box.className += ' ' + type;
     box.textContent = text || '';
   }
 
+  function setLoading(isLoading, text) {
+    STATE.loading = !!isLoading;
+
+    var buttons = document.querySelectorAll('#' + CONFIG.ROOT_ID + ' button');
+    for (var i = 0; i < buttons.length; i += 1) {
+      buttons[i].disabled = !!isLoading;
+    }
+
+    if (text) status(text, '');
+  }
+
+  function errorMessage(err) {
+    if (!err) return 'Ukjent feil.';
+    if (typeof err === 'string') return err;
+    return err.message || err.error_description || err.details || JSON.stringify(err);
+  }
+
   function injectCss() {
-    if (document.getElementById('gk-minbag-v2-css')) return;
+    if (document.getElementById('gk-minbag-v3-css')) return;
 
     var style = document.createElement('style');
-    style.id = 'gk-minbag-v2-css';
+    style.id = 'gk-minbag-v3-css';
     style.textContent =
-      '#min-bag-root{max-width:1120px;margin:0;padding:0;color:#fff;font-family:inherit;}' +
+      '#min-bag-root{width:100%;max-width:1180px;margin:18px 0 0;color:#f8fafc;font-family:inherit;}' +
       '#min-bag-root *{box-sizing:border-box;}' +
 
-      '.gkmb-card{border:1px solid rgba(34,197,94,.28);background:radial-gradient(circle at top left,rgba(34,197,94,.28),transparent 34%),linear-gradient(135deg,#061109,#102719 60%,#07140d);border-radius:24px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.35);margin-bottom:16px;}' +
-      '.gkmb-eyebrow{display:inline-flex;padding:6px 10px;border-radius:999px;background:rgba(34,197,94,.16);border:1px solid rgba(34,197,94,.35);font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#b8ffd0;margin-bottom:12px;}' +
-      '.gkmb-card h1{font-size:clamp(34px,7vw,60px);line-height:.95;margin:0 0 10px;font-weight:1000;letter-spacing:-.05em;}' +
-      '.gkmb-card h2{font-size:22px;margin:0 0 8px;font-weight:1000;}' +
-      '.gkmb-card h3{font-size:16px;margin:0 0 8px;font-weight:1000;}' +
-      '.gkmb-card p{color:rgba(255,255,255,.75);line-height:1.55;margin:0 0 14px;}' +
+      '.gkmb3-shell{display:grid;gap:16px;}' +
+      '.gkmb3-hero{position:relative;overflow:hidden;border-radius:26px;padding:22px;border:1px solid rgba(34,197,94,.28);background:radial-gradient(circle at 0 0,rgba(34,197,94,.24),transparent 38%),linear-gradient(135deg,#061109,#0e2417 56%,#07140d);box-shadow:0 22px 70px rgba(0,0,0,.32);}' +
+      '.gkmb3-hero h2{margin:0 0 8px;font-size:clamp(28px,6vw,52px);line-height:1;font-weight:1000;letter-spacing:-.045em;color:#fff;}' +
+      '.gkmb3-hero p{margin:0 0 14px;max-width:760px;color:rgba(255,255,255,.74);line-height:1.55;}' +
+      '.gkmb3-eyebrow{display:inline-flex;padding:6px 10px;margin-bottom:11px;border-radius:999px;border:1px solid rgba(34,197,94,.38);background:rgba(34,197,94,.13);color:#b9fbcf;font-size:11px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;}' +
 
-      '.gkmb-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px;align-items:start;}' +
-      '.gkmb-panel{border:1px solid rgba(255,255,255,.13);background:linear-gradient(180deg,rgba(255,255,255,.085),rgba(255,255,255,.045));border-radius:22px;padding:16px;box-shadow:0 14px 42px rgba(0,0,0,.18);margin-bottom:14px;}' +
+      '.gkmb3-status{margin-top:14px;padding:11px 13px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.07);color:rgba(255,255,255,.82);font-size:13px;font-weight:800;}' +
+      '.gkmb3-status.ok{border-color:rgba(34,197,94,.36);background:rgba(34,197,94,.12);color:#d1fae5;}' +
+      '.gkmb3-status.err{border-color:rgba(239,68,68,.42);background:rgba(239,68,68,.12);color:#fee2e2;}' +
 
-      '.gkmb-box{margin-top:14px;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.07);border-radius:18px;padding:14px;}' +
-      '.gkmb-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}' +
-      '.gkmb-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}' +
-      '.gkmb-grid-four{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}' +
+      '.gkmb3-pills{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px;}' +
+      '.gkmb3-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.07);font-size:12px;font-weight:800;color:rgba(255,255,255,.82);}' +
 
-      '.gkmb-field{display:grid;gap:5px;font-size:12px;font-weight:900;color:rgba(255,255,255,.75);}' +
-      '.gkmb-input,.gkmb-select,.gkmb-textarea{width:100%;min-height:44px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.28);color:#fff;padding:11px 13px;outline:none;font-family:inherit;}' +
-      '.gkmb-textarea{min-height:86px;resize:vertical;}' +
-      '.gkmb-input:focus,.gkmb-select:focus,.gkmb-textarea:focus{border-color:rgba(34,197,94,.7);box-shadow:0 0 0 3px rgba(34,197,94,.13);}' +
+      '.gkmb3-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}' +
+      '.gkmb3-btn{display:inline-flex;align-items:center;justify-content:center;min-height:43px;padding:10px 13px;border:0;border-radius:13px;background:linear-gradient(135deg,#22c55e,#15803d);color:#fff;font-weight:950;font-family:inherit;cursor:pointer;text-decoration:none;box-shadow:0 8px 24px rgba(21,128,61,.2);}' +
+      '.gkmb3-btn:hover{filter:brightness(1.06);}' +
+      '.gkmb3-btn.secondary{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);box-shadow:none;}' +
+      '.gkmb3-btn.danger{background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.30);box-shadow:none;}' +
+      '.gkmb3-btn:disabled{opacity:.48;cursor:not-allowed;filter:none;}' +
 
-      '.gkmb-btn{border:0;border-radius:14px;padding:12px 14px;font-weight:950;cursor:pointer;color:#fff;background:linear-gradient(135deg,#22c55e,#15803d);}' +
-      '.gkmb-btn.secondary{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);}' +
-      '.gkmb-btn.danger{background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.35);}' +
-      '.gkmb-btn:disabled{opacity:.55;cursor:not-allowed;}' +
+      '.gkmb3-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;}' +
+      '.gkmb3-card{border:1px solid rgba(255,255,255,.11);background:linear-gradient(180deg,rgba(255,255,255,.065),rgba(255,255,255,.035));border-radius:22px;padding:16px;box-shadow:0 16px 48px rgba(0,0,0,.17);}' +
+      '.gkmb3-card h3{margin:0 0 7px;color:#fff;font-size:19px;font-weight:950;}' +
+      '.gkmb3-card h4{margin:0 0 7px;color:#fff;font-size:15px;font-weight:950;}' +
+      '.gkmb3-card p{margin:0 0 12px;color:rgba(255,255,255,.66);line-height:1.45;font-size:13px;}' +
 
-      '.gkmb-status{margin-top:14px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.13);color:rgba(255,255,255,.86);font-weight:800;}' +
-      '.gkmb-status.ok{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35);}' +
-      '.gkmb-status.err{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.35);}' +
+      '.gkmb3-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;}' +
+      '.gkmb3-tab{min-height:46px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.055);color:rgba(255,255,255,.72);font-weight:900;cursor:pointer;}' +
+      '.gkmb3-tab.active{border-color:rgba(34,197,94,.52);background:rgba(34,197,94,.16);color:#dcfce7;}' +
 
-      '.gkmb-small{font-size:13px;color:rgba(255,255,255,.65);margin-top:6px;}' +
-      '.gkmb-pill{display:inline-flex;align-items:center;padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.13);font-size:12px;font-weight:900;color:rgba(255,255,255,.82);margin:4px 5px 4px 0;}' +
+      '.gkmb3-grid{display:grid;grid-template-columns:1fr;gap:10px;}' +
+      '.gkmb3-grid2{display:grid;grid-template-columns:1fr;gap:10px;}' +
+      '.gkmb3-grid4{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}' +
 
-      '.gkmb-disc-list{display:grid;gap:10px;margin-top:12px;}' +
-      '.gkmb-disc{display:flex;gap:12px;align-items:flex-start;padding:12px;border-radius:18px;background:rgba(0,0,0,.16);border:1px solid rgba(255,255,255,.10);}' +
-      '.gkmb-disc-img{width:72px;height:72px;flex:0 0 72px;border-radius:18px;overflow:hidden;background:radial-gradient(circle at top left,rgba(34,197,94,.28),rgba(255,255,255,.06));border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-weight:1000;color:#b8ffd0;}' +
-      '.gkmb-disc-img img{width:100%;height:100%;object-fit:cover;display:block;}' +
-      '.gkmb-disc-body{min-width:0;flex:1;}' +
-      '.gkmb-disc-title{font-weight:1000;font-size:16px;margin-bottom:3px;}' +
-      '.gkmb-disc-sub{font-size:12px;color:rgba(255,255,255,.65);margin-bottom:8px;}' +
+      '.gkmb3-field{display:grid;gap:5px;color:rgba(255,255,255,.72);font-size:12px;font-weight:850;}' +
+      '.gkmb3-input,.gkmb3-select,.gkmb3-textarea{width:100%;min-height:44px;border-radius:13px;border:1px solid rgba(255,255,255,.14);background:#0a120d;color:#fff;padding:10px 12px;font:inherit;outline:none;}' +
+      '.gkmb3-input::placeholder,.gkmb3-textarea::placeholder{color:rgba(255,255,255,.32);}' +
+      '.gkmb3-input:focus,.gkmb3-select:focus,.gkmb3-textarea:focus{border-color:rgba(34,197,94,.72);box-shadow:0 0 0 3px rgba(34,197,94,.11);}' +
+      '.gkmb3-textarea{min-height:88px;resize:vertical;}' +
+      '.gkmb3-check{display:flex;align-items:center;gap:8px;min-height:44px;color:rgba(255,255,255,.78);font-size:13px;font-weight:800;}' +
 
-      '.gkmb-flight{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}' +
-      '.gkmb-flight span{display:inline-flex;gap:5px;align-items:center;padding:6px 8px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.11);font-size:11px;}' +
-      '.gkmb-flight b{color:rgba(255,255,255,.65);}' +
-      '.gkmb-flight em{font-style:normal;font-weight:1000;color:#b8ffd0;}' +
+      '.gkmb3-bags{display:flex;gap:8px;overflow-x:auto;padding-bottom:3px;margin-bottom:12px;scrollbar-width:thin;}' +
+      '.gkmb3-bagbtn{flex:0 0 auto;min-height:42px;padding:9px 12px;border-radius:13px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.055);color:rgba(255,255,255,.75);font-weight:900;cursor:pointer;white-space:nowrap;}' +
+      '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
 
-      '.gkmb-empty{padding:28px;text-align:center;border:1px dashed rgba(255,255,255,.18);border-radius:20px;background:rgba(255,255,255,.035);}' +
-      '.gkmb-empty strong{display:block;font-size:20px;margin-bottom:6px;}' +
+      '.gkmb3-category{margin-top:16px;}' +
+      '.gkmb3-category-title{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:9px;}' +
+      '.gkmb3-category-title strong{font-size:14px;color:#fff;}' +
+      '.gkmb3-category-title span{font-size:11px;color:rgba(255,255,255,.48);}' +
+      '.gkmb3-discgrid{display:grid;grid-template-columns:1fr;gap:10px;}' +
 
-      '@media(max-width:900px){.gkmb-layout{grid-template-columns:1fr}.gkmb-grid,.gkmb-grid-four{grid-template-columns:1fr 1fr;}}' +
-      '@media(max-width:560px){.gkmb-card{padding:16px;border-radius:20px}.gkmb-grid,.gkmb-grid-four{grid-template-columns:1fr}.gkmb-disc{flex-direction:column}.gkmb-disc-img{width:100%;height:160px;flex-basis:auto}}';
+      '.gkmb3-disc{display:grid;grid-template-columns:82px minmax(0,1fr);gap:12px;padding:11px;border-radius:17px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.15);}' +
+      '.gkmb3-discimg{width:82px;height:82px;border-radius:15px;overflow:hidden;border:1px solid rgba(255,255,255,.10);background:radial-gradient(circle at 25% 20%,rgba(34,197,94,.30),rgba(255,255,255,.04));display:flex;align-items:center;justify-content:center;color:#bbf7d0;font-weight:1000;}' +
+      '.gkmb3-discimg img{width:100%;height:100%;object-fit:cover;display:block;}' +
+      '.gkmb3-disctitle{font-size:15px;font-weight:950;color:#fff;line-height:1.15;margin-bottom:3px;}' +
+      '.gkmb3-discsub{font-size:11px;color:rgba(255,255,255,.52);margin-bottom:7px;}' +
+      '.gkmb3-flight{display:flex;gap:5px;flex-wrap:wrap;}' +
+      '.gkmb3-flight span{display:inline-flex;gap:4px;padding:5px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.055);font-size:10px;color:rgba(255,255,255,.54);}' +
+      '.gkmb3-flight b{color:#bbf7d0;}' +
+      '.gkmb3-discmeta{margin-top:7px;font-size:11px;color:rgba(255,255,255,.55);line-height:1.35;}' +
+
+      '.gkmb3-empty{padding:24px 16px;text-align:center;border:1px dashed rgba(255,255,255,.16);border-radius:17px;background:rgba(255,255,255,.025);color:rgba(255,255,255,.58);}' +
+      '.gkmb3-empty strong{display:block;color:#fff;font-size:17px;margin-bottom:5px;}' +
+
+      '.gkmb3-results{display:grid;gap:9px;margin-top:12px;}' +
+      '.gkmb3-result{display:grid;grid-template-columns:66px minmax(0,1fr);gap:10px;padding:10px;border-radius:16px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.14);}' +
+      '.gkmb3-resultimg{width:66px;height:66px;border-radius:13px;overflow:hidden;background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;color:#bbf7d0;font-weight:950;}' +
+      '.gkmb3-resultimg img{width:100%;height:100%;object-fit:cover;}' +
+      '.gkmb3-resulttitle{font-weight:950;color:#fff;font-size:14px;line-height:1.2;margin-bottom:3px;}' +
+      '.gkmb3-resultsub{font-size:11px;color:rgba(255,255,255,.52);margin-bottom:7px;}' +
+      '.gkmb3-price{font-size:12px;font-weight:900;color:#bbf7d0;}' +
+
+      '.gkmb3-login{max-width:620px;display:grid;gap:10px;}' +
+      '.gkmb3-note{font-size:11px;color:rgba(255,255,255,.48);line-height:1.4;}' +
+
+      '@media(min-width:620px){' +
+        '.gkmb3-grid2{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-grid4{grid-template-columns:repeat(4,minmax(0,1fr));}' +
+        '.gkmb3-discgrid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+      '}' +
+      '@media(min-width:960px){' +
+        '.gkmb3-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr);align-items:start;}' +
+        '.gkmb3-sticky{position:sticky;top:18px;}' +
+      '}' +
+      '@media(max-width:480px){' +
+        '.gkmb3-hero{padding:17px;border-radius:21px;}' +
+        '.gkmb3-card{padding:13px;border-radius:18px;}' +
+        '.gkmb3-disc{grid-template-columns:70px minmax(0,1fr);}' +
+        '.gkmb3-discimg{width:70px;height:70px;}' +
+      '}';
 
     document.head.appendChild(style);
   }
@@ -133,1132 +250,1259 @@
         return;
       }
 
+      var existing = document.getElementById('gk-minbag-v3-supabase-sdk');
+      if (existing) {
+        var tries = 0;
+        var timer = setInterval(function () {
+          tries += 1;
+          if (window.supabase && window.supabase.createClient) {
+            clearInterval(timer);
+            resolve();
+          } else if (tries > 100) {
+            clearInterval(timer);
+            reject(new Error('Supabase SDK brukte for lang tid på å laste.'));
+          }
+        }, 100);
+        return;
+      }
+
       var script = document.createElement('script');
-      script.src = SUPABASE_SDK;
+      script.id = 'gk-minbag-v3-supabase-sdk';
+      script.src = CONFIG.SUPABASE_SDK;
+      script.defer = true;
       script.onload = function () { resolve(); };
-      script.onerror = function () { reject(new Error('Kunne ikke laste Supabase SDK')); };
+      script.onerror = function () { reject(new Error('Kunne ikke laste Supabase SDK.')); };
       document.head.appendChild(script);
     });
   }
 
   function createClient() {
-    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
+    if (supabaseClient) return;
+
+    supabaseClient = window.supabase.createClient(
+      CONFIG.SUPABASE_URL,
+      CONFIG.SUPABASE_ANON_KEY,
+      {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
       }
-    });
+    );
+  }
+
+  function renderFlight(speed, glide, turn, fade) {
+    var wrap = el('div', 'gkmb3-flight');
+
+    var values = [
+      ['S', speed],
+      ['G', glide],
+      ['T', turn],
+      ['F', fade]
+    ];
+
+    for (var i = 0; i < values.length; i += 1) {
+      var chip = el('span', '');
+      chip.appendChild(el('b', '', values[i][0]));
+      chip.appendChild(document.createTextNode(
+        values[i][1] === null || values[i][1] === undefined || values[i][1] === ''
+          ? '?'
+          : String(values[i][1])
+      ));
+      wrap.appendChild(chip);
+    }
+
+    return wrap;
   }
 
   function render() {
+    if (!root) return;
+
     clear(root);
 
-    var hero = el('section', 'gkmb-card');
-    hero.appendChild(el('div', 'gkmb-eyebrow', 'GolfKongen verktøy'));
-    hero.appendChild(el('h1', '', 'Min bag'));
+    var shell = el('div', 'gkmb3-shell');
+    var hero = el('section', 'gkmb3-hero');
+
+    hero.appendChild(el('div', 'gkmb3-eyebrow', 'GolfKongen · Min Bag V3'));
+    hero.appendChild(el('h2', '', 'Min bag'));
 
     if (!STATE.user) {
-      hero.appendChild(el('p', '', 'Logg inn med e-post for å bygge og lagre discgolf-bagen din.'));
-      hero.appendChild(renderLoginBox());
-      var statusLoggedOut = el('div', 'gkmb-status', 'Ikke innlogget.');
-      statusLoggedOut.id = 'gkmb-status';
-      hero.appendChild(statusLoggedOut);
-      root.appendChild(hero);
+      hero.appendChild(el(
+        'p',
+        '',
+        'Logg inn med e-post for å bygge og lagre discgolf-bagen din. Du får en sikker innloggingslenke på e-post.'
+      ));
+      hero.appendChild(renderLogin());
+      var loggedOutStatus = el('div', 'gkmb3-status', 'Ikke innlogget.');
+      loggedOutStatus.id = 'gkmb3-status';
+      hero.appendChild(loggedOutStatus);
+
+      shell.appendChild(hero);
+      root.appendChild(shell);
       return;
     }
 
-    hero.appendChild(el('p', '', 'Bygg discgolf-bagen din, hold oversikt over flight-tall og lagre alt trygt på GolfKongen-kontoen din.'));
+    hero.appendChild(el(
+      'p',
+      '',
+      'Hold oversikt over discene dine, legg til fra GolfKongen-katalogen eller registrer discer vi aldri har solgt.'
+    ));
 
-    var meta = el('div', '');
-    meta.appendChild(el('span', 'gkmb-pill', 'Innlogget: ' + STATE.user.email));
-    if (STATE.bag) meta.appendChild(el('span', 'gkmb-pill', 'Bag: ' + STATE.bag.name));
-    meta.appendChild(el('span', 'gkmb-pill', 'Disker: ' + STATE.discs.length));
-    hero.appendChild(meta);
+    var pills = el('div', 'gkmb3-pills');
+    pills.appendChild(el('span', 'gkmb3-pill', STATE.user.email || 'Innlogget'));
 
-    var status = el('div', 'gkmb-status ok', 'Klar');
-    status.id = 'gkmb-status';
-    hero.appendChild(status);
+    var bag = activeBag();
+    if (bag) pills.appendChild(el('span', 'gkmb3-pill', 'Bag: ' + bag.name));
 
-    root.appendChild(hero);
+    pills.appendChild(el('span', 'gkmb3-pill', 'Discer: ' + STATE.discs.length));
+    hero.appendChild(pills);
 
-    var layout = el('div', 'gkmb-layout');
+    var heroActions = el('div', 'gkmb3-toolbar');
+    heroActions.style.marginTop = '12px';
 
-    var main = el('main', '');
-    main.appendChild(renderBagPanel());
+    var logoutBtn = el('button', 'gkmb3-btn secondary', 'Logg ut');
+    logoutBtn.type = 'button';
+    logoutBtn.onclick = logout;
+    heroActions.appendChild(logoutBtn);
 
-    var side = el('aside', '');
-side.appendChild(renderProductSearchPanel());
-side.appendChild(renderTop3Panel());
-side.appendChild(renderAddDiscPanel());
-side.appendChild(renderTipPanel());
+    hero.appendChild(heroActions);
 
-    layout.appendChild(main);
-    layout.appendChild(side);
+    var heroStatus = el('div', 'gkmb3-status ok', 'Klar.');
+    heroStatus.id = 'gkmb3-status';
+    hero.appendChild(heroStatus);
 
-    root.appendChild(layout);
+    shell.appendChild(hero);
+
+    var layout = el('div', 'gkmb3-layout');
+
+    var left = el('div', '');
+    left.appendChild(renderBagManager());
+    left.appendChild(renderBagContents());
+
+    var right = el('div', 'gkmb3-sticky');
+    right.appendChild(renderAddPanel());
+
+    layout.appendChild(left);
+    layout.appendChild(right);
+    shell.appendChild(layout);
+
+    root.appendChild(shell);
   }
 
-  function renderLoginBox() {
-    var box = el('div', 'gkmb-box');
+  function renderLogin() {
+    var wrap = el('div', 'gkmb3-login');
 
-    var row = el('div', 'gkmb-row');
-
-    var input = el('input', 'gkmb-input');
+    var input = el('input', 'gkmb3-input');
+    input.id = 'gkmb3-email';
     input.type = 'email';
-    input.placeholder = 'Din e-postadresse';
-    input.id = 'gkmb-email';
+    input.autocomplete = 'email';
+    input.placeholder = 'din@epost.no';
 
-    var btn = el('button', 'gkmb-btn', 'Send innloggingslenke');
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') sendMagicLink();
+    });
+
+    var btn = el('button', 'gkmb3-btn', 'Send innloggingslenke');
     btn.type = 'button';
     btn.onclick = sendMagicLink;
 
-    row.appendChild(input);
-    row.appendChild(btn);
+    wrap.appendChild(input);
+    wrap.appendChild(btn);
+    wrap.appendChild(el(
+      'div',
+      'gkmb3-note',
+      'Ingen passord nødvendig. Etter innlogging kommer du tilbake til golfkongen.no/sider/min-bag.'
+    ));
 
-    box.appendChild(row);
-    box.appendChild(el('div', 'gkmb-small', 'Du får en e-post med innloggingslenke. Etter innlogging kommer du tilbake til denne siden.'));
-
-    return box;
+    return wrap;
   }
 
-  function renderBagPanel() {
-    var panel = el('section', 'gkmb-panel');
-    panel.appendChild(el('h2', '', STATE.bag ? STATE.bag.name : 'Min bag'));
+  function renderBagManager() {
+    var card = el('section', 'gkmb3-card');
+    card.appendChild(el('h3', '', 'Dine bager'));
+    card.appendChild(el('p', '', 'Velg aktiv bag eller opprett en ny. Én bag er alltid satt som hovedbag.'));
+
+    var bagsRow = el('div', 'gkmb3-bags');
+
+    for (var i = 0; i < STATE.bags.length; i += 1) {
+      (function (bag) {
+        var label = bag.name;
+        if (bag.is_default) label += ' ★';
+        if (bag.disc_count !== undefined && bag.disc_count !== null) {
+          label += ' · ' + bag.disc_count;
+        }
+
+        var btn = el(
+          'button',
+          'gkmb3-bagbtn' + (bag.id === STATE.activeBagId ? ' active' : ''),
+          label
+        );
+        btn.type = 'button';
+        btn.onclick = function () {
+          selectBag(bag.id);
+        };
+        bagsRow.appendChild(btn);
+      })(STATE.bags[i]);
+    }
+
+    card.appendChild(bagsRow);
+
+    var toolbar = el('div', 'gkmb3-toolbar');
+
+    var newBag = el('button', 'gkmb3-btn secondary', '+ Ny bag');
+    newBag.type = 'button';
+    newBag.onclick = createBagPrompt;
+    toolbar.appendChild(newBag);
+
+    var current = activeBag();
+
+    if (current && !current.is_default) {
+      var defaultBtn = el('button', 'gkmb3-btn secondary', 'Sett som hovedbag');
+      defaultBtn.type = 'button';
+      defaultBtn.onclick = function () {
+        setDefaultBag(current.id);
+      };
+      toolbar.appendChild(defaultBtn);
+
+      var deleteBtn = el('button', 'gkmb3-btn danger', 'Slett bag');
+      deleteBtn.type = 'button';
+      deleteBtn.onclick = function () {
+        deleteBag(current);
+      };
+      toolbar.appendChild(deleteBtn);
+    }
+
+    card.appendChild(toolbar);
+
+    return card;
+  }
+
+  function renderBagContents() {
+    var card = el('section', 'gkmb3-card');
+
+    var bag = activeBag();
+    card.appendChild(el('h3', '', bag ? bag.name : 'Min bag'));
+
+    if (!bag) {
+      card.appendChild(el(
+        'div',
+        'gkmb3-empty',
+        'Fant ingen aktiv bag. Prøv å laste siden på nytt.'
+      ));
+      return card;
+    }
 
     if (!STATE.discs.length) {
-      var empty = el('div', 'gkmb-empty');
+      var empty = el('div', 'gkmb3-empty');
       empty.appendChild(el('strong', '', 'Bagen er tom'));
-      empty.appendChild(el('div', 'gkmb-small', 'Legg til en disc manuelt først. Produktsøk kobler vi på etterpå.'));
-      panel.appendChild(empty);
-      return panel;
+      empty.appendChild(el(
+        'div',
+        '',
+        'Bruk panelet for å legge til en disc fra GolfKongen eller registrere din egen.'
+      ));
+      card.appendChild(empty);
+      return card;
     }
 
-    var list = el('div', 'gkmb-disc-list');
+    var groups = [
+      ['putter', 'Puttere'],
+      ['midrange', 'Midrange'],
+      ['fairway', 'Fairway'],
+      ['distance', 'Drivere / Distance']
+    ];
 
-    for (var i = 0; i < STATE.discs.length; i++) {
-      list.appendChild(renderDisc(STATE.discs[i]));
+    for (var i = 0; i < groups.length; i += 1) {
+      var type = groups[i][0];
+      var label = groups[i][1];
+      var items = [];
+
+      for (var j = 0; j < STATE.discs.length; j += 1) {
+        if (STATE.discs[j].disc_type === type) {
+          items.push(STATE.discs[j]);
+        }
+      }
+
+      if (!items.length) continue;
+
+      var section = el('div', 'gkmb3-category');
+      var head = el('div', 'gkmb3-category-title');
+      head.appendChild(el('strong', '', label));
+      head.appendChild(el('span', '', items.length + (items.length === 1 ? ' disc' : ' discer')));
+      section.appendChild(head);
+
+      var grid = el('div', 'gkmb3-discgrid');
+
+      for (var k = 0; k < items.length; k += 1) {
+        grid.appendChild(renderDisc(items[k]));
+      }
+
+      section.appendChild(grid);
+      card.appendChild(section);
     }
 
-    panel.appendChild(list);
-    return panel;
+    return card;
   }
 
   function renderDisc(disc) {
-  var card = el('article', 'gkmb-disc');
+    var card = el('article', 'gkmb3-disc');
 
-  var imgBox = el('div', 'gkmb-disc-img');
-  if (disc.image_url) {
-    var img = document.createElement('img');
-    img.src = disc.image_url;
-    img.alt = disc.name || '';
-    imgBox.appendChild(img);
-  } else {
-    imgBox.textContent = 'GK';
-  }
+    var image = el('div', 'gkmb3-discimg');
 
-  var body = el('div', 'gkmb-disc-body');
-  body.appendChild(el('div', 'gkmb-disc-title', disc.name || 'Ukjent disc'));
-
-  var sub = safe(disc.brand);
-  if (sub) sub += ' · ';
-  sub += discTypeLabel(disc.disc_type);
-  body.appendChild(el('div', 'gkmb-disc-sub', sub));
-
-  var flight = el('div', 'gkmb-flight');
-  flight.appendChild(flightChip('Speed', disc.speed));
-  flight.appendChild(flightChip('Glide', disc.glide));
-  flight.appendChild(flightChip('Turn', disc.turn));
-  flight.appendChild(flightChip('Fade', disc.fade));
-  body.appendChild(flight);
-
-  if (disc.note) {
-    body.appendChild(el('div', 'gkmb-small', disc.note));
-  }
-
-  var actions = el('div', 'gkmb-row');
-
-  if (disc.product_url) {
-    var openLink = el('a', 'gkmb-btn secondary', 'Åpne produkt');
-    openLink.href = disc.product_url;
-    openLink.target = '_blank';
-    openLink.rel = 'noopener';
-    openLink.style.textDecoration = 'none';
-    actions.appendChild(openLink);
-  }
-
-  var editBtn = el('button', 'gkmb-btn secondary', 'Rediger');
-  editBtn.type = 'button';
-  editBtn.onclick = function () {
-    openEditDiscModal(disc);
-  };
-  actions.appendChild(editBtn);
-
-  var deleteBtn = el('button', 'gkmb-btn danger', 'Slett');
-  deleteBtn.type = 'button';
-  deleteBtn.onclick = function () {
-    deleteDisc(disc.id);
-  };
-  actions.appendChild(deleteBtn);
-
-  body.appendChild(actions);
-
-  card.appendChild(imgBox);
-  card.appendChild(body);
-
-  return card;
-}
-
-function renderProductSearchPanel() {
-  var panel = el('section', 'gkmb-panel');
-  panel.appendChild(el('h2', '', 'Søk i GolfKongen'));
-  panel.appendChild(el('p', '', 'Søk etter disc i GolfKongen-katalogen og legg den direkte i Min bag.'));
-
-  var row = el('div', 'gkmb-row');
-
-  var search = input('product-search', 'F.eks. Buzzz, P2, Crave');
-  search.style.flex = '1';
-
-  var btn = el('button', 'gkmb-btn', 'Søk');
-  btn.type = 'button';
-  btn.onclick = function () {
-    searchGolfKongenProducts();
-  };
-
-  row.appendChild(search);
-  row.appendChild(btn);
-  panel.appendChild(row);
-
-  var results = el('div', '');
-  results.id = 'gkmb-product-results';
-  results.style.marginTop = '12px';
-
-  if (STATE.searchResults && STATE.searchResults.length) {
-    for (var i = 0; i < STATE.searchResults.length; i++) {
-      results.appendChild(renderProductResult(STATE.searchResults[i]));
+    if (disc.image_url) {
+      var img = document.createElement('img');
+      img.src = disc.image_url;
+      img.alt = disc.name || disc.mold_name || 'Disc';
+      img.loading = 'lazy';
+      image.appendChild(img);
+    } else {
+      image.textContent = disc.is_favorite ? '★' : 'GK';
     }
-  }
 
-  panel.appendChild(results);
+    card.appendChild(image);
 
-  return panel;
-}
+    var body = el('div', '');
 
- function renderTop3Panel() {
-  var panel = el('section', 'gkmb-panel');
-  panel.appendChild(el('h2', '', 'Topp 3 hos GolfKongen'));
-  panel.appendChild(el('p', '', 'Mest valgte discer blant Min bag-brukere.'));
+    body.appendChild(el(
+      'div',
+      'gkmb3-disctitle',
+      disc.name || disc.mold_name || 'Ukjent disc'
+    ));
 
-  var types = [
-    ['putter', 'Puttere'],
-    ['midrange', 'Midrange'],
-    ['fairway', 'Fairway drivere'],
-    ['distance', 'Distance drivere']
-  ];
+    var sub = [];
+    if (disc.brand) sub.push(disc.brand);
+    if (disc.plastic) sub.push(disc.plastic);
+    sub.push(discTypeLabel(disc.disc_type));
 
-  for (var i = 0; i < types.length; i++) {
-    panel.appendChild(renderTop3Group(types[i][0], types[i][1]));
-  }
+    body.appendChild(el('div', 'gkmb3-discsub', sub.join(' · ')));
+    body.appendChild(renderFlight(disc.speed, disc.glide, disc.turn, disc.fade));
 
-  return panel;
-}
-
-function renderTop3Group(type, label) {
-  var wrap = el('div', '');
-  wrap.style.marginTop = '12px';
-
-  var title = el('h3', '', label);
-  title.style.marginBottom = '8px';
-  wrap.appendChild(title);
-
-  var items = [];
-
-  for (var i = 0; i < STATE.top3.length; i++) {
-    if (STATE.top3[i].disc_type === type) {
-      items.push(STATE.top3[i]);
+    var meta = [];
+    if (disc.weight_grams !== null && disc.weight_grams !== undefined) {
+      meta.push(disc.weight_grams + ' g');
     }
+    if (disc.color) meta.push(disc.color);
+    if (disc.is_favorite) meta.push('★ Favoritt');
+
+    if (meta.length) {
+      body.appendChild(el('div', 'gkmb3-discmeta', meta.join(' · ')));
+    }
+
+    if (disc.note) {
+      body.appendChild(el('div', 'gkmb3-discmeta', disc.note));
+    }
+
+    if (disc.product_url) {
+      var link = el('a', 'gkmb3-btn secondary', 'Se hos GolfKongen');
+      link.href = disc.product_url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.style.marginTop = '8px';
+      link.style.minHeight = '36px';
+      link.style.padding = '7px 10px';
+      link.style.fontSize = '11px';
+      body.appendChild(link);
+    }
+
+    card.appendChild(body);
+
+    return card;
   }
 
-  if (!items.length) {
-    wrap.appendChild(el('div', 'gkmb-small', 'Ingen data ennå'));
+  function renderAddPanel() {
+    var card = el('section', 'gkmb3-card');
+    card.appendChild(el('h3', '', 'Legg til disc'));
+    card.appendChild(el(
+      'p',
+      '',
+      'Velg en GolfKongen-disc eller registrer en disc manuelt.'
+    ));
+
+    var tabs = el('div', 'gkmb3-tabs');
+
+    var catalogTab = el('button', 'gkmb3-tab active', 'Fra GolfKongen');
+    catalogTab.type = 'button';
+    catalogTab.dataset.target = 'catalog';
+
+    var manualTab = el('button', 'gkmb3-tab', 'Egen disc');
+    manualTab.type = 'button';
+    manualTab.dataset.target = 'manual';
+
+    tabs.appendChild(catalogTab);
+    tabs.appendChild(manualTab);
+
+    card.appendChild(tabs);
+
+    var catalog = renderCatalogPanel();
+    catalog.id = 'gkmb3-tab-catalog';
+
+    var manual = renderManualPanel();
+    manual.id = 'gkmb3-tab-manual';
+    manual.style.display = 'none';
+
+    catalogTab.onclick = function () {
+      catalogTab.className = 'gkmb3-tab active';
+      manualTab.className = 'gkmb3-tab';
+      catalog.style.display = '';
+      manual.style.display = 'none';
+    };
+
+    manualTab.onclick = function () {
+      manualTab.className = 'gkmb3-tab active';
+      catalogTab.className = 'gkmb3-tab';
+      manual.style.display = '';
+      catalog.style.display = 'none';
+    };
+
+    card.appendChild(catalog);
+    card.appendChild(manual);
+
+    return card;
+  }
+
+  function renderCatalogPanel() {
+    var wrap = el('div', '');
+
+    var query = el('input', 'gkmb3-input');
+    query.id = 'gkmb3-catalog-query';
+    query.type = 'search';
+    query.placeholder = 'F.eks. Firebird, Buzzz, P2…';
+    query.value = STATE.catalogQuery || '';
+
+    var type = createTypeSelect('gkmb3-catalog-type', true);
+    type.value = STATE.catalogType || '';
+
+    var grid = el('div', 'gkmb3-grid2');
+
+    grid.appendChild(field('Søk', query));
+    grid.appendChild(field('Type', type));
+
+    wrap.appendChild(grid);
+
+    var searchBtn = el('button', 'gkmb3-btn', 'Søk i GolfKongen');
+    searchBtn.type = 'button';
+    searchBtn.style.marginTop = '10px';
+    searchBtn.onclick = searchCatalog;
+
+    query.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') searchCatalog();
+    });
+
+    wrap.appendChild(searchBtn);
+
+    var results = el('div', 'gkmb3-results');
+
+    if (STATE.catalogResults.length) {
+      for (var i = 0; i < STATE.catalogResults.length; i += 1) {
+        results.appendChild(renderCatalogResult(STATE.catalogResults[i]));
+      }
+    } else if (STATE.catalogQuery) {
+      results.appendChild(el('div', 'gkmb3-note', 'Ingen treff på siste søk.'));
+    } else {
+      results.appendChild(el(
+        'div',
+        'gkmb3-note',
+        'Søk i Min Bag-katalogen. Resultatene kommer direkte fra GolfKongens synkede disc-katalog.'
+      ));
+    }
+
+    wrap.appendChild(results);
+
     return wrap;
   }
 
-  for (var j = 0; j < items.length; j++) {
-    wrap.appendChild(renderTop3Item(items[j], j + 1));
+  function renderCatalogResult(product) {
+    var row = el('article', 'gkmb3-result');
+
+    var image = el('div', 'gkmb3-resultimg');
+
+    if (product.image_url) {
+      var img = document.createElement('img');
+      img.src = product.image_url;
+      img.alt = product.product_name || 'Disc';
+      img.loading = 'lazy';
+      image.appendChild(img);
+    } else {
+      image.textContent = 'GK';
+    }
+
+    row.appendChild(image);
+
+    var body = el('div', '');
+
+    body.appendChild(el(
+      'div',
+      'gkmb3-resulttitle',
+      product.product_name || 'Ukjent disc'
+    ));
+
+    var sub = [];
+    if (product.brand) sub.push(product.brand);
+    if (product.plastic) sub.push(product.plastic);
+    sub.push(discTypeLabel(product.disc_type));
+
+    body.appendChild(el('div', 'gkmb3-resultsub', sub.join(' · ')));
+    body.appendChild(renderFlight(product.speed, product.glide, product.turn, product.fade));
+
+    if (product.price_nok !== null && product.price_nok !== undefined) {
+      body.appendChild(el('div', 'gkmb3-price', product.price_nok + ' kr'));
+    }
+
+    var toolbar = el('div', 'gkmb3-toolbar');
+    toolbar.style.marginTop = '8px';
+
+    var add = el('button', 'gkmb3-btn', 'Legg i bag');
+    add.type = 'button';
+    add.onclick = function () {
+      addCatalogDisc(product);
+    };
+    toolbar.appendChild(add);
+
+    if (product.product_url) {
+      var open = el('a', 'gkmb3-btn secondary', 'Se produkt');
+      open.href = product.product_url;
+      open.target = '_blank';
+      open.rel = 'noopener';
+      toolbar.appendChild(open);
+    }
+
+    body.appendChild(toolbar);
+    row.appendChild(body);
+
+    return row;
   }
 
-  return wrap;
-}
+  function renderManualPanel() {
+    var wrap = el('div', '');
 
-function renderTop3Item(item, place) {
-  var row = el('div', 'gkmb-disc');
-  row.style.padding = '9px';
-  row.style.marginBottom = '7px';
+    var name = el('input', 'gkmb3-input');
+    name.id = 'gkmb3-manual-name';
+    name.placeholder = 'F.eks. Champion Firebird';
 
-  var imgBox = el('div', 'gkmb-disc-img');
-  imgBox.style.width = '46px';
-  imgBox.style.height = '46px';
-  imgBox.style.flexBasis = '46px';
-  imgBox.style.borderRadius = '14px';
+    var mold = el('input', 'gkmb3-input');
+    mold.id = 'gkmb3-manual-mold';
+    mold.placeholder = 'F.eks. Firebird';
 
-  if (item.image_url) {
-    var img = document.createElement('img');
-    img.src = item.image_url;
-    img.alt = item.name || '';
-    imgBox.appendChild(img);
-  } else {
-    imgBox.textContent = String(place);
-  }
+    var brand = el('select', 'gkmb3-select');
+    brand.id = 'gkmb3-manual-brand';
 
-  var body = el('div', 'gkmb-disc-body');
-  body.appendChild(el('div', 'gkmb-disc-title', place + '. ' + (item.name || 'Ukjent disc')));
-  body.appendChild(el('div', 'gkmb-disc-sub', 'Valgt ' + (item.count || 0) + ' ganger'));
+    for (var i = 0; i < STATE.brands.length; i += 1) {
+      var option = document.createElement('option');
+      option.value = STATE.brands[i].id;
+      option.textContent = STATE.brands[i].name;
+      option.dataset.custom = STATE.brands[i].is_custom ? '1' : '0';
+      brand.appendChild(option);
+    }
 
-  if (item.product_url) {
-    var open = el('a', 'gkmb-btn secondary', 'Åpne');
-    open.href = item.product_url;
-    open.target = '_blank';
-    open.rel = 'noopener';
-    open.style.textDecoration = 'none';
-    open.style.marginTop = '6px';
-    open.style.display = 'inline-flex';
-    body.appendChild(open);
-  }
+    var customBrand = el('input', 'gkmb3-input');
+    customBrand.id = 'gkmb3-manual-custom-brand';
+    customBrand.placeholder = 'Skriv merkenavn';
+    customBrand.style.display = 'none';
 
-  row.appendChild(imgBox);
-  row.appendChild(body);
+    brand.onchange = function () {
+      var selected = brand.options[brand.selectedIndex];
+      customBrand.style.display =
+        selected && selected.dataset.custom === '1' ? '' : 'none';
+    };
 
-  return row;
-}  
+    var plastic = el('input', 'gkmb3-input');
+    plastic.id = 'gkmb3-manual-plastic';
+    plastic.placeholder = 'F.eks. Champion, ESP, K1';
 
-function renderProductResult(product) {
-  var card = el('div', 'gkmb-disc');
-  card.style.marginBottom = '8px';
+    var type = createTypeSelect('gkmb3-manual-type', false);
 
-  var imgBox = el('div', 'gkmb-disc-img');
-  if (product.image_url) {
-    var img = document.createElement('img');
-    img.src = product.image_url;
-    img.alt = product.name || '';
-    imgBox.appendChild(img);
-  } else {
-    imgBox.textContent = 'GK';
-  }
+    var grid1 = el('div', 'gkmb3-grid2');
+    grid1.appendChild(field('Discnavn *', name));
+    grid1.appendChild(field('Mold / modell *', mold));
+    wrap.appendChild(grid1);
 
-  var body = el('div', 'gkmb-disc-body');
-  body.appendChild(el('div', 'gkmb-disc-title', product.name || 'Ukjent produkt'));
-  body.appendChild(el('div', 'gkmb-disc-sub', discTypeLabel(product.disc_type)));
+    var grid2 = el('div', 'gkmb3-grid2');
+    grid2.appendChild(field('Merke *', brand));
+    grid2.appendChild(field('Eget merkenavn', customBrand));
+    wrap.appendChild(grid2);
 
-  var actions = el('div', 'gkmb-row');
+    var grid3 = el('div', 'gkmb3-grid2');
+    grid3.appendChild(field('Plast', plastic));
+    grid3.appendChild(field('Type *', type));
+    wrap.appendChild(grid3);
 
-  var open = el('a', 'gkmb-btn secondary', 'Åpne');
-  open.href = product.product_url;
-  open.target = '_blank';
-  open.rel = 'noopener';
-  open.style.textDecoration = 'none';
-  actions.appendChild(open);
+    var speed = numericInput('gkmb3-manual-speed', 'Speed');
+    var glide = numericInput('gkmb3-manual-glide', 'Glide');
+    var turn = numericInput('gkmb3-manual-turn', 'Turn');
+    var fade = numericInput('gkmb3-manual-fade', 'Fade');
 
-  var add = el('button', 'gkmb-btn', 'Legg til');
-  add.type = 'button';
-  add.onclick = function () {
-    addProductToBag(product);
-  };
-  actions.appendChild(add);
+    var flightGrid = el('div', 'gkmb3-grid4');
+    flightGrid.appendChild(field('Speed', speed));
+    flightGrid.appendChild(field('Glide', glide));
+    flightGrid.appendChild(field('Turn', turn));
+    flightGrid.appendChild(field('Fade', fade));
+    wrap.appendChild(flightGrid);
 
-  body.appendChild(actions);
+    var weight = numericInput('gkmb3-manual-weight', 'Gram');
+    weight.min = '0';
 
-  card.appendChild(imgBox);
-  card.appendChild(body);
+    var color = el('input', 'gkmb3-input');
+    color.id = 'gkmb3-manual-color';
+    color.placeholder = 'F.eks. grønn';
 
-  return card;
-}
-   
-  function flightChip(label, value) {
-    var c = el('span', '');
-    c.appendChild(el('b', '', label));
-    c.appendChild(el('em', '', value !== null && value !== undefined && value !== '' ? String(value) : '?'));
-    return c;
-  }
+    var extraGrid = el('div', 'gkmb3-grid2');
+    extraGrid.appendChild(field('Vekt (g)', weight));
+    extraGrid.appendChild(field('Farge', color));
+    wrap.appendChild(extraGrid);
 
-  function renderAddDiscPanel() {
-  var panel = el('section', 'gkmb-panel');
-  panel.appendChild(el('h2', '', 'Legg til disc'));
-  panel.appendChild(el('p', '', 'Legg inn disc manuelt. Produktsøk fra GolfKongen kobles på etterpå.'));
+    var note = el('textarea', 'gkmb3-textarea');
+    note.id = 'gkmb3-manual-note';
+    note.placeholder = 'Valgfritt notat om akkurat denne fysiske discen.';
+    wrap.appendChild(field('Notat', note));
 
-  var form = el('div', '');
+    var favoriteLabel = el('label', 'gkmb3-check');
+    var favorite = document.createElement('input');
+    favorite.type = 'checkbox';
+    favorite.id = 'gkmb3-manual-favorite';
+    favoriteLabel.appendChild(favorite);
+    favoriteLabel.appendChild(document.createTextNode('Marker som favoritt'));
+    wrap.appendChild(favoriteLabel);
 
-  var grid1 = el('div', 'gkmb-grid');
-  grid1.appendChild(field('Navn på disc', input('disc-name', 'F.eks. Buzzz')));
-  grid1.appendChild(field('Merke', input('disc-brand', 'F.eks. Discraft')));
-  form.appendChild(grid1);
+    var save = el('button', 'gkmb3-btn', 'Lagre egen disc');
+    save.type = 'button';
+    save.onclick = addManualDisc;
+    wrap.appendChild(save);
 
-  var grid2 = el('div', 'gkmb-grid');
-  grid2.appendChild(field('Type', selectType('disc-type')));
-  grid2.appendChild(field('Bilde-URL', input('disc-image', 'Valgfritt')));
-  form.appendChild(grid2);
+    wrap.appendChild(el(
+      'div',
+      'gkmb3-note',
+      'Merke, disc og eierskap valideres på serveren. Frontend sender aldri user_id som sannhetskilde.'
+    ));
 
-  form.appendChild(field('Produktlenke', input('disc-product-url', 'Valgfritt')));
-
-  var grid3 = el('div', 'gkmb-grid-four');
-  grid3.appendChild(field('Speed', input('disc-speed', '5')));
-  grid3.appendChild(field('Glide', input('disc-glide', '4')));
-  grid3.appendChild(field('Turn', input('disc-turn', '-1')));
-  grid3.appendChild(field('Fade', input('disc-fade', '1')));
-  form.appendChild(grid3);
-
-  form.appendChild(field('Kommentar', textarea('disc-note', 'Valgfritt')));
-
-  var btn = el('button', 'gkmb-btn', 'Lagre disc');
-  btn.type = 'button';
-  btn.onclick = addManualDisc;
-  form.appendChild(btn);
-
-  panel.appendChild(form);
-
-  return panel;
-}
-
-  function renderTipPanel() {
-    var panel = el('section', 'gkmb-panel');
-    panel.appendChild(el('h2', '', 'Neste steg'));
-    panel.appendChild(el('p', '', 'Når manuell lagring fungerer stabilt, kobler vi på produktsøk fra GolfKongen og Topp 3 per kategori.'));
-    return panel;
-  }
-
-  function field(label, control) {
-    var wrap = el('label', 'gkmb-field');
-    wrap.appendChild(el('span', '', label));
-    wrap.appendChild(control);
     return wrap;
   }
 
-  function input(id, placeholder) {
-    var i = el('input', 'gkmb-input');
-    i.id = id;
-    i.type = 'text';
-    i.placeholder = placeholder || '';
-    return i;
+  function field(labelText, control) {
+    var label = el('label', 'gkmb3-field');
+    label.appendChild(el('span', '', labelText));
+    label.appendChild(control);
+    return label;
   }
 
-  function textarea(id, placeholder) {
-    var t = el('textarea', 'gkmb-textarea');
-    t.id = id;
-    t.placeholder = placeholder || '';
-    return t;
+  function numericInput(id, placeholder) {
+    var input = el('input', 'gkmb3-input');
+    input.id = id;
+    input.type = 'number';
+    input.step = '0.1';
+    input.inputMode = 'decimal';
+    input.placeholder = placeholder || '';
+    return input;
   }
 
-  function selectType(id) {
-    var s = el('select', 'gkmb-select');
-    s.id = id;
+  function createTypeSelect(id, allowAll) {
+    var select = el('select', 'gkmb3-select');
+    select.id = id;
 
-    var options = [
+    var options = [];
+
+    if (allowAll) options.push(['', 'Alle typer']);
+
+    options.push(
       ['putter', 'Putter'],
       ['midrange', 'Midrange'],
       ['fairway', 'Fairway driver'],
       ['distance', 'Distance driver']
-    ];
+    );
 
-    for (var i = 0; i < options.length; i++) {
-      var o = document.createElement('option');
-      o.value = options[i][0];
-      o.textContent = options[i][1];
-      s.appendChild(o);
+    for (var i = 0; i < options.length; i += 1) {
+      var opt = document.createElement('option');
+      opt.value = options[i][0];
+      opt.textContent = options[i][1];
+      select.appendChild(opt);
     }
 
-    return s;
+    return select;
   }
 
-  function discTypeLabel(type) {
-    if (type === 'putter') return 'Putter';
-    if (type === 'midrange') return 'Midrange';
-    if (type === 'fairway') return 'Fairway driver';
-    if (type === 'distance') return 'Distance driver';
-    return 'Disc';
+  function getInputValue(id) {
+    var node = document.getElementById(id);
+    return node ? trim(node.value) : '';
+  }
+
+  function getChecked(id) {
+    var node = document.getElementById(id);
+    return !!(node && node.checked);
   }
 
   function sendMagicLink() {
-    var inputEl = document.getElementById('gkmb-email');
-    var email = inputEl ? String(inputEl.value || '').trim().toLowerCase() : '';
+    var email = getInputValue('gkmb3-email').toLowerCase();
 
     if (!email || email.indexOf('@') === -1) {
-      setStatus('Skriv inn en gyldig e-postadresse.', 'err');
+      status('Skriv inn en gyldig e-postadresse.', 'err');
       return;
     }
 
-    setStatus('Sender innloggingslenke…');
+    setLoading(true, 'Sender innloggingslenke…');
 
     supabaseClient.auth.signInWithOtp({
       email: email,
       options: {
-        emailRedirectTo: 'http://golfkongen.no/sider/min-bag'
+        emailRedirectTo: CONFIG.MAGIC_LINK_REDIRECT
       }
     }).then(function (res) {
+      setLoading(false);
+
       if (res.error) {
-        setStatus('Kunne ikke sende lenke: ' + res.error.message, 'err');
+        status('Kunne ikke sende innloggingslenke: ' + errorMessage(res.error), 'err');
         return;
       }
 
-      setStatus('Innloggingslenke sendt. Sjekk e-posten din.', 'ok');
+      status('Innloggingslenke sendt. Sjekk e-posten din.', 'ok');
+    }).catch(function (err) {
+      setLoading(false);
+      status('Kunne ikke sende innloggingslenke: ' + errorMessage(err), 'err');
     });
   }
-
-   function inferDiscTypeFromUrl(url) {
-  url = safe(url).toLowerCase();
-
-  if (url.indexOf('/discgolf/disc-putter') === 0) return 'putter';
-  if (url.indexOf('/discgolf/midrange') === 0) return 'midrange';
-  if (url.indexOf('/discgolf/fairway-driver') === 0) return 'fairway';
-  if (url.indexOf('/discgolf/driver') === 0) return 'distance';
-
-  return 'midrange';
-}
-
-function titleFromUrl(url) {
-  var last = safe(url).split('/').pop() || '';
-  last = decodeURIComponent(last);
-  last = last.replace(/-/g, ' ');
-  last = last.replace(/\s+/g, ' ').trim();
-
-  return last.replace(/\b\w/g, function (m) {
-    return m.toUpperCase();
-  });
-}
-
-function absUrl(url) {
-  url = safe(url).trim();
-
-  if (!url) return '';
-  if (/^https?:\/\//i.test(url)) return url;
-  if (url.indexOf('//') === 0) return location.protocol + url;
-  if (url.charAt(0) === '/') return location.origin + url;
-
-  return url;
-}
-
-function fetchText(url) {
-  return fetch(url, { credentials: 'include' }).then(function (res) {
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return res.text();
-  });
-}
-
-   function searchGolfKongenProducts() {
-  var q = getVal('product-search').toLowerCase();
-
-  if (!q || q.length < 2) {
-    setStatus('Skriv minst 2 tegn for å søke.', 'err');
-    return;
-  }
-
-  setStatus('Søker i GolfKongen…');
-
-  fetchText('/sitemap.xml')
-    .then(function (xml) {
-      var urls = [];
-      var re = /<loc>([^<]+)<\/loc>/g;
-      var match;
-
-      while ((match = re.exec(xml))) {
-        var path = safe(match[1]).replace(/^https?:\/\/[^\/]+/i, '');
-
-        if (!/^\/discgolf\/[^\/]+\/[^\/?#]+/.test(path)) continue;
-
-        var lower = path.toLowerCase();
-        var slug = lower.split('/').pop().replace(/-/g, ' ');
-
-        if (lower.indexOf(q) !== -1 || slug.indexOf(q) !== -1) {
-          urls.push(path);
-        }
-
-        if (urls.length >= 20) break;
-      }
-
-      if (!urls.length) {
-        STATE.searchResults = [];
-        render();
-        setStatus('Fant ingen produkter på søket.', 'err');
-        return;
-      }
-
-      var products = [];
-
-      for (var i = 0; i < urls.length; i++) {
-        products.push({
-          name: titleFromUrl(urls[i]),
-          product_url: urls[i],
-          image_url: '',
-          disc_type: inferDiscTypeFromUrl(urls[i]),
-          speed: null,
-          glide: null,
-          turn: null,
-          fade: null
-        });
-      }
-
-      STATE.searchResults = products;
-      render();
-      setStatus('Fant ' + products.length + ' produkter.', 'ok');
-    })
-    .catch(function (err) {
-      setStatus('Produktsøk feilet: ' + (err.message || String(err)), 'err');
-    });
-}
-
-   function addProductToBag(product) {
-  if (!STATE.bag || !STATE.bag.id) {
-    setStatus('Mangler aktiv bag. Last inn siden på nytt.', 'err');
-    return;
-  }
-
-  setStatus('Henter produktinfo…');
-
-  fetchProductMeta(product)
-    .then(function (meta) {
-      var row = {
-        bag_id: STATE.bag.id,
-        user_id: STATE.user.id,
-        name: meta.name,
-        brand: meta.brand || null,
-        disc_type: meta.disc_type || 'midrange',
-        product_url: meta.product_url || null,
-        image_url: meta.image_url || null,
-        speed: numOrNull(meta.speed),
-        glide: numOrNull(meta.glide),
-        turn: numOrNull(meta.turn),
-        fade: numOrNull(meta.fade),
-        note: null
-      };
-
-      return supabaseClient
-        .from('minbag_discs')
-        .insert(row)
-        .select('*')
-        .single();
-    })
-    .then(function (res) {
-      if (res.error) {
-        setStatus('Kunne ikke legge til produkt: ' + res.error.message, 'err');
-        return;
-      }
-
-      STATE.searchResults = [];
-
-return incrementPopularForDisc(res.data)
-  .then(loadTop3)
-  .then(loadDefaultBag)
-  .then(function () {
-    setStatus('Produkt lagt til i Min bag.', 'ok');
-  });
-    })
-    .catch(function (err) {
-      setStatus('Kunne ikke legge til produkt: ' + (err.message || String(err)), 'err');
-    });
-}
-
-function incrementPopularForDisc(disc) {
-  if (!disc) return Promise.resolve();
-
-  return supabaseClient
-    .rpc('minbag_increment_popular_disc', {
-      p_disc_type: disc.disc_type || 'midrange',
-      p_name: disc.name || '',
-      p_brand: disc.brand || null,
-      p_product_url: disc.product_url || null,
-      p_image_url: disc.image_url || null
-    })
-    .then(function (res) {
-      if (res.error) {
-        console.warn('[GK MIN BAG] Kunne ikke øke popular', res.error);
-      }
-    });
-}
-
-function fetchProductMeta(product) {
-  return fetchText(product.product_url)
-    .then(function (html) {
-      var doc = new DOMParser().parseFromString(html, 'text/html');
-
-      var name = product.name || '';
-      var h1 = doc.querySelector('h1');
-
-      if (h1 && h1.textContent) {
-        name = h1.textContent.replace(/\s+/g, ' ').trim();
-      }
-
-      var imageUrl = product.image_url || '';
-
-      var metaImg =
-        doc.querySelector('meta[property="og:image"]') ||
-        doc.querySelector('meta[name="twitter:image"]');
-
-      if (metaImg && metaImg.getAttribute('content')) {
-        imageUrl = absUrl(metaImg.getAttribute('content'));
-      }
-
-      var flight = parseFlightFromHtml(html);
-
-      return {
-        name: name || product.name,
-        brand: guessBrandFromName(name || product.name),
-        disc_type: product.disc_type || inferDiscTypeFromUrl(product.product_url),
-        product_url: product.product_url,
-        image_url: imageUrl,
-        speed: flight.speed,
-        glide: flight.glide,
-        turn: flight.turn,
-        fade: flight.fade
-      };
-    })
-    .catch(function () {
-      return product;
-    });
-}
-
-function parseFlightFromHtml(html) {
-  html = safe(html);
-
-  function pick(label) {
-    var re = new RegExp(label + '\\s*:?\\s*(-?\\d+(?:[\\.,]\\d+)?)', 'i');
-    var m = html.match(re);
-    return m ? m[1].replace(',', '.') : null;
-  }
-
-  var speed = pick('speed');
-  var glide = pick('glide');
-  var turn = pick('turn');
-  var fade = pick('fade');
-
-  if (speed || glide || turn || fade) {
-    return {
-      speed: speed,
-      glide: glide,
-      turn: turn,
-      fade: fade
-    };
-  }
-
-  return {
-    speed: null,
-    glide: null,
-    turn: null,
-    fade: null
-  };
-}
-
-function guessBrandFromName(name) {
-  name = safe(name).toLowerCase();
-
-  var brands = [
-    'Discraft',
-    'Discmania',
-    'Axiom',
-    'MVP',
-    'Innova',
-    'Latitude 64',
-    'Kastaplast',
-    'Disctroyer',
-    'Dynamic Discs',
-    'Westside Discs',
-    'Prodigy Disc',
-    'Thought Space Athletics',
-    'Streamline Discs',
-    'Guru',
-    'Alfa Discs'
-  ];
-
-  for (var i = 0; i < brands.length; i++) {
-    if (name.indexOf(brands[i].toLowerCase()) !== -1) {
-      return brands[i];
-    }
-  }
-
-  return '';
-}
 
   function logout() {
-    setStatus('Logger ut…');
+    setLoading(true, 'Logger ut…');
 
-    supabaseClient.auth.signOut().then(function () {
-      STATE.user = null;
-      STATE.bag = null;
-      STATE.discs = [];
+    supabaseClient.auth.signOut().then(function (res) {
+      setLoading(false);
+
+      if (res.error) {
+        status('Kunne ikke logge ut: ' + errorMessage(res.error), 'err');
+        return;
+      }
+
+      resetUserState();
       render();
+    }).catch(function (err) {
+      setLoading(false);
+      status('Kunne ikke logge ut: ' + errorMessage(err), 'err');
     });
   }
 
-  function ensureUserAndLoadBag() {
-  setStatus('Laster Min bag…');
-
-  return supabaseClient.rpc('minbag_ensure_user')
-    .then(function (res) {
-      if (res.error) throw res.error;
-      return loadTop3();
-    })
-    .then(function () {
-      return loadDefaultBag();
-    });
-}
-
-  function loadDefaultBag() {
-    return supabaseClient.rpc('minbag_get_default_bag_with_discs')
-      .then(function (res) {
-        if (res.error) throw res.error;
-
-        var data = res.data || {};
-        STATE.bag = data.bag || null;
-        STATE.discs = data.discs || [];
-
-        render();
-        setStatus('Min bag er lastet.', 'ok');
-      });
+  function resetUserState() {
+    STATE.user = null;
+    STATE.bags = [];
+    STATE.activeBagId = null;
+    STATE.discs = [];
+    STATE.catalogResults = [];
+    STATE.catalogQuery = '';
+    STATE.catalogType = '';
   }
 
-   function loadTop3() {
-  return supabaseClient
-    .rpc('minbag_get_top3')
-    .then(function (res) {
-      if (res.error) {
-        console.warn('[GK MIN BAG] Kunne ikke hente topp 3', res.error);
-        STATE.top3 = [];
-        return;
-      }
-
-      STATE.top3 = res.data || [];
-    });
-}
-
-  function addManualDisc() {
-  if (!STATE.bag || !STATE.bag.id) {
-    setStatus('Mangler aktiv bag. Last inn siden på nytt.', 'err');
-    return;
-  }
-
-  var name = getVal('disc-name');
-  var brand = getVal('disc-brand');
-  var discType = getVal('disc-type');
-  var imageUrl = getVal('disc-image');
-  var productUrl = getVal('disc-product-url');
-  var note = getVal('disc-note');
-
-  if (!name) {
-    setStatus('Navn på disc mangler.', 'err');
-    return;
-  }
-
-  setStatus('Lagrer disc…');
-
-  var row = {
-    bag_id: STATE.bag.id,
-    user_id: STATE.user.id,
-    name: name,
-    brand: brand || null,
-    disc_type: discType || 'midrange',
-    product_url: productUrl || null,
-    image_url: imageUrl || null,
-    speed: numOrNull(getVal('disc-speed')),
-    glide: numOrNull(getVal('disc-glide')),
-    turn: numOrNull(getVal('disc-turn')),
-    fade: numOrNull(getVal('disc-fade')),
-    note: note || null
-  };
-
-  supabaseClient
-    .from('minbag_discs')
-    .insert(row)
-    .select('*')
-    .single()
-    .then(function (res) {
-      if (res.error) {
-        setStatus('Kunne ikke lagre disc: ' + res.error.message, 'err');
-        return;
-      }
-
-      clearForm();
-
-return incrementPopularForDisc(res.data)
-  .then(loadTop3)
-  .then(loadDefaultBag)
-  .then(function () {
-    setStatus('Disc lagret i Min bag.', 'ok');
-  });
-    });
-}
-           
-        function deleteDisc(discId) {
-  if (!discId) {
-    setStatus('Mangler disc-ID.', 'err');
-    return;
-  }
-
-  if (!confirm('Vil du slette denne disken fra Min bag?')) {
-    return;
-  }
-
-  setStatus('Sletter disc…');
-
-  supabaseClient
-    .from('minbag_discs')
-    .delete()
-    .eq('id', discId)
-    .eq('user_id', STATE.user.id)
-    .then(function (res) {
-      if (res.error) {
-        setStatus('Kunne ikke slette disc: ' + res.error.message, 'err');
-        return;
-      }
-
-      loadDefaultBag().then(function () {
-        setStatus('Disc slettet fra Min bag.', 'ok');
-      });
-    });
-}
-
-   function openEditDiscModal(disc) {
-  if (!disc || !disc.id) {
-    setStatus('Mangler disc-data.', 'err');
-    return;
-  }
-
-  var overlay = el('div', '');
-  overlay.style.cssText =
-    'position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:16px;';
-
-  var modal = el('div', '');
-  modal.style.cssText =
-    'width:min(760px,100%);max-height:88vh;overflow:auto;border-radius:24px;background:#0b140e;border:1px solid rgba(255,255,255,.15);box-shadow:0 28px 90px rgba(0,0,0,.55);color:white;padding:16px;';
-
-  var head = el('div', 'gkmb-row');
-  head.style.justifyContent = 'space-between';
-  head.appendChild(el('h2', '', 'Rediger disc'));
-
-  var closeBtn = el('button', 'gkmb-btn secondary', 'Lukk');
-  closeBtn.type = 'button';
-  closeBtn.onclick = function () {
-    document.body.removeChild(overlay);
-  };
-  head.appendChild(closeBtn);
-  modal.appendChild(head);
-
-  var form = el('div', '');
-
-  var name = input('edit-disc-name', '');
-  name.value = safe(disc.name);
-
-  var brand = input('edit-disc-brand', '');
-  brand.value = safe(disc.brand);
-
-  var image = input('edit-disc-image', '');
-  image.value = safe(disc.image_url);
-
-  var productUrl = input('edit-disc-product-url', '');
-  productUrl.value = safe(disc.product_url);
-
-  var type = selectType('edit-disc-type');
-  type.value = disc.disc_type || 'midrange';
-
-  var speed = input('edit-disc-speed', '');
-  speed.value = disc.speed !== null && disc.speed !== undefined ? String(disc.speed) : '';
-
-  var glide = input('edit-disc-glide', '');
-  glide.value = disc.glide !== null && disc.glide !== undefined ? String(disc.glide) : '';
-
-  var turn = input('edit-disc-turn', '');
-  turn.value = disc.turn !== null && disc.turn !== undefined ? String(disc.turn) : '';
-
-  var fade = input('edit-disc-fade', '');
-  fade.value = disc.fade !== null && disc.fade !== undefined ? String(disc.fade) : '';
-
-  var note = textarea('edit-disc-note', '');
-  note.value = safe(disc.note);
-
-  var grid1 = el('div', 'gkmb-grid');
-  grid1.appendChild(field('Navn på disc', name));
-  grid1.appendChild(field('Merke', brand));
-  form.appendChild(grid1);
-
-  var grid2 = el('div', 'gkmb-grid');
-  grid2.appendChild(field('Type', type));
-  grid2.appendChild(field('Bilde-URL', image));
-  form.appendChild(grid2);
-
-  form.appendChild(field('Produktlenke', productUrl));
-
-  var grid3 = el('div', 'gkmb-grid-four');
-  grid3.appendChild(field('Speed', speed));
-  grid3.appendChild(field('Glide', glide));
-  grid3.appendChild(field('Turn', turn));
-  grid3.appendChild(field('Fade', fade));
-  form.appendChild(grid3);
-
-  form.appendChild(field('Kommentar', note));
-
-  var saveBtn = el('button', 'gkmb-btn', 'Lagre endringer');
-  saveBtn.type = 'button';
-  saveBtn.onclick = function () {
-    updateDisc(disc.id, {
-      name: name.value,
-      brand: brand.value,
-      disc_type: type.value,
-      image_url: image.value,
-      product_url: productUrl.value,
-      speed: speed.value,
-      glide: glide.value,
-      turn: turn.value,
-      fade: fade.value,
-      note: note.value
-    }, overlay);
-  };
-
-  form.appendChild(saveBtn);
-  modal.appendChild(form);
-  overlay.appendChild(modal);
-
-  overlay.onclick = function (e) {
-    if (e.target === overlay) {
-      document.body.removeChild(overlay);
-    }
-  };
-
-  document.body.appendChild(overlay);
-}
-
-function updateDisc(discId, values, overlay) {
-  if (!discId) {
-    setStatus('Mangler disc-ID.', 'err');
-    return;
-  }
-
-  var name = safe(values.name).trim();
-
-  if (!name) {
-    setStatus('Navn på disc mangler.', 'err');
-    return;
-  }
-
-  setStatus('Lagrer endringer…');
-
-  var row = {
-    name: name,
-    brand: safe(values.brand).trim() || null,
-    disc_type: safe(values.disc_type).trim() || 'midrange',
-    image_url: safe(values.image_url).trim() || null,
-    product_url: safe(values.product_url).trim() || null,
-    speed: numOrNull(values.speed),
-    glide: numOrNull(values.glide),
-    turn: numOrNull(values.turn),
-    fade: numOrNull(values.fade),
-    note: safe(values.note).trim() || null
-  };
-
-  supabaseClient
-    .from('minbag_discs')
-    .update(row)
-    .eq('id', discId)
-    .eq('user_id', STATE.user.id)
-    .then(function (res) {
-      if (res.error) {
-        setStatus('Kunne ikke lagre endringer: ' + res.error.message, 'err');
-        return;
-      }
-
-      if (overlay && overlay.parentNode) {
-        overlay.parentNode.removeChild(overlay);
-      }
-
-      loadDefaultBag().then(function () {
-        setStatus('Disc oppdatert.', 'ok');
-      });
-    });
-}
-
-  function getVal(id) {
-    var node = document.getElementById(id);
-    return node ? String(node.value || '').trim() : '';
-  }
-
-  function clearForm() {
-  var ids = [
-    'disc-name',
-    'disc-brand',
-    'disc-image',
-    'disc-product-url',
-    'disc-speed',
-    'disc-glide',
-    'disc-turn',
-    'disc-fade',
-    'disc-note'
-  ];
-
-  for (var i = 0; i < ids.length; i++) {
-    var node = document.getElementById(ids[i]);
-    if (node) node.value = '';
-  }
-
-  var type = document.getElementById('disc-type');
-  if (type) type.value = 'putter';
-}
   function refreshAuthState() {
-    supabaseClient.auth.getUser().then(function (res) {
-      if (res.error) {
-        STATE.user = null;
-        render();
-        setStatus('Auth-feil: ' + res.error.message, 'err');
-        return;
-      }
+    return supabaseClient.auth.getUser().then(function (res) {
+      if (res.error) throw res.error;
 
       STATE.user = res.data ? res.data.user : null;
 
       if (!STATE.user) {
-        STATE.bag = null;
+        STATE.bags = [];
+        STATE.activeBagId = null;
         STATE.discs = [];
         render();
         return;
       }
 
       render();
+      status('Laster Min Bag…');
 
-      ensureUserAndLoadBag().catch(function (err) {
-        render();
-        setStatus('Kunne ikke laste Min bag: ' + (err.message || String(err)), 'err');
-      });
+      return ensureAndLoad();
+    }).catch(function (err) {
+      resetUserState();
+      render();
+      status('Auth-feil: ' + errorMessage(err), 'err');
     });
   }
 
+  function ensureAndLoad() {
+    return supabaseClient.rpc('minbag_ensure_user')
+      .then(function (res) {
+        if (res.error) throw res.error;
+        return loadBrands();
+      })
+      .then(function () {
+        return loadBags();
+      })
+      .then(function () {
+        return loadActiveBagDiscs();
+      })
+      .then(function () {
+        render();
+        status('Min Bag er lastet.', 'ok');
+      });
+  }
+
+  function loadBrands() {
+    return supabaseClient
+      .from('minbag_brands')
+      .select('id,name,is_active,is_featured,is_custom,sort_order')
+      .eq('is_active', true)
+      .order('is_custom', { ascending: true })
+      .order('is_featured', { ascending: false })
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true })
+      .then(function (res) {
+        if (res.error) throw res.error;
+        STATE.brands = res.data || [];
+      });
+  }
+
+  function loadBags(preferredBagId) {
+    return supabaseClient.rpc('minbag_get_my_bags')
+      .then(function (res) {
+        if (res.error) throw res.error;
+
+        STATE.bags = res.data || [];
+
+        var nextId = null;
+
+        if (preferredBagId) {
+          for (var i = 0; i < STATE.bags.length; i += 1) {
+            if (STATE.bags[i].id === preferredBagId) {
+              nextId = preferredBagId;
+              break;
+            }
+          }
+        }
+
+        if (!nextId && STATE.activeBagId) {
+          for (var j = 0; j < STATE.bags.length; j += 1) {
+            if (STATE.bags[j].id === STATE.activeBagId) {
+              nextId = STATE.activeBagId;
+              break;
+            }
+          }
+        }
+
+        if (!nextId) {
+          for (var k = 0; k < STATE.bags.length; k += 1) {
+            if (STATE.bags[k].is_default) {
+              nextId = STATE.bags[k].id;
+              break;
+            }
+          }
+        }
+
+        if (!nextId && STATE.bags.length) {
+          nextId = STATE.bags[0].id;
+        }
+
+        STATE.activeBagId = nextId;
+      });
+  }
+
+  function loadActiveBagDiscs() {
+    if (!STATE.activeBagId) {
+      STATE.discs = [];
+      return Promise.resolve();
+    }
+
+    return supabaseClient
+      .from('minbag_discs')
+      .select(
+        'id,bag_id,catalog_id,source,name,brand,mold_name,plastic,disc_type,' +
+        'product_url,image_url,speed,glide,turn,fade,weight_grams,color,note,' +
+        'is_favorite,created_at,updated_at,mold_key'
+      )
+      .eq('bag_id', STATE.activeBagId)
+      .order('disc_type', { ascending: true })
+      .order('created_at', { ascending: true })
+      .then(function (res) {
+        if (res.error) throw res.error;
+        STATE.discs = res.data || [];
+      });
+  }
+
+  function selectBag(bagId) {
+    if (!bagId || bagId === STATE.activeBagId) return;
+
+    STATE.activeBagId = bagId;
+    STATE.catalogResults = [];
+    STATE.catalogQuery = '';
+    STATE.catalogType = '';
+
+    render();
+    status('Laster bag…');
+
+    loadActiveBagDiscs()
+      .then(function () {
+        render();
+        status('Bag lastet.', 'ok');
+      })
+      .catch(function (err) {
+        status('Kunne ikke laste bag: ' + errorMessage(err), 'err');
+      });
+  }
+
+  function createBagPrompt() {
+    var name = prompt('Navn på ny bag:', 'Bag 2');
+    if (name === null) return;
+
+    name = trim(name);
+
+    if (!name) {
+      status('Bag-navn kan ikke være tomt.', 'err');
+      return;
+    }
+
+    setLoading(true, 'Oppretter bag…');
+
+    supabaseClient.rpc('minbag_create_bag', {
+      p_name: name
+    }).then(function (res) {
+      if (res.error) throw res.error;
+
+      var newBagId = res.data;
+
+      return loadBags(newBagId).then(function () {
+        return loadActiveBagDiscs();
+      });
+    }).then(function () {
+      setLoading(false);
+      render();
+      status('Ny bag opprettet.', 'ok');
+    }).catch(function (err) {
+      setLoading(false);
+      status('Kunne ikke opprette bag: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function setDefaultBag(bagId) {
+    if (!bagId) return;
+
+    setLoading(true, 'Setter hovedbag…');
+
+    supabaseClient.rpc('minbag_set_default_bag', {
+      p_bag_id: bagId
+    }).then(function (res) {
+      if (res.error) throw res.error;
+
+      return loadBags(bagId).then(function () {
+        return loadActiveBagDiscs();
+      });
+    }).then(function () {
+      setLoading(false);
+      render();
+      status('Hovedbag oppdatert.', 'ok');
+    }).catch(function (err) {
+      setLoading(false);
+      status('Kunne ikke sette hovedbag: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function deleteBag(bag) {
+    if (!bag || !bag.id || bag.is_default) return;
+
+    if (!confirm(
+      'Vil du slette "' + bag.name + '"? Discene i denne baggen slettes også.'
+    )) {
+      return;
+    }
+
+    setLoading(true, 'Sletter bag…');
+
+    supabaseClient.rpc('minbag_delete_bag', {
+      p_bag_id: bag.id
+    }).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.activeBagId = null;
+
+      return loadBags().then(function () {
+        return loadActiveBagDiscs();
+      });
+    }).then(function () {
+      setLoading(false);
+      render();
+      status('Bag slettet.', 'ok');
+    }).catch(function (err) {
+      setLoading(false);
+      status('Kunne ikke slette bag: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function searchCatalog() {
+    if (!STATE.activeBagId) {
+      status('Mangler aktiv bag.', 'err');
+      return;
+    }
+
+    var query = getInputValue('gkmb3-catalog-query');
+    var type = getInputValue('gkmb3-catalog-type');
+
+    STATE.catalogQuery = query;
+    STATE.catalogType = type;
+
+    setLoading(true, 'Søker i GolfKongen-katalogen…');
+
+    supabaseClient.rpc('minbag_search_catalog', {
+      p_query: query || null,
+      p_disc_type: type || null,
+      p_limit: CONFIG.CATALOG_LIMIT
+    }).then(function (res) {
+      setLoading(false);
+
+      if (res.error) {
+        status('Katalogsøk feilet: ' + errorMessage(res.error), 'err');
+        return;
+      }
+
+      STATE.catalogResults = res.data || [];
+      render();
+
+      if (STATE.catalogResults.length) {
+        status('Fant ' + STATE.catalogResults.length + ' katalogtreff.', 'ok');
+      } else {
+        status('Fant ingen katalogtreff.', '');
+      }
+    }).catch(function (err) {
+      setLoading(false);
+      status('Katalogsøk feilet: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function addCatalogDisc(product) {
+    if (!STATE.activeBagId || !product || !product.id) {
+      status('Mangler aktiv bag eller katalog-ID.', 'err');
+      return;
+    }
+
+    setLoading(true, 'Legger disc i bag…');
+
+    supabaseClient.rpc('minbag_add_catalog_disc', {
+      p_bag_id: STATE.activeBagId,
+      p_catalog_id: product.id,
+      p_weight_grams: null,
+      p_color: null,
+      p_note: null
+    }).then(function (res) {
+      if (res.error) throw res.error;
+
+      return Promise.all([
+        loadBags(STATE.activeBagId),
+        loadActiveBagDiscs()
+      ]);
+    }).then(function () {
+      setLoading(false);
+      render();
+      status('Disc lagt til fra GolfKongen.', 'ok');
+    }).catch(function (err) {
+      setLoading(false);
+      status('Kunne ikke legge til disc: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function addManualDisc() {
+    if (!STATE.activeBagId) {
+      status('Mangler aktiv bag.', 'err');
+      return;
+    }
+
+    var brandNode = document.getElementById('gkmb3-manual-brand');
+    var selected = brandNode && brandNode.options.length
+      ? brandNode.options[brandNode.selectedIndex]
+      : null;
+
+    var brandId = selected ? Number(selected.value) : null;
+    var isCustom = !!(selected && selected.dataset.custom === '1');
+
+    var name = getInputValue('gkmb3-manual-name');
+    var mold = getInputValue('gkmb3-manual-mold');
+    var customBrand = getInputValue('gkmb3-manual-custom-brand');
+    var plastic = getInputValue('gkmb3-manual-plastic');
+    var type = getInputValue('gkmb3-manual-type');
+
+    if (!name) {
+      status('Discnavn er obligatorisk.', 'err');
+      return;
+    }
+
+    if (!mold) {
+      status('Mold / modell er obligatorisk.', 'err');
+      return;
+    }
+
+    if (!brandId) {
+      status('Velg merke.', 'err');
+      return;
+    }
+
+    if (isCustom && !customBrand) {
+      status('Skriv merkenavn når du velger Annet merke.', 'err');
+      return;
+    }
+
+    if (!type) {
+      status('Velg disc-type.', 'err');
+      return;
+    }
+
+    var duplicate = findManualDuplicate(mold, brandId, customBrand);
+
+    if (duplicate) {
+      var proceed = confirm(
+        'Du har allerede en ' +
+        (duplicate.brand ? duplicate.brand + ' ' : '') +
+        (duplicate.mold_name || duplicate.name) +
+        ' i denne baggen.\n\nVil du legge til enda ett eksemplar?'
+      );
+
+      if (!proceed) return;
+    }
+
+    setLoading(true, 'Lagrer egen disc…');
+
+    supabaseClient.rpc('minbag_add_manual_disc', {
+      p_bag_id: STATE.activeBagId,
+      p_brand_id: brandId,
+      p_name: name,
+      p_mold_name: mold,
+      p_disc_type: type,
+      p_custom_brand: isCustom ? customBrand : null,
+      p_plastic: plastic || null,
+      p_speed: numOrNull(getInputValue('gkmb3-manual-speed')),
+      p_glide: numOrNull(getInputValue('gkmb3-manual-glide')),
+      p_turn: numOrNull(getInputValue('gkmb3-manual-turn')),
+      p_fade: numOrNull(getInputValue('gkmb3-manual-fade')),
+      p_weight_grams: numOrNull(getInputValue('gkmb3-manual-weight')),
+      p_color: getInputValue('gkmb3-manual-color') || null,
+      p_note: getInputValue('gkmb3-manual-note') || null,
+      p_is_favorite: getChecked('gkmb3-manual-favorite')
+    }).then(function (res) {
+      if (res.error) throw res.error;
+
+      return Promise.all([
+        loadBags(STATE.activeBagId),
+        loadActiveBagDiscs()
+      ]);
+    }).then(function () {
+      setLoading(false);
+      render();
+      status('Egen disc lagret.', 'ok');
+    }).catch(function (err) {
+      setLoading(false);
+      status('Kunne ikke lagre disc: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function normalizeLocalKey(value) {
+    return trim(value)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  function findManualDuplicate(moldName, brandId, customBrand) {
+    var selectedBrand = '';
+
+    for (var i = 0; i < STATE.brands.length; i += 1) {
+      if (Number(STATE.brands[i].id) === Number(brandId)) {
+        selectedBrand = STATE.brands[i].is_custom
+          ? customBrand
+          : STATE.brands[i].name;
+        break;
+      }
+    }
+
+    var wanted = normalizeLocalKey(selectedBrand + ' ' + moldName);
+
+    if (!wanted) return null;
+
+    for (var j = 0; j < STATE.discs.length; j += 1) {
+      var disc = STATE.discs[j];
+
+      if (disc.mold_key && normalizeLocalKey(disc.mold_key) === wanted) {
+        return disc;
+      }
+
+      var fallback = normalizeLocalKey(
+        safe(disc.brand) + ' ' + safe(disc.mold_name)
+      );
+
+      if (fallback && fallback === wanted) {
+        return disc;
+      }
+    }
+
+    return null;
+  }
+
   function boot() {
-    root = document.getElementById(ROOT_ID);
+    if (booting || !onMinBagPage()) return;
+    booting = true;
+
+    root = document.getElementById(CONFIG.ROOT_ID);
 
     if (!root) {
-      console.warn('[GK MIN BAG V2] Fant ikke #' + ROOT_ID);
+      booting = false;
+      console.warn('[GK MIN BAG V3] Fant ikke #' + CONFIG.ROOT_ID);
       return;
     }
 
     injectCss();
 
+    clear(root);
+
+    var loading = el('div', 'gkmb3-status', 'Laster Min Bag V3…');
+    loading.id = 'gkmb3-status';
+    root.appendChild(loading);
+
     loadSupabaseSdk()
       .then(function () {
         createClient();
 
-        supabaseClient.auth.onAuthStateChange(function () {
-          refreshAuthState();
+        if (authSubscription && authSubscription.unsubscribe) {
+          try { authSubscription.unsubscribe(); } catch (_) {}
+        }
+
+        var authResult = supabaseClient.auth.onAuthStateChange(function () {
+          setTimeout(function () {
+            refreshAuthState();
+          }, 0);
         });
 
-        refreshAuthState();
+        authSubscription =
+          authResult &&
+          authResult.data &&
+          authResult.data.subscription
+            ? authResult.data.subscription
+            : null;
+
+        return refreshAuthState();
       })
       .catch(function (err) {
         clear(root);
-        root.appendChild(el('div', 'gkmb-status err', err.message || String(err)));
+        var box = el(
+          'div',
+          'gkmb3-status err',
+          'Kunne ikke starte Min Bag: ' + errorMessage(err)
+        );
+        box.id = 'gkmb3-status';
+        root.appendChild(box);
+      })
+      .finally(function () {
+        booting = false;
       });
   }
 
-  window.GK_MINBAG_V2 = {
+  window.GK_MINBAG_V3 = {
     version: VERSION,
-    state: STATE
+    state: STATE,
+    boot: boot
   };
+
+  window.__MINBAG_BOOT__ = boot;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
   } else {
     boot();
   }
+
+  window.addEventListener('pageshow', function () {
+    if (onMinBagPage()) {
+      setTimeout(boot, 0);
+    }
+  });
 })();
