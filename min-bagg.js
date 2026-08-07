@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-06.1';
+  var VERSION = '2026-08-07.1';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -1266,6 +1266,19 @@
       return;
     }
 
+    var duplicate = findCatalogDuplicate(product);
+
+    if (duplicate) {
+      var proceed = confirm(
+        'Du har allerede en ' +
+        (duplicate.brand ? duplicate.brand + ' ' : '') +
+        (duplicate.mold_name || duplicate.name) +
+        ' i denne baggen.\n\nVil du legge til enda ett eksemplar?'
+      );
+
+      if (!proceed) return;
+    }
+
     setLoading(true, 'Legger disc i bag…');
 
     supabaseClient.rpc('minbag_add_catalog_disc', {
@@ -1393,24 +1406,15 @@
       .replace(/^-+|-+$/g, '');
   }
 
-  function findManualDuplicate(moldName, brandId, customBrand) {
-    var selectedBrand = '';
-
-    for (var i = 0; i < STATE.brands.length; i += 1) {
-      if (Number(STATE.brands[i].id) === Number(brandId)) {
-        selectedBrand = STATE.brands[i].is_custom
-          ? customBrand
-          : STATE.brands[i].name;
-        break;
-      }
-    }
-
-    var wanted = normalizeLocalKey(selectedBrand + ' ' + moldName);
+  function findDuplicateByMold(brandName, moldName) {
+    var wanted = normalizeLocalKey(
+      safe(brandName) + ' ' + safe(moldName)
+    );
 
     if (!wanted) return null;
 
-    for (var j = 0; j < STATE.discs.length; j += 1) {
-      var disc = STATE.discs[j];
+    for (var i = 0; i < STATE.discs.length; i += 1) {
+      var disc = STATE.discs[i];
 
       if (disc.mold_key && normalizeLocalKey(disc.mold_key) === wanted) {
         return disc;
@@ -1426,6 +1430,30 @@
     }
 
     return null;
+  }
+
+  function findCatalogDuplicate(product) {
+    if (!product) return null;
+
+    return findDuplicateByMold(
+      product.brand,
+      product.mold_name || product.product_name
+    );
+  }
+
+  function findManualDuplicate(moldName, brandId, customBrand) {
+    var selectedBrand = '';
+
+    for (var i = 0; i < STATE.brands.length; i += 1) {
+      if (Number(STATE.brands[i].id) === Number(brandId)) {
+        selectedBrand = STATE.brands[i].is_custom
+          ? customBrand
+          : STATE.brands[i].name;
+        break;
+      }
+    }
+
+    return findDuplicateByMold(selectedBrand, moldName);
   }
 
   function boot() {
