@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-07.1';
+  var VERSION = '2026-08-07.2';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -49,6 +49,8 @@
     catalogResults: [],
     catalogQuery: '',
     catalogType: '',
+    top3: [],
+    top3Loaded: false,
     loading: false
   };
 
@@ -224,12 +226,28 @@
       '.gkmb3-login{max-width:620px;display:grid;gap:10px;}' +
       '.gkmb3-note{font-size:11px;color:rgba(255,255,255,.48);line-height:1.4;}' +
 
+      '.gkmb3-top3grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px;}' +
+      '.gkmb3-top3type{padding:12px;border-radius:17px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.14);}' +
+      '.gkmb3-top3type h4{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 9px;font-size:14px;}' +
+      '.gkmb3-top3type h4 span{font-size:10px;color:rgba(255,255,255,.42);font-weight:800;}' +
+      '.gkmb3-top3list{display:grid;gap:7px;}' +
+      '.gkmb3-top3item{display:grid;grid-template-columns:46px minmax(0,1fr);gap:9px;align-items:center;padding:8px;border-radius:13px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035);text-decoration:none;color:inherit;transition:.15s ease;}' +
+      '.gkmb3-top3item:hover{border-color:rgba(34,197,94,.38);background:rgba(34,197,94,.08);transform:translateY(-1px);}' +
+      '.gkmb3-top3img{position:relative;width:46px;height:46px;border-radius:11px;overflow:hidden;background:radial-gradient(circle at 25% 20%,rgba(34,197,94,.28),rgba(255,255,255,.04));display:flex;align-items:center;justify-content:center;color:#bbf7d0;font-size:10px;font-weight:950;}' +
+      '.gkmb3-top3img img{width:100%;height:100%;object-fit:cover;display:block;}' +
+      '.gkmb3-rank{position:absolute;top:2px;left:2px;min-width:20px;height:20px;padding:0 4px;border-radius:999px;background:rgba(0,0,0,.78);border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;color:#dcfce7;font-size:9px;font-weight:1000;}' +
+      '.gkmb3-top3name{font-size:12px;font-weight:950;color:#fff;line-height:1.15;}' +
+      '.gkmb3-top3meta{margin-top:3px;font-size:10px;color:rgba(255,255,255,.50);line-height:1.25;}' +
+      '.gkmb3-top3empty{padding:12px 8px;text-align:center;border-radius:12px;border:1px dashed rgba(255,255,255,.10);color:rgba(255,255,255,.40);font-size:11px;}' +
+
       '@media(min-width:620px){' +
         '.gkmb3-grid2{grid-template-columns:repeat(2,minmax(0,1fr));}' +
         '.gkmb3-grid4{grid-template-columns:repeat(4,minmax(0,1fr));}' +
         '.gkmb3-discgrid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-top3grid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
       '}' +
       '@media(min-width:960px){' +
+        '.gkmb3-top3grid{grid-template-columns:repeat(4,minmax(0,1fr));}' +
         '.gkmb3-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr);align-items:start;}' +
         '.gkmb3-sticky{position:sticky;top:18px;}' +
       '}' +
@@ -316,6 +334,98 @@
     return wrap;
   }
 
+  function top3RowsForType(type) {
+    var rows = [];
+
+    for (var i = 0; i < STATE.top3.length; i += 1) {
+      if (STATE.top3[i].disc_type === type) rows.push(STATE.top3[i]);
+    }
+
+    return rows;
+  }
+
+  function renderTop3() {
+    var card = el('section', 'gkmb3-card');
+    card.appendChild(el('h3', '', 'Topp 3 i Min Bag'));
+    card.appendChild(el(
+      'p',
+      '',
+      'De mest brukte moldene blant Min Bag-brukerne. Hver bruker teller én gang per mold, og bare discer vi kan lenke til i GolfKongen vises.'
+    ));
+
+    var grid = el('div', 'gkmb3-top3grid');
+
+    var types = [
+      ['putter', 'Puttere'],
+      ['midrange', 'Midrange'],
+      ['fairway', 'Fairway'],
+      ['distance', 'Distance']
+    ];
+
+    for (var i = 0; i < types.length; i += 1) {
+      var type = types[i][0];
+      var label = types[i][1];
+      var rows = top3RowsForType(type);
+
+      var box = el('div', 'gkmb3-top3type');
+      var heading = el('h4', '');
+      heading.appendChild(document.createTextNode(label));
+      heading.appendChild(el('span', '', 'TOPP 3'));
+      box.appendChild(heading);
+
+      var list = el('div', 'gkmb3-top3list');
+
+      if (!STATE.top3Loaded) {
+        list.appendChild(el('div', 'gkmb3-top3empty', 'Laster statistikk…'));
+      } else if (!rows.length) {
+        list.appendChild(el('div', 'gkmb3-top3empty', 'Ingen data ennå.'));
+      } else {
+        for (var j = 0; j < rows.length; j += 1) {
+          var row = rows[j];
+
+          var link = el('a', 'gkmb3-top3item');
+          link.href = row.product_url;
+          link.target = '_blank';
+          link.rel = 'noopener';
+
+          var img = el('div', 'gkmb3-top3img');
+
+          if (row.image_url) {
+            var image = document.createElement('img');
+            image.src = row.image_url;
+            image.alt = safe(row.brand) + ' ' + safe(row.name);
+            image.loading = 'lazy';
+            img.appendChild(image);
+          } else {
+            img.appendChild(document.createTextNode('DISC'));
+          }
+
+          img.appendChild(el('span', 'gkmb3-rank', '#' + (j + 1)));
+
+          var body = el('div', '');
+          body.appendChild(el('div', 'gkmb3-top3name', safe(row.name)));
+
+          var count = Number(row.count) || 0;
+          body.appendChild(el(
+            'div',
+            'gkmb3-top3meta',
+            safe(row.brand) + ' · ' + count + (count === 1 ? ' bruker' : ' brukere') + ' · Se i nettbutikken'
+          ));
+
+          link.appendChild(img);
+          link.appendChild(body);
+          list.appendChild(link);
+        }
+      }
+
+      box.appendChild(list);
+      grid.appendChild(box);
+    }
+
+    card.appendChild(grid);
+    return card;
+  }
+
   function render() {
     if (!root) return;
 
@@ -339,6 +449,7 @@
       hero.appendChild(loggedOutStatus);
 
       shell.appendChild(hero);
+      shell.appendChild(renderTop3());
       root.appendChild(shell);
       return;
     }
@@ -373,6 +484,7 @@
     hero.appendChild(heroStatus);
 
     shell.appendChild(hero);
+    shell.appendChild(renderTop3());
 
     var layout = el('div', 'gkmb3-layout');
 
@@ -988,6 +1100,15 @@
     STATE.catalogType = '';
   }
 
+  function loadPublicTop3() {
+    return supabaseClient.rpc('minbag_get_top3')
+      .then(function (res) {
+        if (res.error) throw res.error;
+        STATE.top3 = res.data || [];
+        STATE.top3Loaded = true;
+      });
+  }
+
   function refreshAuthState() {
     return supabaseClient.auth.getUser().then(function (res) {
       if (res.error) throw res.error;
@@ -1292,7 +1413,8 @@
 
       return Promise.all([
         loadBags(STATE.activeBagId),
-        loadActiveBagDiscs()
+        loadActiveBagDiscs(),
+        loadPublicTop3()
       ]);
     }).then(function () {
       setLoading(false);
@@ -1385,7 +1507,8 @@
 
       return Promise.all([
         loadBags(STATE.activeBagId),
-        loadActiveBagDiscs()
+        loadActiveBagDiscs(),
+        loadPublicTop3()
       ]);
     }).then(function () {
       setLoading(false);
@@ -1497,7 +1620,15 @@
             ? authResult.data.subscription
             : null;
 
-        return refreshAuthState();
+        return loadPublicTop3()
+          .catch(function (err) {
+            STATE.top3 = [];
+            STATE.top3Loaded = true;
+            console.warn('[GK MIN BAG V3] Kunne ikke laste offentlig Top 3', err);
+          })
+          .then(function () {
+            return refreshAuthState();
+          });
       })
       .catch(function (err) {
         clear(root);
