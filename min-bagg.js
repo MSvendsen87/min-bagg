@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-07.4';
+  var VERSION = '2026-08-07.5';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -32,7 +32,12 @@
     SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ3enRybnhoZnZybGNlaWNjdGx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MTgwMjYsImV4cCI6MjA5NTI5NDAyNn0.q4QthdBWEtUi_Fdz_Ge88E_5CpJMtUvjWhMAa0R0zmE',
     SUPABASE_SDK: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
     MAGIC_LINK_REDIRECT: 'https://golfkongen.no/sider/min-bag',
-    CATALOG_LIMIT: 30
+    CATALOG_LIMIT: 30,
+    BAG_IMAGE_BUCKET: 'minbag-bag-images',
+    BAG_IMAGE_SIGNED_SECONDS: 86400,
+    BAG_IMAGE_MAX_SOURCE_BYTES: 12 * 1024 * 1024,
+    BAG_IMAGE_MAX_EDGE: 1200,
+    BAG_IMAGE_WEBP_QUALITY: 0.82
   };
 
   var root = null;
@@ -51,6 +56,8 @@
     catalogType: '',
     top3: [],
     top3Loaded: false,
+    bagImageUrls: {},
+    bagImageBusy: false,
     loading: false
   };
 
@@ -239,6 +246,15 @@
       '.gkmb3-top3name{font-size:12px;font-weight:950;color:#fff;line-height:1.15;}' +
       '.gkmb3-top3meta{margin-top:3px;font-size:10px;color:rgba(255,255,255,.50);line-height:1.25;}' +
       '.gkmb3-top3empty{padding:12px 8px;text-align:center;border-radius:12px;border:1px dashed rgba(255,255,255,.10);color:rgba(255,255,255,.40);font-size:11px;}' +
+
+      '.gkmb3-bagphoto{display:grid;grid-template-columns:82px minmax(0,1fr);gap:12px;align-items:center;margin:14px 0 4px;padding:12px;border-radius:17px;border:1px solid rgba(34,197,94,.18);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(255,255,255,.025));}' +
+      '.gkmb3-bagphoto-img{width:82px;height:82px;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.13);background:radial-gradient(circle at 25% 20%,rgba(34,197,94,.25),rgba(0,0,0,.25));display:flex;align-items:center;justify-content:center;font-size:34px;}' +
+      '.gkmb3-bagphoto-img img{width:100%;height:100%;object-fit:cover;display:block;}' +
+      '.gkmb3-bagphoto-info{min-width:0;}' +
+      '.gkmb3-bagphoto-name{font-size:14px;font-weight:950;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+      '.gkmb3-bagphoto-help{margin-top:4px;font-size:10px;line-height:1.35;color:rgba(255,255,255,.52);}' +
+      '.gkmb3-bagphoto-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px;}' +
+      '.gkmb3-bagphoto-actions .gkmb3-btn{min-height:38px;padding:8px 11px;font-size:11px;}' +
 
       '@media(min-width:620px){' +
         '.gkmb3-grid2{grid-template-columns:repeat(2,minmax(0,1fr));}' +
@@ -538,6 +554,75 @@
     return wrap;
   }
 
+  function renderBagPhotoManager(bag) {
+    var wrap = el('div', 'gkmb3-bagphoto');
+
+    var visual = el('div', 'gkmb3-bagphoto-img');
+    var signedUrl = STATE.bagImageUrls[bag.id] || '';
+
+    if (signedUrl) {
+      var img = document.createElement('img');
+      img.src = signedUrl;
+      img.alt = 'Bilde av ' + safe(bag.name);
+      img.loading = 'lazy';
+      visual.appendChild(img);
+    } else {
+      visual.appendChild(document.createTextNode('🎒'));
+    }
+
+    var info = el('div', 'gkmb3-bagphoto-info');
+    info.appendChild(el('div', 'gkmb3-bagphoto-name', safe(bag.name)));
+    info.appendChild(el(
+      'div',
+      'gkmb3-bagphoto-help',
+      'Gjør bagen personlig med et bilde. På mobil kan du velge fra bilder eller ta et nytt bilde.'
+    ));
+
+    var actions = el('div', 'gkmb3-bagphoto-actions');
+
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png,image/webp';
+    input.style.display = 'none';
+
+    input.onchange = function () {
+      var file = input.files && input.files[0] ? input.files[0] : null;
+      if (!file) return;
+      uploadBagImage(bag, file);
+      input.value = '';
+    };
+
+    var choose = el(
+      'button',
+      'gkmb3-btn secondary',
+      signedUrl ? '📷 Bytt bilde' : '📷 Legg til bilde'
+    );
+    choose.type = 'button';
+    choose.disabled = !!STATE.bagImageBusy;
+    choose.onclick = function () {
+      if (!STATE.bagImageBusy) input.click();
+    };
+
+    actions.appendChild(choose);
+    actions.appendChild(input);
+
+    if (bag.image_url) {
+      var remove = el('button', 'gkmb3-btn secondary', 'Fjern bilde');
+      remove.type = 'button';
+      remove.disabled = !!STATE.bagImageBusy;
+      remove.onclick = function () {
+        removeBagImage(bag);
+      };
+      actions.appendChild(remove);
+    }
+
+    info.appendChild(actions);
+    wrap.appendChild(visual);
+    wrap.appendChild(info);
+
+    return wrap;
+  }
+
   function renderBagManager() {
     var card = el('section', 'gkmb3-card');
     card.appendChild(el('h3', '', 'Dine bager'));
@@ -568,14 +653,18 @@
 
     card.appendChild(bagsRow);
 
+    var current = activeBag();
+
+    if (current) {
+      card.appendChild(renderBagPhotoManager(current));
+    }
+
     var toolbar = el('div', 'gkmb3-toolbar');
 
     var newBag = el('button', 'gkmb3-btn secondary', '+ Ny bag');
     newBag.type = 'button';
     newBag.onclick = createBagPrompt;
     toolbar.appendChild(newBag);
-
-    var current = activeBag();
 
     if (current && !current.is_default) {
       var defaultBtn = el('button', 'gkmb3-btn secondary', 'Sett som hovedbag');
@@ -1106,6 +1195,8 @@
     STATE.catalogResults = [];
     STATE.catalogQuery = '';
     STATE.catalogType = '';
+    STATE.bagImageUrls = {};
+    STATE.bagImageBusy = false;
   }
 
   function loadPublicTop3() {
@@ -1183,6 +1274,261 @@
       });
   }
 
+  function loadBagImages() {
+    STATE.bagImageUrls = {};
+
+    if (!STATE.user || !STATE.bags.length) {
+      return Promise.resolve();
+    }
+
+    return supabaseClient.rpc('minbag_get_my_bag_images')
+      .then(function (res) {
+        if (res.error) throw res.error;
+
+        var rows = res.data || [];
+        var byId = {};
+
+        for (var i = 0; i < rows.length; i += 1) {
+          byId[rows[i].bag_id] = rows[i].image_path || null;
+        }
+
+        var signing = [];
+
+        for (var j = 0; j < STATE.bags.length; j += 1) {
+          (function (bag) {
+            bag.image_url = byId[bag.id] || null;
+
+            if (!bag.image_url) return;
+
+            signing.push(
+              supabaseClient.storage
+                .from(CONFIG.BAG_IMAGE_BUCKET)
+                .createSignedUrl(
+                  bag.image_url,
+                  CONFIG.BAG_IMAGE_SIGNED_SECONDS
+                )
+                .then(function (signed) {
+                  if (signed.error) throw signed.error;
+
+                  if (
+                    signed.data &&
+                    signed.data.signedUrl
+                  ) {
+                    STATE.bagImageUrls[bag.id] = signed.data.signedUrl;
+                  }
+                })
+                .catch(function (err) {
+                  console.warn(
+                    '[GK MIN BAG V3] Kunne ikke lage signert bag-bilde',
+                    err
+                  );
+                })
+            );
+          })(STATE.bags[j]);
+        }
+
+        return Promise.all(signing);
+      });
+  }
+
+  function canvasBlob(canvas, type, quality) {
+    return new Promise(function (resolve, reject) {
+      canvas.toBlob(function (blob) {
+        if (!blob) {
+          reject(new Error('Kunne ikke behandle bildet.'));
+          return;
+        }
+
+        resolve(blob);
+      }, type, quality);
+    });
+  }
+
+  function prepareBagImage(file) {
+    return new Promise(function (resolve, reject) {
+      if (!file) {
+        reject(new Error('Fant ikke bildefilen.'));
+        return;
+      }
+
+      if (!/^image\/(jpeg|png|webp)$/i.test(file.type || '')) {
+        reject(new Error('Bruk JPG, PNG eller WEBP.'));
+        return;
+      }
+
+      if (file.size > CONFIG.BAG_IMAGE_MAX_SOURCE_BYTES) {
+        reject(new Error('Bildet er for stort. Maks 12 MB før komprimering.'));
+        return;
+      }
+
+      var objectUrl = URL.createObjectURL(file);
+      var image = new Image();
+
+      image.onload = function () {
+        try {
+          var width = image.naturalWidth || image.width;
+          var height = image.naturalHeight || image.height;
+
+          if (!width || !height) {
+            URL.revokeObjectURL(objectUrl);
+            reject(new Error('Kunne ikke lese bildestørrelsen.'));
+            return;
+          }
+
+          var maxEdge = CONFIG.BAG_IMAGE_MAX_EDGE;
+          var scale = Math.min(1, maxEdge / Math.max(width, height));
+          var targetWidth = Math.max(1, Math.round(width * scale));
+          var targetHeight = Math.max(1, Math.round(height * scale));
+
+          var canvas = document.createElement('canvas');
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+
+          var ctx = canvas.getContext('2d', { alpha: false });
+          ctx.fillStyle = '#111111';
+          ctx.fillRect(0, 0, targetWidth, targetHeight);
+          ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+          URL.revokeObjectURL(objectUrl);
+
+          canvasBlob(
+            canvas,
+            'image/webp',
+            CONFIG.BAG_IMAGE_WEBP_QUALITY
+          ).then(resolve).catch(reject);
+        } catch (err) {
+          URL.revokeObjectURL(objectUrl);
+          reject(err);
+        }
+      };
+
+      image.onerror = function () {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Kunne ikke åpne bildet.'));
+      };
+
+      image.src = objectUrl;
+    });
+  }
+
+  function uploadBagImage(bag, file) {
+    if (!STATE.user || !bag || !bag.id || STATE.bagImageBusy) return;
+
+    STATE.bagImageBusy = true;
+    render();
+    status('Behandler bag-bildet…');
+
+    var oldPath = bag.image_url || null;
+    var newPath = null;
+
+    prepareBagImage(file)
+      .then(function (blob) {
+        newPath =
+          STATE.user.id +
+          '/' +
+          bag.id +
+          '/' +
+          Date.now() +
+          '-' +
+          Math.random().toString(36).slice(2, 9) +
+          '.webp';
+
+        status('Laster opp bag-bildet…');
+
+        return supabaseClient.storage
+          .from(CONFIG.BAG_IMAGE_BUCKET)
+          .upload(newPath, blob, {
+            contentType: 'image/webp',
+            cacheControl: '3600',
+            upsert: false
+          });
+      })
+      .then(function (uploadRes) {
+        if (uploadRes.error) throw uploadRes.error;
+
+        return supabaseClient.rpc('minbag_set_bag_image', {
+          p_bag_id: bag.id,
+          p_image_path: newPath
+        });
+      })
+      .then(function (saveRes) {
+        if (saveRes.error) throw saveRes.error;
+
+        if (oldPath && oldPath !== newPath) {
+          return supabaseClient.storage
+            .from(CONFIG.BAG_IMAGE_BUCKET)
+            .remove([oldPath])
+            .catch(function () {});
+        }
+      })
+      .then(function () {
+        return loadBags(bag.id);
+      })
+      .then(function () {
+        STATE.bagImageBusy = false;
+        render();
+        status('Bag-bildet er lagret.', 'ok');
+      })
+      .catch(function (err) {
+        var cleanup = Promise.resolve();
+
+        if (newPath) {
+          cleanup = supabaseClient.storage
+            .from(CONFIG.BAG_IMAGE_BUCKET)
+            .remove([newPath])
+            .catch(function () {});
+        }
+
+        cleanup.finally(function () {
+          STATE.bagImageBusy = false;
+          render();
+          status('Kunne ikke lagre bag-bildet: ' + errorMessage(err), 'err');
+        });
+      });
+  }
+
+  function removeBagImage(bag) {
+    if (!STATE.user || !bag || !bag.id || !bag.image_url || STATE.bagImageBusy) {
+      return;
+    }
+
+    if (!confirm('Vil du fjerne bildet fra "' + bag.name + '"?')) {
+      return;
+    }
+
+    STATE.bagImageBusy = true;
+    render();
+    status('Fjerner bag-bildet…');
+
+    var oldPath = bag.image_url;
+
+    supabaseClient.rpc('minbag_set_bag_image', {
+      p_bag_id: bag.id,
+      p_image_path: null
+    })
+      .then(function (res) {
+        if (res.error) throw res.error;
+
+        return supabaseClient.storage
+          .from(CONFIG.BAG_IMAGE_BUCKET)
+          .remove([oldPath])
+          .catch(function () {});
+      })
+      .then(function () {
+        return loadBags(bag.id);
+      })
+      .then(function () {
+        STATE.bagImageBusy = false;
+        render();
+        status('Bag-bildet er fjernet.', 'ok');
+      })
+      .catch(function (err) {
+        STATE.bagImageBusy = false;
+        render();
+        status('Kunne ikke fjerne bag-bildet: ' + errorMessage(err), 'err');
+      });
+  }
+
   function loadBags(preferredBagId) {
     return supabaseClient.rpc('minbag_get_my_bags')
       .then(function (res) {
@@ -1224,6 +1570,8 @@
         }
 
         STATE.activeBagId = nextId;
+
+        return loadBagImages();
       });
   }
 
