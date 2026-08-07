@@ -23,7 +23,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-07.2';
+  var VERSION = '2026-08-07.4';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -406,10 +406,18 @@
           body.appendChild(el('div', 'gkmb3-top3name', safe(row.name)));
 
           var count = Number(row.count) || 0;
+          var metaText = safe(row.brand);
+
+          if (STATE.user) {
+            metaText += ' · ' + count + (count === 1 ? ' bruker' : ' brukere');
+          }
+
+          metaText += ' · Se i nettbutikken';
+
           body.appendChild(el(
             'div',
             'gkmb3-top3meta',
-            safe(row.brand) + ' · ' + count + (count === 1 ? ' bruker' : ' brukere') + ' · Se i nettbutikken'
+            metaText
           ));
 
           link.appendChild(img);
@@ -1110,10 +1118,18 @@
   }
 
   function refreshAuthState() {
-    return supabaseClient.auth.getUser().then(function (res) {
+    return supabaseClient.auth.getSession().then(function (res) {
       if (res.error) throw res.error;
 
-      STATE.user = res.data ? res.data.user : null;
+      var session =
+        res.data && res.data.session
+          ? res.data.session
+          : null;
+
+      STATE.user =
+        session && session.user
+          ? session.user
+          : null;
 
       if (!STATE.user) {
         STATE.bags = [];
