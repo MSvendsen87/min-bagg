@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.16';
+  var VERSION = '2026-08-08.17';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -111,6 +111,14 @@
     throwHasSearched: false,
     throwBusy: false,
     throwError: '',
+    roundBagCount: '8',
+    roundBagCourseStyle: '',
+    roundBagWindStyle: '',
+    roundBagFocus: '',
+    roundBagResults: [],
+    roundBagHasBuilt: false,
+    roundBagBusy: false,
+    roundBagError: '',
     recoBusy: false,
     loading: false
   };
@@ -354,6 +362,25 @@
       '.gkmb3-throwreason{margin-top:6px;color:rgba(255,255,255,.66);font-size:9px;line-height:1.45;}' +
       '@media(max-width:850px){.gkmb3-throwgrid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
       '@media(max-width:520px){.gkmb3-throwgrid{grid-template-columns:1fr;}.gkmb3-throwresult{grid-template-columns:48px minmax(0,1fr);}.gkmb3-throwimg{width:48px;height:48px;}}' +
+      '.gkmb3-roundbag{margin-top:12px;padding:12px;border-radius:16px;border:1px solid rgba(245,158,11,.26);background:linear-gradient(135deg,rgba(120,53,15,.12),rgba(2,10,6,.34));}' +
+      '.gkmb3-roundbag-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:9px;}' +
+      '.gkmb3-roundbag-head h4{margin:0;color:#fff;font-size:13px;}' +
+      '.gkmb3-roundbag-head p{margin:4px 0 0;color:rgba(255,255,255,.58);font-size:9px;line-height:1.45;max-width:680px;}' +
+      '.gkmb3-roundbag-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;}' +
+      '.gkmb3-roundbag-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;}' +
+      '.gkmb3-roundbag-summary{margin-top:10px;padding:8px 10px;border-radius:11px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.18);color:#fde68a;font-size:9px;font-weight:850;line-height:1.45;}' +
+      '.gkmb3-roundbag-list{display:grid;gap:8px;margin-top:10px;}' +
+      '.gkmb3-roundbag-item{display:grid;grid-template-columns:56px minmax(0,1fr);gap:10px;padding:10px;border-radius:13px;border:1px solid rgba(245,158,11,.17);background:rgba(18,10,2,.31);}' +
+      '.gkmb3-roundbag-img{width:56px;height:56px;border-radius:11px;overflow:hidden;display:grid;place-items:center;background:#0b0b08;border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.35);font-size:9px;font-weight:900;}' +
+      '.gkmb3-roundbag-img img{width:100%;height:100%;object-fit:contain;display:block;}' +
+      '.gkmb3-roundbag-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}' +
+      '.gkmb3-roundbag-name{font-size:12px;font-weight:950;color:#fff;line-height:1.25;}' +
+      '.gkmb3-roundbag-role{flex:0 0 auto;padding:4px 7px;border-radius:999px;background:#b45309;color:#fff;font-size:9px;font-weight:950;white-space:nowrap;}' +
+      '.gkmb3-roundbag-meta{margin-top:3px;color:rgba(255,255,255,.55);font-size:9px;font-weight:750;}' +
+      '.gkmb3-roundbag-reason{margin-top:6px;color:rgba(255,255,255,.66);font-size:9px;line-height:1.45;}' +
+      '.gkmb3-roundbag-score{margin-top:5px;color:#fde68a;font-size:9px;font-weight:900;}' +
+      '@media(max-width:850px){.gkmb3-roundbag-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
+      '@media(max-width:520px){.gkmb3-roundbag-grid{grid-template-columns:1fr;}.gkmb3-roundbag-item{grid-template-columns:48px minmax(0,1fr);}.gkmb3-roundbag-img{width:48px;height:48px;}}' +
       '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
       '.gkmb3-bagform{margin-top:11px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.16));}' +
       '.gkmb3-bagform-title{font-size:13px;font-weight:950;color:#fff;margin-bottom:3px;}' +
@@ -2239,6 +2266,269 @@
     return wrap;
   }
 
+  function ensureRoundBagDefaults() {
+    if (!STATE.roundBagCourseStyle) {
+      STATE.roundBagCourseStyle =
+        STATE.recoProfile &&
+        STATE.recoProfile.course_style
+          ? STATE.recoProfile.course_style
+          : 'mixed';
+    }
+
+    if (!STATE.roundBagWindStyle) {
+      STATE.roundBagWindStyle =
+        STATE.recoProfile &&
+        STATE.recoProfile.wind_style
+          ? STATE.recoProfile.wind_style
+          : 'mixed';
+    }
+
+    if (!STATE.roundBagFocus) {
+      if (STATE.roundBagCourseStyle === 'technical') {
+        STATE.roundBagFocus = 'control';
+      } else if (STATE.roundBagCourseStyle === 'open') {
+        STATE.roundBagFocus = 'distance';
+      } else {
+        STATE.roundBagFocus = 'balanced';
+      }
+    }
+  }
+
+  function renderRoundBagItem(row) {
+    var item = el('article', 'gkmb3-roundbag-item');
+
+    var image = el('div', 'gkmb3-roundbag-img');
+
+    if (row.image_url) {
+      var img = document.createElement('img');
+      img.src = row.image_url;
+      img.alt = row.name || 'Rundebag-disc';
+      img.loading = 'lazy';
+      image.appendChild(img);
+    } else {
+      image.textContent = 'DISC';
+    }
+
+    item.appendChild(image);
+
+    var body = el('div', '');
+    var top = el('div', 'gkmb3-roundbag-top');
+
+    top.appendChild(el(
+      'div',
+      'gkmb3-roundbag-name',
+      '#' + safe(row.slot_rank) + ' ' + safe(row.name)
+    ));
+
+    top.appendChild(el(
+      'div',
+      'gkmb3-roundbag-role',
+      '🎯 ' + safe(row.role_label || 'Allround')
+    ));
+
+    body.appendChild(top);
+
+    var meta = [];
+    if (row.brand) meta.push(row.brand);
+    if (row.plastic) meta.push(row.plastic);
+    if (row.weight_grams !== null && row.weight_grams !== undefined) {
+      meta.push(safe(row.weight_grams) + ' g');
+    }
+    if (row.color) meta.push(row.color);
+    if (row.is_favorite) meta.push('★ Favoritt');
+
+    if (meta.length) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-roundbag-meta',
+        meta.join(' · ')
+      ));
+    }
+
+    body.appendChild(renderFlight(
+      row.speed,
+      row.glide,
+      row.turn,
+      row.fade
+    ));
+
+    if (row.selection_reason) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-roundbag-reason',
+        safe(row.selection_reason)
+      ));
+    }
+
+    if (row.selection_score !== null &&
+        row.selection_score !== undefined) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-roundbag-score',
+        'Rolle-match: ' +
+        Math.round(Number(row.selection_score) || 0) +
+        ' %'
+      ));
+    }
+
+    if (row.product_url) {
+      var actions = el('div', 'gkmb3-toolbar');
+      actions.style.marginTop = '7px';
+
+      var open = el(
+        'a',
+        'gkmb3-btn secondary',
+        'Se hos GolfKongen'
+      );
+      open.href = row.product_url;
+      open.target = '_blank';
+      open.rel = 'noopener';
+
+      actions.appendChild(open);
+      body.appendChild(actions);
+    }
+
+    item.appendChild(body);
+    return item;
+  }
+
+  function renderRoundBagBuilder() {
+    ensureRoundBagDefaults();
+
+    var wrap = el('section', 'gkmb3-roundbag');
+    var head = el('div', 'gkmb3-roundbag-head');
+    var copy = el('div', '');
+
+    copy.appendChild(el('h4', '', '🧳 Bygg rundebag'));
+    copy.appendChild(el(
+      'p',
+      '',
+      'Velg hva slags runde du skal spille. Min Bag plukker et balansert utvalg av discene du faktisk eier og gir hver disc én tydelig jobb. Senere kan en valgt bane fylle inn baneprofilen automatisk.'
+    ));
+
+    head.appendChild(copy);
+    wrap.appendChild(head);
+
+    var grid = el('div', 'gkmb3-roundbag-grid');
+
+    grid.appendChild(field(
+      'Antall discer',
+      createRecoSelect(
+        'gkmb3-roundbag-count',
+        [
+          ['5', '5 discer · minimalistisk'],
+          ['8', '8 discer · kompakt'],
+          ['12', '12 discer · full rundebag']
+        ],
+        STATE.roundBagCount
+      )
+    ));
+
+    grid.appendChild(field(
+      'Banetype',
+      createRecoSelect(
+        'gkmb3-roundbag-course',
+        [
+          ['technical', 'Teknisk / skog'],
+          ['mixed', 'Blandet'],
+          ['open', 'Åpen / lengde']
+        ],
+        STATE.roundBagCourseStyle
+      )
+    ));
+
+    grid.appendChild(field(
+      'Vind',
+      createRecoSelect(
+        'gkmb3-roundbag-wind',
+        [
+          ['normal', 'Lite / normal vind'],
+          ['mixed', 'Variert vind'],
+          ['windy', 'Mye vind']
+        ],
+        STATE.roundBagWindStyle
+      )
+    ));
+
+    grid.appendChild(field(
+      'Fokus',
+      createRecoSelect(
+        'gkmb3-roundbag-focus',
+        [
+          ['control', 'Kontroll'],
+          ['balanced', 'Balansert'],
+          ['distance', 'Lengde']
+        ],
+        STATE.roundBagFocus
+      )
+    ));
+
+    wrap.appendChild(grid);
+
+    var actions = el('div', 'gkmb3-roundbag-actions');
+
+    var build = el(
+      'button',
+      'gkmb3-btn',
+      STATE.roundBagBusy
+        ? 'Bygger rundebag…'
+        : '🧳 Bygg rundebag'
+    );
+    build.type = 'button';
+    build.disabled = !!STATE.roundBagBusy;
+    build.onclick = buildRoundBag;
+
+    actions.appendChild(build);
+    wrap.appendChild(actions);
+
+    if (STATE.roundBagHasBuilt) {
+      if (STATE.roundBagBusy) {
+        wrap.appendChild(el(
+          'div',
+          'gkmb3-note',
+          'Fordeler roller og velger de beste kombinasjonene…'
+        ));
+      } else if (STATE.roundBagResults.length) {
+        var requested = Number(STATE.roundBagCount) || 8;
+        var actual = STATE.roundBagResults.length;
+
+        wrap.appendChild(el(
+          'div',
+          'gkmb3-roundbag-summary',
+          actual === requested
+            ? 'Rundebagen er klar: ' +
+              actual +
+              ' ulike molds med hver sin hovedrolle.'
+            : 'Rundebagen fant ' +
+              actual +
+              ' av ønsket ' +
+              requested +
+              ' discer. Det betyr at denne bagen ikke har nok ulike molds med komplette flight-tall til å fylle alle plassene uten unødvendige dubletter.'
+        ));
+
+        var list = el('div', 'gkmb3-roundbag-list');
+
+        for (var i = 0; i < STATE.roundBagResults.length; i += 1) {
+          list.appendChild(
+            renderRoundBagItem(STATE.roundBagResults[i])
+          );
+        }
+
+        wrap.appendChild(list);
+      } else {
+        wrap.appendChild(el(
+          'div',
+          'gkmb3-note',
+          STATE.roundBagError
+            ? 'Kunne ikke bygge rundebagen akkurat nå.'
+            : 'Fant ingen discer med komplette flight-tall i denne bagen.'
+        ));
+      }
+    }
+
+    return wrap;
+  }
+
   function renderRecommendationPanel() {
     var card = el('section', 'gkmb3-card gkmb3-reco');
     var head = el('div', 'gkmb3-recohead');
@@ -2305,6 +2595,7 @@
     if (STATE.discs.length) {
       card.appendChild(renderBagScore());
       card.appendChild(renderThrowAdvisor());
+      card.appendChild(renderRoundBagBuilder());
     }
 
     if (!STATE.discs.length) {
@@ -3228,6 +3519,14 @@
     STATE.throwHasSearched = false;
     STATE.throwBusy = false;
     STATE.throwError = '';
+    STATE.roundBagCount = '8';
+    STATE.roundBagCourseStyle = '';
+    STATE.roundBagWindStyle = '';
+    STATE.roundBagFocus = '';
+    STATE.roundBagResults = [];
+    STATE.roundBagHasBuilt = false;
+    STATE.roundBagBusy = false;
+    STATE.roundBagError = '';
     STATE.recoBusy = false;
   }
 
@@ -3341,6 +3640,78 @@
           STATE.recoProfileOpen = true;
         }
       });
+  }
+
+  function buildRoundBag() {
+    if (!STATE.user || !STATE.activeBagId || STATE.roundBagBusy) {
+      return;
+    }
+
+    var countValue = getInputValue('gkmb3-roundbag-count');
+    var courseStyle = getInputValue('gkmb3-roundbag-course');
+    var windStyle = getInputValue('gkmb3-roundbag-wind');
+    var focus = getInputValue('gkmb3-roundbag-focus');
+
+    STATE.roundBagCount =
+      countValue || STATE.roundBagCount || '8';
+
+    STATE.roundBagCourseStyle =
+      courseStyle || STATE.roundBagCourseStyle || 'mixed';
+
+    STATE.roundBagWindStyle =
+      windStyle || STATE.roundBagWindStyle || 'mixed';
+
+    STATE.roundBagFocus =
+      focus || STATE.roundBagFocus || 'balanced';
+
+    STATE.roundBagBusy = true;
+    STATE.roundBagHasBuilt = true;
+    STATE.roundBagResults = [];
+    STATE.roundBagError = '';
+
+    render();
+    status('Bygger optimal rundebag…');
+
+    supabaseClient.rpc(
+      'minbag_build_round_bag',
+      {
+        p_bag_id: STATE.activeBagId,
+        p_disc_count: Number(STATE.roundBagCount) || 8,
+        p_course_style: STATE.roundBagCourseStyle,
+        p_wind_style: STATE.roundBagWindStyle,
+        p_focus: STATE.roundBagFocus
+      }
+    ).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.roundBagResults = res.data || [];
+      STATE.roundBagBusy = false;
+      render();
+
+      if (STATE.roundBagResults.length) {
+        status(
+          'Rundebag bygget med ' +
+          STATE.roundBagResults.length +
+          ' discer.',
+          'ok'
+        );
+      } else {
+        status(
+          'Fant ingen egnede discer med komplette flight-tall.',
+          ''
+        );
+      }
+    }).catch(function (err) {
+      STATE.roundBagResults = [];
+      STATE.roundBagBusy = false;
+      STATE.roundBagError = errorMessage(err);
+      render();
+
+      status(
+        'Kunne ikke bygge rundebag: ' + errorMessage(err),
+        'err'
+      );
+    });
   }
 
   function findBestThrowDisc() {
@@ -3574,6 +3945,13 @@
     };
 
     STATE.recoBusy = true;
+    STATE.roundBagCourseStyle = '';
+    STATE.roundBagWindStyle = '';
+    STATE.roundBagFocus = '';
+    STATE.roundBagResults = [];
+    STATE.roundBagHasBuilt = false;
+    STATE.roundBagBusy = false;
+    STATE.roundBagError = '';
     render();
     status('Lagrer spillerprofil…');
 
@@ -4101,6 +4479,10 @@
       STATE.throwHasSearched = false;
       STATE.throwBusy = false;
       STATE.throwError = '';
+      STATE.roundBagResults = [];
+      STATE.roundBagHasBuilt = false;
+      STATE.roundBagBusy = false;
+      STATE.roundBagError = '';
       return Promise.resolve();
     }
 
@@ -4121,6 +4503,10 @@
         STATE.throwHasSearched = false;
         STATE.throwBusy = false;
         STATE.throwError = '';
+        STATE.roundBagResults = [];
+        STATE.roundBagHasBuilt = false;
+        STATE.roundBagBusy = false;
+        STATE.roundBagError = '';
         return loadGapAnalysis();
       });
   }
@@ -4153,6 +4539,10 @@
     STATE.throwHasSearched = false;
     STATE.throwBusy = false;
     STATE.throwError = '';
+    STATE.roundBagResults = [];
+    STATE.roundBagHasBuilt = false;
+    STATE.roundBagBusy = false;
+    STATE.roundBagError = '';
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
 
