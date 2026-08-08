@@ -24,7 +24,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-07.6';
+  var VERSION = '2026-08-08.7';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -780,9 +780,7 @@
 
         if (product.stock_quantity !== null && product.stock_quantity !== undefined) {
           var stock = Number(product.stock_quantity);
-          meta.push(stock > 0 ? ('På lager: ' + stock) : 'Utsolgt');
-        } else {
-          meta.push('Lagerstatus ukjent');
+          meta.push(stock > 0 ? 'På lager' : 'Utsolgt');
         }
 
         if (productId === selectedId) meta.push('✓ Valgt');
