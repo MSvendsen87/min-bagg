@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.17';
+  var VERSION = '2026-08-08.18';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -119,6 +119,19 @@
     roundBagHasBuilt: false,
     roundBagBusy: false,
     roundBagError: '',
+    courses: [],
+    coursesLoaded: false,
+    courseQuery: '',
+    courseSearchBusy: false,
+    courseSubmitOpen: false,
+    courseSubmitBusy: false,
+    myCourses: [],
+    myCoursesLoaded: false,
+    courseAdmin: false,
+    courseAdminLoaded: false,
+    pendingCourses: [],
+    pendingCoursesLoaded: false,
+    courseModerationBusy: false,
     recoBusy: false,
     loading: false
   };
@@ -381,6 +394,29 @@
       '.gkmb3-roundbag-score{margin-top:5px;color:#fde68a;font-size:9px;font-weight:900;}' +
       '@media(max-width:850px){.gkmb3-roundbag-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
       '@media(max-width:520px){.gkmb3-roundbag-grid{grid-template-columns:1fr;}.gkmb3-roundbag-item{grid-template-columns:48px minmax(0,1fr);}.gkmb3-roundbag-img{width:48px;height:48px;}}' +
+      '.gkmb3-courses{margin-top:0;}' +
+      '.gkmb3-course-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;margin-top:10px;}' +
+      '.gkmb3-course-list{display:grid;gap:9px;margin-top:11px;}' +
+      '.gkmb3-course{padding:12px;border-radius:15px;border:1px solid rgba(59,130,246,.17);background:rgba(4,12,18,.30);}' +
+      '.gkmb3-course.own{border-color:rgba(245,158,11,.20);background:rgba(40,24,4,.18);}' +
+      '.gkmb3-course.pending{border-color:rgba(168,85,247,.26);background:rgba(52,16,78,.14);}' +
+      '.gkmb3-course-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}' +
+      '.gkmb3-course-name{font-size:13px;font-weight:1000;color:#fff;line-height:1.25;}' +
+      '.gkmb3-course-location{margin-top:3px;color:rgba(255,255,255,.56);font-size:9px;font-weight:760;}' +
+      '.gkmb3-course-status{flex:0 0 auto;padding:4px 7px;border-radius:999px;background:rgba(59,130,246,.18);border:1px solid rgba(59,130,246,.22);color:#bfdbfe;font-size:9px;font-weight:950;white-space:nowrap;}' +
+      '.gkmb3-course-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}' +
+      '.gkmb3-course-badges span{padding:5px 7px;border-radius:999px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.075);color:rgba(255,255,255,.72);font-size:9px;font-weight:850;}' +
+      '.gkmb3-course-desc{margin-top:8px;color:rgba(255,255,255,.64);font-size:9px;line-height:1.48;}' +
+      '.gkmb3-course-record{margin-top:8px;padding:7px 9px;border-radius:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.16);color:#bbf7d0;font-size:9px;font-weight:850;}' +
+      '.gkmb3-course-form{margin-top:10px;padding:12px;border-radius:15px;border:1px solid rgba(245,158,11,.20);background:rgba(40,24,4,.16);}' +
+      '.gkmb3-course-formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;}' +
+      '.gkmb3-course-formgrid .wide{grid-column:1/-1;}' +
+      '.gkmb3-course-form textarea{min-height:92px;resize:vertical;}' +
+      '.gkmb3-course-sectiontitle{margin:14px 0 0;color:#fff;font-size:12px;font-weight:1000;}' +
+      '.gkmb3-adminqueue{margin-top:14px;padding:12px;border-radius:15px;border:1px solid rgba(168,85,247,.25);background:rgba(52,16,78,.13);}' +
+      '.gkmb3-adminqueue h4{margin:0;color:#fff;font-size:12px;}' +
+      '.gkmb3-adminqueue p{margin:4px 0 0;color:rgba(255,255,255,.57);font-size:9px;line-height:1.45;}' +
+      '@media(max-width:650px){.gkmb3-course-search{grid-template-columns:1fr;}.gkmb3-course-formgrid{grid-template-columns:1fr;}.gkmb3-course-formgrid .wide{grid-column:auto;}.gkmb3-course-head{display:block;}.gkmb3-course-status{display:inline-block;margin-top:7px;}}' +
       '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
       '.gkmb3-bagform{margin-top:11px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.16));}' +
       '.gkmb3-bagform-title{font-size:13px;font-weight:950;color:#fff;margin-bottom:3px;}' +
@@ -737,6 +773,7 @@
     left.appendChild(renderBagManager());
     left.appendChild(renderRecommendationPanel());
     left.appendChild(renderBagContents());
+    left.appendChild(renderCoursePanel());
 
     var right = el('div', 'gkmb3-sticky');
     right.appendChild(renderAddPanel());
@@ -746,6 +783,667 @@
     shell.appendChild(layout);
 
     root.appendChild(shell);
+  }
+
+  function courseStyleLabel(value) {
+    return {
+      technical: 'Teknisk / skog',
+      mixed: 'Blandet',
+      open: 'Åpen / lengde'
+    }[value] || safe(value);
+  }
+
+  function courseWindLabel(value) {
+    return {
+      normal: 'Lite / normal vind',
+      mixed: 'Variert vind',
+      windy: 'Mye vind'
+    }[value] || safe(value);
+  }
+
+  function courseFocusLabel(value) {
+    return {
+      control: 'Kontroll',
+      balanced: 'Balansert',
+      distance: 'Lengde'
+    }[value] || safe(value);
+  }
+
+  function courseDifficultyLabel(value) {
+    var n = Number(value) || 0;
+
+    return {
+      1: 'Lett',
+      2: 'Lett–middels',
+      3: 'Middels',
+      4: 'Krevende',
+      5: 'Svært krevende'
+    }[n] || '';
+  }
+
+  function courseStatusLabel(value) {
+    return {
+      private: 'Privat',
+      pending: 'Venter godkjenning',
+      public: 'Offentlig',
+      rejected: 'Avvist'
+    }[value] || safe(value);
+  }
+
+  function courseLocationText(course) {
+    var bits = [];
+    if (course.locality) bits.push(course.locality);
+    if (course.municipality &&
+        bits.indexOf(course.municipality) === -1) {
+      bits.push(course.municipality);
+    }
+    if (course.county &&
+        bits.indexOf(course.county) === -1) {
+      bits.push(course.county);
+    }
+    return bits.join(' · ');
+  }
+
+  function courseTextInput(id, placeholder, type) {
+    var input = el('input', 'gkmb3-input');
+    input.id = id;
+    input.type = type || 'text';
+    input.placeholder = placeholder || '';
+    return input;
+  }
+
+  function renderCourseCard(course, options) {
+    options = options || {};
+
+    var className = 'gkmb3-course';
+    if (options.own) className += ' own';
+    if (course.visibility_status === 'pending' || options.pending) {
+      className += ' pending';
+    }
+
+    var card = el('article', className);
+    var head = el('div', 'gkmb3-course-head');
+    var title = el('div', '');
+
+    title.appendChild(el(
+      'div',
+      'gkmb3-course-name',
+      safe(course.name)
+    ));
+
+    var location = courseLocationText(course);
+    if (location) {
+      title.appendChild(el(
+        'div',
+        'gkmb3-course-location',
+        location
+      ));
+    }
+
+    head.appendChild(title);
+
+    if (course.visibility_status) {
+      head.appendChild(el(
+        'div',
+        'gkmb3-course-status',
+        courseStatusLabel(course.visibility_status)
+      ));
+    } else {
+      head.appendChild(el(
+        'div',
+        'gkmb3-course-status',
+        'Offentlig bane'
+      ));
+    }
+
+    card.appendChild(head);
+
+    var badges = el('div', 'gkmb3-course-badges');
+
+    if (course.holes) {
+      badges.appendChild(el(
+        'span',
+        '',
+        '🥏 ' + safe(course.holes) + ' hull'
+      ));
+    }
+
+    if (course.course_style) {
+      badges.appendChild(el(
+        'span',
+        '',
+        '🌲 ' + courseStyleLabel(course.course_style)
+      ));
+    }
+
+    if (course.difficulty_level) {
+      badges.appendChild(el(
+        'span',
+        '',
+        '📈 ' + courseDifficultyLabel(course.difficulty_level)
+      ));
+    }
+
+    if (course.total_length_m) {
+      badges.appendChild(el(
+        'span',
+        '',
+        '📏 ' + safe(course.total_length_m) + ' m'
+      ));
+    }
+
+    if (course.wind_style) {
+      badges.appendChild(el(
+        'span',
+        '',
+        '🌬 ' + courseWindLabel(course.wind_style)
+      ));
+    }
+
+    card.appendChild(badges);
+
+    if (course.description) {
+      card.appendChild(el(
+        'div',
+        'gkmb3-course-desc',
+        safe(course.description)
+      ));
+    }
+
+    if (course.record_player_name) {
+      var recordText =
+        '🏆 Banerekord: ' +
+        safe(course.record_player_name);
+
+      if (course.record_score_to_par !== null &&
+          course.record_score_to_par !== undefined) {
+        var toPar = Number(course.record_score_to_par);
+        recordText +=
+          ' · ' +
+          (toPar > 0 ? '+' : '') +
+          toPar;
+      } else if (course.record_total_score !== null &&
+                 course.record_total_score !== undefined) {
+        recordText +=
+          ' · ' +
+          safe(course.record_total_score) +
+          ' kast';
+      }
+
+      if (course.record_layout_name) {
+        recordText +=
+          ' · ' +
+          safe(course.record_layout_name);
+      }
+
+      card.appendChild(el(
+        'div',
+        'gkmb3-course-record',
+        recordText
+      ));
+    }
+
+    if (course.moderation_note &&
+        course.visibility_status === 'rejected') {
+      card.appendChild(el(
+        'div',
+        'gkmb3-note',
+        'Merknad: ' + safe(course.moderation_note)
+      ));
+    }
+
+    var toolbar = el('div', 'gkmb3-toolbar');
+    toolbar.style.marginTop = '9px';
+
+    if (!options.pending &&
+        course.course_style &&
+        course.wind_style &&
+        course.focus) {
+      var roundBag = el(
+        'button',
+        'gkmb3-btn',
+        '🧳 Rundebag for banen'
+      );
+      roundBag.type = 'button';
+      roundBag.onclick = function () {
+        buildRoundBagForCourse(course);
+      };
+      toolbar.appendChild(roundBag);
+    }
+
+    var linkUrl =
+      course.website_url ||
+      course.map_url ||
+      course.source_url ||
+      '';
+
+    if (linkUrl) {
+      var open = el(
+        'a',
+        'gkmb3-btn secondary',
+        course.website_url
+          ? 'Åpne nettside'
+          : course.map_url
+            ? 'Åpne kart'
+            : 'Se kilde'
+      );
+      open.href = linkUrl;
+      open.target = '_blank';
+      open.rel = 'noopener';
+      toolbar.appendChild(open);
+    }
+
+    if (options.pending && STATE.courseAdmin) {
+      var approve = el(
+        'button',
+        'gkmb3-btn',
+        '✓ Godkjenn offentlig'
+      );
+      approve.type = 'button';
+      approve.disabled = !!STATE.courseModerationBusy;
+      approve.onclick = function () {
+        moderateCourse(course.id, 'approve');
+      };
+      toolbar.appendChild(approve);
+
+      var reject = el(
+        'button',
+        'gkmb3-btn danger',
+        'Avvis'
+      );
+      reject.type = 'button';
+      reject.disabled = !!STATE.courseModerationBusy;
+      reject.onclick = function () {
+        moderateCourse(course.id, 'reject');
+      };
+      toolbar.appendChild(reject);
+    }
+
+    if (toolbar.childNodes.length) {
+      card.appendChild(toolbar);
+    }
+
+    return card;
+  }
+
+  function renderCourseSubmitForm() {
+    var form = el('div', 'gkmb3-course-form');
+
+    form.appendChild(el(
+      'div',
+      'gkmb3-course-sectiontitle',
+      'Legg inn bane'
+    ));
+
+    form.appendChild(el(
+      'div',
+      'gkmb3-note',
+      'Du kan beholde banen privat eller sende den til godkjenning. Godkjente baner blir søkbare for alle.'
+    ));
+
+    var grid = el('div', 'gkmb3-course-formgrid');
+
+    grid.appendChild(field(
+      'Bane *',
+      courseTextInput(
+        'gkmb3-course-name',
+        'F.eks. Lyngdal DiscGolfPark'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Sted',
+      courseTextInput(
+        'gkmb3-course-locality',
+        'F.eks. Lyngdal'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Kommune',
+      courseTextInput(
+        'gkmb3-course-municipality',
+        'F.eks. Lyngdal'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Fylke',
+      courseTextInput(
+        'gkmb3-course-county',
+        'F.eks. Agder'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Antall hull',
+      numericInput(
+        'gkmb3-course-holes',
+        '18'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Total lengde i meter',
+      numericInput(
+        'gkmb3-course-length',
+        'F.eks. 1650'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Banetype',
+      createRecoSelect(
+        'gkmb3-course-style',
+        [
+          ['technical', 'Teknisk / skog'],
+          ['mixed', 'Blandet'],
+          ['open', 'Åpen / lengde']
+        ],
+        'mixed'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Vind',
+      createRecoSelect(
+        'gkmb3-course-wind',
+        [
+          ['normal', 'Lite / normal vind'],
+          ['mixed', 'Variert vind'],
+          ['windy', 'Mye vind']
+        ],
+        'mixed'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Hva belønner banen?',
+      createRecoSelect(
+        'gkmb3-course-focus',
+        [
+          ['control', 'Kontroll'],
+          ['balanced', 'Balansert'],
+          ['distance', 'Lengde']
+        ],
+        'balanced'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Vanskelighetsgrad',
+      createRecoSelect(
+        'gkmb3-course-difficulty',
+        [
+          ['1', '1 · Lett'],
+          ['2', '2 · Lett–middels'],
+          ['3', '3 · Middels'],
+          ['4', '4 · Krevende'],
+          ['5', '5 · Svært krevende']
+        ],
+        '3'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Adresse',
+      courseTextInput(
+        'gkmb3-course-address',
+        'Valgfritt'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Nettside',
+      courseTextInput(
+        'gkmb3-course-website',
+        'https://…',
+        'url'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Kartlenke',
+      courseTextInput(
+        'gkmb3-course-map',
+        'https://…',
+        'url'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Kilde',
+      courseTextInput(
+        'gkmb3-course-source',
+        'Nettside / kilde hvis du har den',
+        'url'
+      )
+    ));
+
+    var description = el('textarea', 'gkmb3-input');
+    description.id = 'gkmb3-course-description';
+    description.placeholder =
+      'Kort beskrivelse: skog/åpent, høydeforskjell, OB, hva banen krever osv.';
+
+    var descField = field('Beskrivelse', description);
+    descField.className += ' wide';
+    grid.appendChild(descField);
+
+    form.appendChild(grid);
+
+    var publicLabel = el('label', 'gkmb3-check');
+    var publicBox = document.createElement('input');
+    publicBox.id = 'gkmb3-course-public';
+    publicBox.type = 'checkbox';
+    publicBox.checked = true;
+
+    publicLabel.appendChild(publicBox);
+    publicLabel.appendChild(document.createTextNode(
+      'Send banen til godkjenning slik at andre kan finne den'
+    ));
+
+    form.appendChild(publicLabel);
+
+    var toolbar = el('div', 'gkmb3-toolbar');
+    toolbar.style.marginTop = '10px';
+
+    var save = el(
+      'button',
+      'gkmb3-btn',
+      STATE.courseSubmitBusy
+        ? 'Lagrer bane…'
+        : 'Lagre bane'
+    );
+    save.type = 'button';
+    save.disabled = !!STATE.courseSubmitBusy;
+    save.onclick = submitCourse;
+    toolbar.appendChild(save);
+
+    var cancel = el(
+      'button',
+      'gkmb3-btn secondary',
+      'Avbryt'
+    );
+    cancel.type = 'button';
+    cancel.disabled = !!STATE.courseSubmitBusy;
+    cancel.onclick = function () {
+      STATE.courseSubmitOpen = false;
+      render();
+    };
+    toolbar.appendChild(cancel);
+
+    form.appendChild(toolbar);
+    return form;
+  }
+
+  function renderCoursePanel() {
+    var card = el('section', 'gkmb3-card gkmb3-courses');
+
+    card.appendChild(el('h3', '', '🗺 Baner'));
+    card.appendChild(el(
+      'p',
+      '',
+      'Søk på bane, sted, kommune eller fylke. En baneprofil kan brukes direkte til å bygge optimal rundebag av discene du eier.'
+    ));
+
+    var search = el('div', 'gkmb3-course-search');
+
+    var inputWrap = field(
+      'Finn bane eller område',
+      courseTextInput(
+        'gkmb3-course-search',
+        'F.eks. Lyngdal eller Agder'
+      )
+    );
+
+    var input =
+      inputWrap.querySelector('#gkmb3-course-search');
+
+    if (input) {
+      input.value = STATE.courseQuery || '';
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') searchCoursesFromForm();
+      });
+    }
+
+    search.appendChild(inputWrap);
+
+    var searchBtn = el(
+      'button',
+      'gkmb3-btn',
+      STATE.courseSearchBusy ? 'Søker…' : 'Søk baner'
+    );
+    searchBtn.type = 'button';
+    searchBtn.disabled = !!STATE.courseSearchBusy;
+    searchBtn.onclick = searchCoursesFromForm;
+    search.appendChild(searchBtn);
+
+    card.appendChild(search);
+
+    var toolbar = el('div', 'gkmb3-toolbar');
+    toolbar.style.marginTop = '9px';
+
+    var add = el(
+      'button',
+      'gkmb3-btn secondary',
+      STATE.courseSubmitOpen
+        ? 'Lukk skjema'
+        : '+ Legg til bane'
+    );
+    add.type = 'button';
+    add.onclick = function () {
+      STATE.courseSubmitOpen = !STATE.courseSubmitOpen;
+      render();
+    };
+    toolbar.appendChild(add);
+
+    card.appendChild(toolbar);
+
+    if (STATE.courseSubmitOpen) {
+      card.appendChild(renderCourseSubmitForm());
+    }
+
+    card.appendChild(el(
+      'div',
+      'gkmb3-course-sectiontitle',
+      STATE.courseQuery
+        ? 'Treff for «' + STATE.courseQuery + '»'
+        : 'Offentlige baner'
+    ));
+
+    if (!STATE.coursesLoaded || STATE.courseSearchBusy) {
+      card.appendChild(el(
+        'div',
+        'gkmb3-note',
+        'Laster baner…'
+      ));
+    } else if (!STATE.courses.length) {
+      card.appendChild(el(
+        'div',
+        'gkmb3-note',
+        STATE.courseQuery
+          ? 'Fant ingen godkjente baner på dette søket ennå.'
+          : 'Banedatabasen er klar, men vi har ikke lagt inn offentlige baner ennå.'
+      ));
+    } else {
+      var list = el('div', 'gkmb3-course-list');
+
+      for (var i = 0; i < STATE.courses.length; i += 1) {
+        list.appendChild(
+          renderCourseCard(STATE.courses[i])
+        );
+      }
+
+      card.appendChild(list);
+    }
+
+    if (STATE.myCoursesLoaded && STATE.myCourses.length) {
+      card.appendChild(el(
+        'div',
+        'gkmb3-course-sectiontitle',
+        'Mine baner / innsendinger'
+      ));
+
+      var mine = el('div', 'gkmb3-course-list');
+
+      for (var j = 0; j < STATE.myCourses.length; j += 1) {
+        mine.appendChild(
+          renderCourseCard(
+            STATE.myCourses[j],
+            { own: true }
+          )
+        );
+      }
+
+      card.appendChild(mine);
+    }
+
+    if (STATE.courseAdmin) {
+      var admin = el('section', 'gkmb3-adminqueue');
+
+      admin.appendChild(el(
+        'h4',
+        '',
+        '🛡 Baner til godkjenning'
+      ));
+
+      admin.appendChild(el(
+        'p',
+        '',
+        'Brukerinnsendte baner blir ikke offentlige før de er godkjent her.'
+      ));
+
+      if (!STATE.pendingCoursesLoaded) {
+        admin.appendChild(el(
+          'div',
+          'gkmb3-note',
+          'Laster godkjenningskø…'
+        ));
+      } else if (!STATE.pendingCourses.length) {
+        admin.appendChild(el(
+          'div',
+          'gkmb3-note',
+          'Ingen baner venter på godkjenning.'
+        ));
+      } else {
+        var pending = el('div', 'gkmb3-course-list');
+
+        for (var k = 0; k < STATE.pendingCourses.length; k += 1) {
+          pending.appendChild(
+            renderCourseCard(
+              STATE.pendingCourses[k],
+              { pending: true }
+            )
+          );
+        }
+
+        admin.appendChild(pending);
+      }
+
+      card.appendChild(admin);
+    }
+
+    return card;
   }
 
   function renderLogin() {
@@ -3527,6 +4225,19 @@
     STATE.roundBagHasBuilt = false;
     STATE.roundBagBusy = false;
     STATE.roundBagError = '';
+    STATE.courses = [];
+    STATE.coursesLoaded = false;
+    STATE.courseQuery = '';
+    STATE.courseSearchBusy = false;
+    STATE.courseSubmitOpen = false;
+    STATE.courseSubmitBusy = false;
+    STATE.myCourses = [];
+    STATE.myCoursesLoaded = false;
+    STATE.courseAdmin = false;
+    STATE.courseAdminLoaded = false;
+    STATE.pendingCourses = [];
+    STATE.pendingCoursesLoaded = false;
+    STATE.courseModerationBusy = false;
     STATE.recoBusy = false;
   }
 
@@ -3579,6 +4290,14 @@
         STATE.throwHasSearched = false;
         STATE.throwBusy = false;
         STATE.throwError = '';
+        STATE.courses = [];
+        STATE.coursesLoaded = false;
+        STATE.myCourses = [];
+        STATE.myCoursesLoaded = false;
+        STATE.courseAdmin = false;
+        STATE.courseAdminLoaded = false;
+        STATE.pendingCourses = [];
+        STATE.pendingCoursesLoaded = false;
         STATE.recoBusy = false;
         render();
         return;
@@ -3611,7 +4330,10 @@
         return loadRecoProfile();
       })
       .then(function () {
-        return loadActiveBagDiscs();
+        return Promise.all([
+          loadActiveBagDiscs(),
+          loadCourseModule()
+        ]);
       })
       .then(function () {
         render();
@@ -3642,18 +4364,331 @@
       });
   }
 
-  function buildRoundBag() {
-    if (!STATE.user || !STATE.activeBagId || STATE.roundBagBusy) {
+  function loadCourses(query) {
+    var wanted = trim(query);
+    STATE.courseQuery = wanted;
+    STATE.courseSearchBusy = true;
+
+    return supabaseClient.rpc(
+      'minbag_search_courses',
+      {
+        p_query: wanted || null,
+        p_limit: 30
+      }
+    ).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.courses = res.data || [];
+      STATE.coursesLoaded = true;
+      STATE.courseSearchBusy = false;
+    }).catch(function (err) {
+      STATE.courses = [];
+      STATE.coursesLoaded = true;
+      STATE.courseSearchBusy = false;
+
+      console.warn(
+        '[GK MIN BAG V3] Banesøk feilet',
+        err
+      );
+    });
+  }
+
+  function loadMyCourses() {
+    if (!STATE.user) {
+      STATE.myCourses = [];
+      STATE.myCoursesLoaded = true;
+      return Promise.resolve();
+    }
+
+    return supabaseClient.rpc('minbag_get_my_courses')
+      .then(function (res) {
+        if (res.error) throw res.error;
+
+        STATE.myCourses = res.data || [];
+        STATE.myCoursesLoaded = true;
+      })
+      .catch(function (err) {
+        STATE.myCourses = [];
+        STATE.myCoursesLoaded = true;
+
+        console.warn(
+          '[GK MIN BAG V3] Mine baner feilet',
+          err
+        );
+      });
+  }
+
+  function loadPendingCourses() {
+    if (!STATE.courseAdmin) {
+      STATE.pendingCourses = [];
+      STATE.pendingCoursesLoaded = true;
+      return Promise.resolve();
+    }
+
+    STATE.pendingCoursesLoaded = false;
+
+    return supabaseClient.rpc(
+      'minbag_admin_get_pending_courses'
+    ).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.pendingCourses = res.data || [];
+      STATE.pendingCoursesLoaded = true;
+    }).catch(function (err) {
+      STATE.pendingCourses = [];
+      STATE.pendingCoursesLoaded = true;
+
+      console.warn(
+        '[GK MIN BAG V3] Banekø feilet',
+        err
+      );
+    });
+  }
+
+  function loadCourseAdminStatus() {
+    if (!STATE.user) {
+      STATE.courseAdmin = false;
+      STATE.courseAdminLoaded = true;
+      STATE.pendingCourses = [];
+      STATE.pendingCoursesLoaded = true;
+      return Promise.resolve();
+    }
+
+    return supabaseClient.rpc(
+      'minbag_course_admin_status'
+    ).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.courseAdmin = !!res.data;
+      STATE.courseAdminLoaded = true;
+
+      return loadPendingCourses();
+    }).catch(function (err) {
+      STATE.courseAdmin = false;
+      STATE.courseAdminLoaded = true;
+      STATE.pendingCourses = [];
+      STATE.pendingCoursesLoaded = true;
+
+      console.warn(
+        '[GK MIN BAG V3] Adminstatus for baner feilet',
+        err
+      );
+    });
+  }
+
+  function loadCourseModule() {
+    return Promise.all([
+      loadCourses(''),
+      loadMyCourses(),
+      loadCourseAdminStatus()
+    ]);
+  }
+
+  function searchCoursesFromForm() {
+    if (STATE.courseSearchBusy) return;
+
+    var query = getInputValue('gkmb3-course-search');
+
+    STATE.courseSearchBusy = true;
+    render();
+    status('Søker etter baner…');
+
+    loadCourses(query)
+      .then(function () {
+        render();
+
+        if (STATE.courses.length) {
+          status(
+            'Fant ' +
+            STATE.courses.length +
+            ' bane' +
+            (STATE.courses.length === 1 ? '.' : 'r.'),
+            'ok'
+          );
+        } else {
+          status('Fant ingen godkjente baner på søket.', '');
+        }
+      });
+  }
+
+  function submitCourse() {
+    if (!STATE.user || STATE.courseSubmitBusy) return;
+
+    var name = getInputValue('gkmb3-course-name');
+
+    if (!name) {
+      status('Skriv inn navn på banen.', 'err');
       return;
     }
 
-    var countValue = getInputValue('gkmb3-roundbag-count');
-    var courseStyle = getInputValue('gkmb3-roundbag-course');
-    var windStyle = getInputValue('gkmb3-roundbag-wind');
-    var focus = getInputValue('gkmb3-roundbag-focus');
+    var holes = numOrNull(
+      getInputValue('gkmb3-course-holes')
+    );
+
+    var length = numOrNull(
+      getInputValue('gkmb3-course-length')
+    );
+
+    STATE.courseSubmitBusy = true;
+    render();
+    status('Lagrer bane…');
+
+    supabaseClient.rpc(
+      'minbag_submit_course',
+      {
+        p_name: name,
+        p_locality: getInputValue('gkmb3-course-locality') || null,
+        p_municipality: getInputValue('gkmb3-course-municipality') || null,
+        p_county: getInputValue('gkmb3-course-county') || null,
+        p_address: getInputValue('gkmb3-course-address') || null,
+
+        p_holes: holes === null ? null : Math.round(holes),
+        p_total_length_m:
+          length === null ? null : Math.round(length),
+
+        p_course_style:
+          getInputValue('gkmb3-course-style') || 'mixed',
+
+        p_wind_style:
+          getInputValue('gkmb3-course-wind') || 'mixed',
+
+        p_focus:
+          getInputValue('gkmb3-course-focus') || 'balanced',
+
+        p_difficulty_level:
+          Number(
+            getInputValue('gkmb3-course-difficulty')
+          ) || 3,
+
+        p_description:
+          getInputValue('gkmb3-course-description') || null,
+
+        p_website_url:
+          getInputValue('gkmb3-course-website') || null,
+
+        p_map_url:
+          getInputValue('gkmb3-course-map') || null,
+
+        p_source_url:
+          getInputValue('gkmb3-course-source') || null,
+
+        p_submit_public:
+          getChecked('gkmb3-course-public')
+      }
+    ).then(function (res) {
+      if (res.error) throw res.error;
+
+      var rows = res.data || [];
+      var row = rows.length ? rows[0] : null;
+
+      STATE.courseSubmitBusy = false;
+      STATE.courseSubmitOpen = false;
+
+      return Promise.all([
+        loadMyCourses(),
+        loadPendingCourses()
+      ]).then(function () {
+        render();
+
+        status(
+          row &&
+          row.visibility_status === 'private'
+            ? 'Privat bane lagret.'
+            : 'Bane sendt til godkjenning.',
+          'ok'
+        );
+      });
+    }).catch(function (err) {
+      STATE.courseSubmitBusy = false;
+      render();
+
+      status(
+        'Kunne ikke lagre bane: ' + errorMessage(err),
+        'err'
+      );
+    });
+  }
+
+  function moderateCourse(courseId, action) {
+    if (!STATE.courseAdmin ||
+        !courseId ||
+        STATE.courseModerationBusy) {
+      return;
+    }
+
+    var note = '';
+
+    if (action === 'reject') {
+      note =
+        window.prompt(
+          'Valgfri forklaring til brukeren på hvorfor banen avvises:',
+          ''
+        ) || '';
+
+      if (!window.confirm('Avvise denne banen?')) {
+        return;
+      }
+    } else if (!window.confirm(
+      'Godkjenne banen som offentlig og søkbar for alle?'
+    )) {
+      return;
+    }
+
+    STATE.courseModerationBusy = true;
+    render();
+
+    supabaseClient.rpc(
+      'minbag_admin_moderate_course',
+      {
+        p_course_id: courseId,
+        p_action: action,
+        p_note: note || null
+      }
+    ).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.courseModerationBusy = false;
+
+      return Promise.all([
+        loadPendingCourses(),
+        loadMyCourses(),
+        loadCourses(STATE.courseQuery)
+      ]);
+    }).then(function () {
+      render();
+
+      status(
+        action === 'approve'
+          ? 'Bane godkjent og gjort offentlig.'
+          : 'Bane avvist.',
+        'ok'
+      );
+    }).catch(function (err) {
+      STATE.courseModerationBusy = false;
+      render();
+
+      status(
+        'Kunne ikke behandle banen: ' + errorMessage(err),
+        'err'
+      );
+    });
+  }
+
+  function runRoundBagBuild(
+    countValue,
+    courseStyle,
+    windStyle,
+    focus,
+    sourceName
+  ) {
+    if (!STATE.user ||
+        !STATE.activeBagId ||
+        STATE.roundBagBusy) {
+      return;
+    }
 
     STATE.roundBagCount =
-      countValue || STATE.roundBagCount || '8';
+      safe(countValue || STATE.roundBagCount || '8');
 
     STATE.roundBagCourseStyle =
       courseStyle || STATE.roundBagCourseStyle || 'mixed';
@@ -3670,16 +4705,25 @@
     STATE.roundBagError = '';
 
     render();
-    status('Bygger optimal rundebag…');
+
+    status(
+      sourceName
+        ? 'Bygger rundebag for ' + sourceName + '…'
+        : 'Bygger optimal rundebag…'
+    );
 
     supabaseClient.rpc(
       'minbag_build_round_bag',
       {
         p_bag_id: STATE.activeBagId,
-        p_disc_count: Number(STATE.roundBagCount) || 8,
-        p_course_style: STATE.roundBagCourseStyle,
-        p_wind_style: STATE.roundBagWindStyle,
-        p_focus: STATE.roundBagFocus
+        p_disc_count:
+          Number(STATE.roundBagCount) || 8,
+        p_course_style:
+          STATE.roundBagCourseStyle,
+        p_wind_style:
+          STATE.roundBagWindStyle,
+        p_focus:
+          STATE.roundBagFocus
       }
     ).then(function (res) {
       if (res.error) throw res.error;
@@ -3690,9 +4734,15 @@
 
       if (STATE.roundBagResults.length) {
         status(
-          'Rundebag bygget med ' +
-          STATE.roundBagResults.length +
-          ' discer.',
+          sourceName
+            ? 'Rundebag for ' +
+              sourceName +
+              ' bygget med ' +
+              STATE.roundBagResults.length +
+              ' discer.'
+            : 'Rundebag bygget med ' +
+              STATE.roundBagResults.length +
+              ' discer.',
           'ok'
         );
       } else {
@@ -3708,10 +4758,59 @@
       render();
 
       status(
-        'Kunne ikke bygge rundebag: ' + errorMessage(err),
+        'Kunne ikke bygge rundebag: ' +
+        errorMessage(err),
         'err'
       );
     });
+  }
+
+  function buildRoundBagForCourse(course) {
+    if (!course) return;
+
+    var focus =
+      course.focus ||
+      (
+        course.course_style === 'technical'
+          ? 'control'
+          : course.course_style === 'open'
+            ? 'distance'
+            : 'balanced'
+      );
+
+    runRoundBagBuild(
+      STATE.roundBagCount || '8',
+      course.course_style || 'mixed',
+      course.wind_style || 'mixed',
+      focus,
+      course.name || 'valgt bane'
+    );
+  }
+
+  function buildRoundBag() {
+    if (!STATE.user || !STATE.activeBagId || STATE.roundBagBusy) {
+      return;
+    }
+
+    runRoundBagBuild(
+      getInputValue('gkmb3-roundbag-count') ||
+        STATE.roundBagCount ||
+        '8',
+
+      getInputValue('gkmb3-roundbag-course') ||
+        STATE.roundBagCourseStyle ||
+        'mixed',
+
+      getInputValue('gkmb3-roundbag-wind') ||
+        STATE.roundBagWindStyle ||
+        'mixed',
+
+      getInputValue('gkmb3-roundbag-focus') ||
+        STATE.roundBagFocus ||
+        'balanced',
+
+      ''
+    );
   }
 
   function findBestThrowDisc() {
