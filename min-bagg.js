@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.19.1';
+  var VERSION = '2026-08-08.19.2';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -119,6 +119,8 @@
     roundBagHasBuilt: false,
     roundBagBusy: false,
     roundBagError: '',
+    roundBagSourceName: '',
+    expandedOverlapKey: '',
     courses: [],
     coursesLoaded: false,
     courseTotalCount: 0,
@@ -313,6 +315,17 @@
       '.gkmb3-recofinding{padding:11px;border-radius:15px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.14);}' +
       '.gkmb3-recofinding.gap{border-color:rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.14));}' +
       '.gkmb3-recofinding.overlap{border-color:rgba(245,158,11,.24);background:linear-gradient(135deg,rgba(245,158,11,.06),rgba(0,0,0,.14));}' +
+      '.gkmb3-recofinding.overlap.clickable{cursor:pointer;transition:.15s ease;}' +
+      '.gkmb3-recofinding.overlap.clickable:hover{border-color:rgba(245,158,11,.48);background:linear-gradient(135deg,rgba(245,158,11,.11),rgba(0,0,0,.18));}' +
+      '.gkmb3-overlap-toggle{margin-top:8px;display:inline-flex;align-items:center;gap:5px;color:#fde68a;font-size:9px;font-weight:950;}' +
+      '.gkmb3-overlap-list{display:grid;gap:7px;margin-top:9px;padding-top:9px;border-top:1px solid rgba(245,158,11,.18);}' +
+      '.gkmb3-overlap-disc{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 9px;border-radius:11px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.20);}' +
+      '.gkmb3-overlap-disc.review{border-color:rgba(249,115,22,.34);background:rgba(124,45,18,.15);}' +
+      '.gkmb3-overlap-disc-name{color:#fff;font-size:10px;font-weight:950;}' +
+      '.gkmb3-overlap-disc-meta{margin-top:3px;color:rgba(255,255,255,.56);font-size:9px;line-height:1.35;}' +
+      '.gkmb3-overlap-badge{display:inline-flex;padding:4px 7px;border-radius:999px;font-size:8px;font-weight:950;white-space:nowrap;background:rgba(34,197,94,.13);color:#bbf7d0;border:1px solid rgba(34,197,94,.22);}' +
+      '.gkmb3-overlap-disc.review .gkmb3-overlap-badge{background:rgba(249,115,22,.15);color:#fed7aa;border-color:rgba(249,115,22,.30);}' +
+      '.gkmb3-disc.gkmb3-disc-focus{outline:3px solid rgba(249,115,22,.88);box-shadow:0 0 0 6px rgba(249,115,22,.16),0 14px 36px rgba(0,0,0,.35);}' +
       '.gkmb3-recofinding-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}' +
       '.gkmb3-recofinding-title{font-size:12px;font-weight:950;color:#fff;line-height:1.25;}' +
       '.gkmb3-recofinding-priority{flex:0 0 auto;padding:4px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.055);color:rgba(255,255,255,.62);font-size:9px;font-weight:900;}' +
@@ -380,7 +393,7 @@
       '.gkmb3-throwreason{margin-top:6px;color:rgba(255,255,255,.66);font-size:9px;line-height:1.45;}' +
       '@media(max-width:850px){.gkmb3-throwgrid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
       '@media(max-width:520px){.gkmb3-throwgrid{grid-template-columns:1fr;}.gkmb3-throwresult{grid-template-columns:48px minmax(0,1fr);}.gkmb3-throwimg{width:48px;height:48px;}}' +
-      '.gkmb3-roundbag{margin-top:12px;padding:12px;border-radius:16px;border:1px solid rgba(245,158,11,.26);background:linear-gradient(135deg,rgba(120,53,15,.12),rgba(2,10,6,.34));}' +
+      '.gkmb3-roundbag{margin-top:12px;padding:12px;border-radius:16px;border:1px solid rgba(245,158,11,.26);background:linear-gradient(135deg,rgba(120,53,15,.12),rgba(2,10,6,.34));scroll-margin-top:18px;}' +
       '.gkmb3-roundbag-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:9px;}' +
       '.gkmb3-roundbag-head h4{margin:0;color:#fff;font-size:13px;}' +
       '.gkmb3-roundbag-head p{margin:4px 0 0;color:rgba(255,255,255,.58);font-size:9px;line-height:1.45;max-width:680px;}' +
@@ -3275,6 +3288,8 @@
     ensureRoundBagDefaults();
 
     var wrap = el('section', 'gkmb3-roundbag');
+    wrap.id = 'gkmb3-roundbag-section';
+
     var head = el('div', 'gkmb3-roundbag-head');
     var copy = el('div', '');
 
@@ -3374,7 +3389,12 @@
         wrap.appendChild(el(
           'div',
           'gkmb3-roundbag-summary',
-          actual === requested
+          (STATE.roundBagSourceName
+            ? 'Optimalisert for ' +
+              STATE.roundBagSourceName +
+              '. '
+            : '') +
+          (actual === requested
             ? 'Rundebagen er klar: ' +
               actual +
               ' ulike molds med hver sin hovedrolle.'
@@ -3382,7 +3402,7 @@
               actual +
               ' av ønsket ' +
               requested +
-              ' discer. Det betyr at denne bagen ikke har nok ulike molds med komplette flight-tall til å fylle alle plassene uten unødvendige dubletter.'
+              ' discer. Det betyr at denne bagen ikke har nok ulike molds med komplette flight-tall til å fylle alle plassene uten unødvendige dubletter.')
         ));
 
         var list = el('div', 'gkmb3-roundbag-list');
@@ -3406,6 +3426,265 @@
     }
 
     return wrap;
+  }
+
+  function canonicalDiscTypeFrontend(disc) {
+    var speed = Number(disc && disc.speed);
+
+    if (isFinite(speed)) {
+      if (speed <= 3) return 'putter';
+      if (speed <= 5) return 'midrange';
+      if (speed <= 9) return 'fairway';
+      return 'distance';
+    }
+
+    return safe(disc && disc.disc_type).toLowerCase();
+  }
+
+  function stabilityBucketFrontend(turn, fade) {
+    turn = Number(turn);
+    fade = Number(fade);
+
+    if (!isFinite(turn) || !isFinite(fade)) return 'unknown';
+    if (turn <= -2 && fade <= 2) return 'understable';
+    if (fade >= 3 || (turn >= 0 && fade >= 2.5)) return 'overstable';
+    if (fade >= 2 || (turn + fade) >= 1.5) return 'stable';
+    return 'neutral';
+  }
+
+  function overlapFindingKey(finding) {
+    return [
+      safe(finding.disc_type),
+      safe(finding.stability),
+      safe(finding.target_speed_min),
+      safe(finding.target_speed_max)
+    ].join('|');
+  }
+
+  function discsForOverlapFinding(finding) {
+    var rows = [];
+
+    for (var i = 0; i < STATE.discs.length; i += 1) {
+      var disc = STATE.discs[i];
+
+      if (
+        finding.disc_type &&
+        canonicalDiscTypeFrontend(disc) !== finding.disc_type
+      ) {
+        continue;
+      }
+
+      if (
+        finding.stability &&
+        stabilityBucketFrontend(disc.turn, disc.fade) !== finding.stability
+      ) {
+        continue;
+      }
+
+      var speed = Number(disc.speed);
+
+      if (
+        finding.target_speed_min !== null &&
+        finding.target_speed_min !== undefined &&
+        isFinite(speed) &&
+        speed < Number(finding.target_speed_min)
+      ) {
+        continue;
+      }
+
+      if (
+        finding.target_speed_max !== null &&
+        finding.target_speed_max !== undefined &&
+        isFinite(speed) &&
+        speed > Number(finding.target_speed_max)
+      ) {
+        continue;
+      }
+
+      rows.push(disc);
+    }
+
+    return rows;
+  }
+
+  function overlapDiscKeepScore(disc) {
+    var score = 0;
+
+    if (disc.is_favorite) score += 100;
+    if (disc.note) score += 12;
+    if (disc.weight_grams !== null && disc.weight_grams !== undefined) score += 5;
+    if (disc.color) score += 3;
+    if (disc.plastic) score += 3;
+
+    return score;
+  }
+
+  function overlapReviewMap(discs) {
+    var sorted = discs.slice();
+
+    sorted.sort(function (a, b) {
+      var scoreDiff =
+        overlapDiscKeepScore(b) -
+        overlapDiscKeepScore(a);
+
+      if (scoreDiff) return scoreDiff;
+
+      return safe(a.name || a.mold_name).localeCompare(
+        safe(b.name || b.mold_name)
+      );
+    });
+
+    var review = {};
+
+    // Ved tydelig overlapp lar vi de to mest prioriterte være "behold".
+    // Resten merkes som kandidater det er verdt å se nærmere på.
+    for (var i = 2; i < sorted.length; i += 1) {
+      review[sorted[i].id] = true;
+    }
+
+    return review;
+  }
+
+  function focusDiscInBag(discId, event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    var node = document.getElementById(
+      'gkmb3-disc-' + discId
+    );
+
+    if (!node) {
+      status(
+        'Discen finnes i bagen, men er skjult av aktivt søk/filter.',
+        ''
+      );
+      return;
+    }
+
+    node.classList.add('gkmb3-disc-focus');
+
+    node.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center'
+    });
+
+    window.setTimeout(function () {
+      node.classList.remove('gkmb3-disc-focus');
+    }, 2600);
+  }
+
+  function renderOverlapDetails(finding) {
+    var discs = discsForOverlapFinding(finding);
+    var list = el('div', 'gkmb3-overlap-list');
+
+    if (!discs.length) {
+      list.appendChild(el(
+        'div',
+        'gkmb3-note',
+        'Fant ikke de fysiske discene i dagens visning.'
+      ));
+      return list;
+    }
+
+    var reviewMap = overlapReviewMap(discs);
+
+    list.appendChild(el(
+      'div',
+      'gkmb3-note',
+      '«Verdt å se på» betyr ikke at discen bør slettes. Min Bag lar favoritter og de to tydeligst prioriterte eksemplarene stå igjen, og markerer resten som naturlige kandidater å vurdere når flere fyller nesten samme rolle.'
+    ));
+
+    for (var i = 0; i < discs.length; i += 1) {
+      var disc = discs[i];
+      var review = !!reviewMap[disc.id];
+
+      var row = el(
+        'div',
+        'gkmb3-overlap-disc' + (review ? ' review' : '')
+      );
+
+      var body = el('div', '');
+      body.appendChild(el(
+        'div',
+        'gkmb3-overlap-disc-name',
+        safe(disc.name || disc.mold_name || 'Ukjent disc')
+      ));
+
+      var meta = [
+        safe(disc.speed),
+        safe(disc.glide),
+        safe(disc.turn),
+        safe(disc.fade)
+      ].join(' / ');
+
+      var extras = [];
+      if (disc.plastic) extras.push(disc.plastic);
+      if (disc.weight_grams !== null && disc.weight_grams !== undefined) {
+        extras.push(safe(disc.weight_grams) + ' g');
+      }
+      if (disc.color) extras.push(disc.color);
+      if (disc.is_favorite) extras.push('★ Favoritt');
+
+      body.appendChild(el(
+        'div',
+        'gkmb3-overlap-disc-meta',
+        meta + (extras.length ? ' · ' + extras.join(' · ') : '')
+      ));
+
+      row.appendChild(body);
+
+      var actions = el('div', '');
+      actions.style.display = 'grid';
+      actions.style.justifyItems = 'end';
+      actions.style.gap = '5px';
+
+      actions.appendChild(el(
+        'span',
+        'gkmb3-overlap-badge',
+        review
+          ? '👀 Verdt å se på'
+          : disc.is_favorite
+            ? '★ Prioritert'
+            : '✓ Behold-kandidat'
+      ));
+
+      var show = el(
+        'button',
+        'gkmb3-btn secondary',
+        'Vis i bagen'
+      );
+      show.type = 'button';
+      show.style.minHeight = '30px';
+      show.style.padding = '5px 7px';
+      show.onclick = (function (id) {
+        return function (event) {
+          focusDiscInBag(id, event);
+        };
+      })(disc.id);
+
+      actions.appendChild(show);
+      row.appendChild(actions);
+      list.appendChild(row);
+    }
+
+    return list;
+  }
+
+  function scrollToRoundBag() {
+    window.setTimeout(function () {
+      var node = document.getElementById(
+        'gkmb3-roundbag-section'
+      );
+
+      if (node) {
+        node.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start'
+        });
+      }
+    }, 80);
   }
 
   function renderRecommendationPanel() {
@@ -3561,6 +3840,49 @@
         item.appendChild(el('div', 'gkmb3-recofinding-meta', meta.join(' · ')));
       }
 
+      if (finding.finding_type === 'overlap') {
+        var overlapKey = overlapFindingKey(finding);
+        var overlapOpen = STATE.expandedOverlapKey === overlapKey;
+
+        item.className += ' clickable';
+        item.appendChild(el(
+          'div',
+          'gkmb3-overlap-toggle',
+          overlapOpen
+            ? '▲ Skjul discer'
+            : '▼ Trykk for å se hvilke discer'
+        ));
+
+        item.onclick = (function (key) {
+          return function (event) {
+            if (
+              event &&
+              event.target &&
+              (
+                event.target.tagName === 'BUTTON' ||
+                event.target.closest &&
+                event.target.closest('button')
+              )
+            ) {
+              return;
+            }
+
+            STATE.expandedOverlapKey =
+              STATE.expandedOverlapKey === key
+                ? ''
+                : key;
+
+            render();
+          };
+        })(overlapKey);
+
+        if (overlapOpen) {
+          item.appendChild(
+            renderOverlapDetails(finding)
+          );
+        }
+      }
+
       if (finding.finding_type === 'gap') {
         if (!STATE.recoProductsLoaded) {
           item.appendChild(el(
@@ -3701,6 +4023,7 @@
 
   function renderDisc(disc) {
     var card = el('article', 'gkmb3-disc');
+    card.id = 'gkmb3-disc-' + disc.id;
 
     var image = el('div', 'gkmb3-discimg');
 
@@ -4406,6 +4729,8 @@
     STATE.roundBagHasBuilt = false;
     STATE.roundBagBusy = false;
     STATE.roundBagError = '';
+    STATE.roundBagSourceName = '';
+    STATE.expandedOverlapKey = '';
     STATE.courses = [];
     STATE.coursesLoaded = false;
     STATE.courseTotalCount = 0;
@@ -5149,12 +5474,18 @@
     STATE.roundBagFocus =
       focus || STATE.roundBagFocus || 'balanced';
 
+    STATE.roundBagSourceName = sourceName || '';
+
     STATE.roundBagBusy = true;
     STATE.roundBagHasBuilt = true;
     STATE.roundBagResults = [];
     STATE.roundBagError = '';
 
     render();
+
+    if (sourceName) {
+      scrollToRoundBag();
+    }
 
     status(
       sourceName
@@ -5181,6 +5512,10 @@
       STATE.roundBagResults = res.data || [];
       STATE.roundBagBusy = false;
       render();
+
+      if (sourceName) {
+        scrollToRoundBag();
+      }
 
       if (STATE.roundBagResults.length) {
         status(
@@ -6032,6 +6367,8 @@
       STATE.roundBagHasBuilt = false;
       STATE.roundBagBusy = false;
       STATE.roundBagError = '';
+      STATE.roundBagSourceName = '';
+      STATE.expandedOverlapKey = '';
       return Promise.resolve();
     }
 
@@ -6056,6 +6393,8 @@
         STATE.roundBagHasBuilt = false;
         STATE.roundBagBusy = false;
         STATE.roundBagError = '';
+        STATE.roundBagSourceName = '';
+        STATE.expandedOverlapKey = '';
         return loadGapAnalysis();
       });
   }
@@ -6092,6 +6431,8 @@
     STATE.roundBagHasBuilt = false;
     STATE.roundBagBusy = false;
     STATE.roundBagError = '';
+    STATE.roundBagSourceName = '';
+    STATE.expandedOverlapKey = '';
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
 
