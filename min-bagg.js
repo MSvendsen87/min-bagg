@@ -12,6 +12,7 @@
    - "Legg til fra GolfKongen" via minbag_search_catalog + minbag_add_catalog_disc
    - "Legg inn egen disc" via minbag_add_manual_disc
    - Mobil-først, mørkt GolfKongen-design
+   - Bag-cover: velg GolfKongen-sekk eller bruk eget bilde
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -23,7 +24,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-07.5';
+  var VERSION = '2026-08-07.6';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -37,7 +38,9 @@
     BAG_IMAGE_SIGNED_SECONDS: 86400,
     BAG_IMAGE_MAX_SOURCE_BYTES: 12 * 1024 * 1024,
     BAG_IMAGE_MAX_EDGE: 1200,
-    BAG_IMAGE_WEBP_QUALITY: 0.82
+    BAG_IMAGE_WEBP_QUALITY: 0.82,
+    WORKER_URL: 'https://sportskongen-quickbutik-sync.post-cd6.workers.dev',
+    STORE_BAG_IMAGE_ENDPOINT: '/alt-text-product-check'
   };
 
   var root = null;
@@ -58,6 +61,12 @@
     top3Loaded: false,
     bagImageUrls: {},
     bagImageBusy: false,
+    storeBags: [],
+    storeBagSelections: {},
+    storeBagImageUrls: {},
+    storeBagImageLoading: {},
+    storeBagPickerOpen: false,
+    storeBagBusy: false,
     loading: false
   };
 
@@ -255,12 +264,29 @@
       '.gkmb3-bagphoto-help{margin-top:4px;font-size:10px;line-height:1.35;color:rgba(255,255,255,.52);}' +
       '.gkmb3-bagphoto-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px;}' +
       '.gkmb3-bagphoto-actions .gkmb3-btn{min-height:38px;padding:8px 11px;font-size:11px;}' +
+      '.gkmb3-bagsource{display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:4px 7px;border-radius:999px;border:1px solid rgba(34,197,94,.22);background:rgba(34,197,94,.08);color:#bbf7d0;font-size:9px;font-weight:900;}' +
+      '.gkmb3-storepicker{margin-top:12px;padding:12px;border-radius:17px;border:1px solid rgba(34,197,94,.22);background:rgba(0,0,0,.18);}' +
+      '.gkmb3-storepicker-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;}' +
+      '.gkmb3-storepicker-title{font-size:14px;font-weight:950;color:#fff;}' +
+      '.gkmb3-storepicker-note{margin-top:3px;font-size:10px;line-height:1.35;color:rgba(255,255,255,.50);}' +
+      '.gkmb3-storegrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;max-height:490px;overflow:auto;padding-right:2px;scrollbar-width:thin;}' +
+      '.gkmb3-storebag{min-width:0;border-radius:15px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.035);overflow:hidden;}' +
+      '.gkmb3-storebag.selected{border-color:rgba(34,197,94,.62);box-shadow:0 0 0 2px rgba(34,197,94,.10) inset;background:rgba(34,197,94,.07);}' +
+      '.gkmb3-storebag-pick{display:grid;width:100%;grid-template-columns:62px minmax(0,1fr);gap:9px;align-items:center;padding:9px;border:0;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer;}' +
+      '.gkmb3-storebag-pick:disabled{opacity:.50;cursor:not-allowed;}' +
+      '.gkmb3-storebag-img{width:62px;height:62px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.10);background:radial-gradient(circle at 25% 20%,rgba(34,197,94,.22),rgba(255,255,255,.035));display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.45);font-size:9px;font-weight:900;text-align:center;padding:4px;}' +
+      '.gkmb3-storebag-img img{width:100%;height:100%;object-fit:cover;display:block;}' +
+      '.gkmb3-storebag-name{font-size:11px;font-weight:950;color:#fff;line-height:1.2;}' +
+      '.gkmb3-storebag-meta{margin-top:4px;font-size:9px;line-height:1.3;color:rgba(255,255,255,.52);}' +
+      '.gkmb3-storebag-link{display:block;padding:0 9px 9px;color:#86efac;font-size:9px;font-weight:900;text-decoration:none;}' +
+      '.gkmb3-storebag-link:hover{text-decoration:underline;}' +
 
       '@media(min-width:620px){' +
         '.gkmb3-grid2{grid-template-columns:repeat(2,minmax(0,1fr));}' +
         '.gkmb3-grid4{grid-template-columns:repeat(4,minmax(0,1fr));}' +
         '.gkmb3-discgrid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
         '.gkmb3-top3grid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-storegrid{grid-template-columns:repeat(3,minmax(0,1fr));}' +
       '}' +
       '@media(min-width:960px){' +
         '.gkmb3-top3grid{grid-template-columns:repeat(4,minmax(0,1fr));}' +
@@ -272,6 +298,7 @@
         '.gkmb3-card{padding:13px;border-radius:18px;}' +
         '.gkmb3-disc{grid-template-columns:70px minmax(0,1fr);}' +
         '.gkmb3-discimg{width:70px;height:70px;}' +
+        '.gkmb3-storegrid{grid-template-columns:1fr;max-height:540px;}' +
       '}';
 
     document.head.appendChild(style);
@@ -554,31 +581,78 @@
     return wrap;
   }
 
+  function currentStoreBagSelection(bagId) {
+    return STATE.storeBagSelections[bagId] || null;
+  }
+
   function renderBagPhotoManager(bag) {
     var wrap = el('div', 'gkmb3-bagphoto');
 
     var visual = el('div', 'gkmb3-bagphoto-img');
-    var signedUrl = STATE.bagImageUrls[bag.id] || '';
+    var ownSignedUrl = STATE.bagImageUrls[bag.id] || '';
+    var storeSelection = currentStoreBagSelection(bag.id);
+    var storeProductId = storeSelection
+      ? safe(storeSelection.quickbutik_product_id)
+      : '';
+    var storeImageUrl = storeProductId
+      ? (STATE.storeBagImageUrls[storeProductId] || '')
+      : '';
+    var shownUrl = storeSelection ? storeImageUrl : ownSignedUrl;
 
-    if (signedUrl) {
+    if (shownUrl) {
       var img = document.createElement('img');
-      img.src = signedUrl;
-      img.alt = 'Bilde av ' + safe(bag.name);
+      img.src = shownUrl;
+      img.alt = storeSelection
+        ? safe(storeSelection.product_name || bag.name)
+        : 'Bilde av ' + safe(bag.name);
       img.loading = 'lazy';
       visual.appendChild(img);
     } else {
       visual.appendChild(document.createTextNode('🎒'));
+
+      if (storeProductId) {
+        setTimeout(function () {
+          ensureStoreBagImage(storeProductId).then(function () {
+            render();
+          });
+        }, 0);
+      }
     }
 
     var info = el('div', 'gkmb3-bagphoto-info');
     info.appendChild(el('div', 'gkmb3-bagphoto-name', safe(bag.name)));
+
+    if (storeSelection) {
+      info.appendChild(el(
+        'div',
+        'gkmb3-bagsource',
+        '🛍 GolfKongen-sekk · ' + safe(storeSelection.product_name || 'Valgt sekk')
+      ));
+    } else if (bag.image_url) {
+      info.appendChild(el('div', 'gkmb3-bagsource', '📷 Eget bilde'));
+    }
+
     info.appendChild(el(
       'div',
       'gkmb3-bagphoto-help',
-      'Gjør bagen personlig med et bilde. På mobil kan du velge fra bilder eller ta et nytt bilde.'
+      'Velg en sekk fra GolfKongen eller bruk ditt eget bilde. Valget gjelder bare denne bagen.'
     ));
 
     var actions = el('div', 'gkmb3-bagphoto-actions');
+
+    var storeChoose = el(
+      'button',
+      'gkmb3-btn secondary',
+      STATE.storeBagPickerOpen ? 'Lukk sekkvalg' : '🛍 Velg GolfKongen-sekk'
+    );
+    storeChoose.type = 'button';
+    storeChoose.disabled = !!STATE.storeBagBusy || !!STATE.bagImageBusy;
+    storeChoose.onclick = function () {
+      if (STATE.storeBagBusy || STATE.bagImageBusy) return;
+      STATE.storeBagPickerOpen = !STATE.storeBagPickerOpen;
+      render();
+    };
+    actions.appendChild(storeChoose);
 
     var input = document.createElement('input');
     input.type = 'file';
@@ -592,24 +666,34 @@
       input.value = '';
     };
 
-    var choose = el(
+    if (storeSelection && bag.image_url) {
+      var useOwn = el('button', 'gkmb3-btn secondary', '📷 Bruk eget bilde');
+      useOwn.type = 'button';
+      useOwn.disabled = !!STATE.storeBagBusy || !!STATE.bagImageBusy;
+      useOwn.onclick = function () {
+        setGolfkongenBag(bag, null);
+      };
+      actions.appendChild(useOwn);
+    }
+
+    var chooseOwn = el(
       'button',
       'gkmb3-btn secondary',
-      signedUrl ? '📷 Bytt bilde' : '📷 Legg til bilde'
+      bag.image_url ? '📷 Last opp nytt bilde' : '📷 Last opp eget bilde'
     );
-    choose.type = 'button';
-    choose.disabled = !!STATE.bagImageBusy;
-    choose.onclick = function () {
-      if (!STATE.bagImageBusy) input.click();
+    chooseOwn.type = 'button';
+    chooseOwn.disabled = !!STATE.bagImageBusy || !!STATE.storeBagBusy;
+    chooseOwn.onclick = function () {
+      if (!STATE.bagImageBusy && !STATE.storeBagBusy) input.click();
     };
 
-    actions.appendChild(choose);
+    actions.appendChild(chooseOwn);
     actions.appendChild(input);
 
-    if (bag.image_url) {
+    if (!storeSelection && bag.image_url) {
       var remove = el('button', 'gkmb3-btn secondary', 'Fjern bilde');
       remove.type = 'button';
-      remove.disabled = !!STATE.bagImageBusy;
+      remove.disabled = !!STATE.bagImageBusy || !!STATE.storeBagBusy;
       remove.onclick = function () {
         removeBagImage(bag);
       };
@@ -621,6 +705,105 @@
     wrap.appendChild(info);
 
     return wrap;
+  }
+
+  function renderStoreBagPicker(bag) {
+    var picker = el('div', 'gkmb3-storepicker');
+    var head = el('div', 'gkmb3-storepicker-head');
+    var text = el('div', '');
+
+    text.appendChild(el('div', 'gkmb3-storepicker-title', 'Velg sekken din fra GolfKongen'));
+    text.appendChild(el(
+      'div',
+      'gkmb3-storepicker-note',
+      'Produkter på lager vises først. Utsolgte modeller kan fortsatt velges hvis det er sekken du eier.'
+    ));
+    head.appendChild(text);
+
+    var close = el('button', 'gkmb3-btn secondary', 'Lukk');
+    close.type = 'button';
+    close.style.minHeight = '34px';
+    close.style.padding = '6px 9px';
+    close.style.fontSize = '10px';
+    close.onclick = function () {
+      STATE.storeBagPickerOpen = false;
+      render();
+    };
+    head.appendChild(close);
+    picker.appendChild(head);
+
+    if (!STATE.storeBags.length) {
+      picker.appendChild(el('div', 'gkmb3-empty', 'Fant ingen GolfKongen-sekker akkurat nå.'));
+      return picker;
+    }
+
+    var grid = el('div', 'gkmb3-storegrid');
+    var selected = currentStoreBagSelection(bag.id);
+    var selectedId = selected ? safe(selected.quickbutik_product_id) : '';
+
+    for (var i = 0; i < STATE.storeBags.length; i += 1) {
+      (function (product) {
+        var productId = safe(product.quickbutik_product_id);
+        var card = el('div', 'gkmb3-storebag' + (productId === selectedId ? ' selected' : ''));
+        var pick = el('button', 'gkmb3-storebag-pick');
+        pick.type = 'button';
+        pick.disabled = !!STATE.storeBagBusy;
+        pick.onclick = function () {
+          setGolfkongenBag(bag, product);
+        };
+
+        var image = el('div', 'gkmb3-storebag-img', 'Henter bilde…');
+        var cached = STATE.storeBagImageUrls[productId] || '';
+
+        if (cached) {
+          clear(image);
+          var img = document.createElement('img');
+          img.src = cached;
+          img.alt = safe(product.name || 'GolfKongen-sekk');
+          img.loading = 'lazy';
+          image.appendChild(img);
+        } else {
+          setTimeout(function () {
+            observeStoreBagImage(image, productId, product.name);
+          }, 0);
+        }
+
+        pick.appendChild(image);
+
+        var body = el('div', '');
+        body.appendChild(el('div', 'gkmb3-storebag-name', safe(product.name)));
+
+        var meta = [];
+        if (product.price_nok !== null && product.price_nok !== undefined) {
+          meta.push(Math.round(Number(product.price_nok)) + ' kr');
+        }
+
+        if (product.stock_quantity !== null && product.stock_quantity !== undefined) {
+          var stock = Number(product.stock_quantity);
+          meta.push(stock > 0 ? ('På lager: ' + stock) : 'Utsolgt');
+        } else {
+          meta.push('Lagerstatus ukjent');
+        }
+
+        if (productId === selectedId) meta.push('✓ Valgt');
+        body.appendChild(el('div', 'gkmb3-storebag-meta', meta.join(' · ')));
+        pick.appendChild(body);
+        card.appendChild(pick);
+
+        if (product.product_url) {
+          var link = el('a', 'gkmb3-storebag-link', 'Se produkt ↗');
+          link.href = product.product_url;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          card.appendChild(link);
+        }
+
+        grid.appendChild(card);
+      })(STATE.storeBags[i]);
+    }
+
+    picker.appendChild(grid);
+    return picker;
   }
 
   function renderBagManager() {
@@ -657,6 +840,10 @@
 
     if (current) {
       card.appendChild(renderBagPhotoManager(current));
+
+      if (STATE.storeBagPickerOpen) {
+        card.appendChild(renderStoreBagPicker(current));
+      }
     }
 
     var toolbar = el('div', 'gkmb3-toolbar');
@@ -1197,6 +1384,12 @@
     STATE.catalogType = '';
     STATE.bagImageUrls = {};
     STATE.bagImageBusy = false;
+    STATE.storeBags = [];
+    STATE.storeBagSelections = {};
+    STATE.storeBagImageUrls = {};
+    STATE.storeBagImageLoading = {};
+    STATE.storeBagPickerOpen = false;
+    STATE.storeBagBusy = false;
   }
 
   function loadPublicTop3() {
@@ -1226,6 +1419,13 @@
         STATE.bags = [];
         STATE.activeBagId = null;
         STATE.discs = [];
+        STATE.bagImageUrls = {};
+        STATE.storeBags = [];
+        STATE.storeBagSelections = {};
+        STATE.storeBagImageUrls = {};
+        STATE.storeBagImageLoading = {};
+        STATE.storeBagPickerOpen = false;
+        STATE.storeBagBusy = false;
         render();
         return;
       }
@@ -1248,7 +1448,10 @@
         return loadBrands();
       })
       .then(function () {
-        return loadBags();
+        return Promise.all([
+          loadStoreBagCatalog(),
+          loadBags()
+        ]);
       })
       .then(function () {
         return loadActiveBagDiscs();
@@ -1271,6 +1474,163 @@
       .then(function (res) {
         if (res.error) throw res.error;
         STATE.brands = res.data || [];
+      });
+  }
+
+  function loadStoreBagCatalog() {
+    if (!STATE.user) {
+      STATE.storeBags = [];
+      return Promise.resolve();
+    }
+
+    return supabaseClient.rpc('minbag_get_golfkongen_bags')
+      .then(function (res) {
+        if (res.error) throw res.error;
+        STATE.storeBags = res.data || [];
+      });
+  }
+
+  function loadStoreBagSelections() {
+    STATE.storeBagSelections = {};
+
+    if (!STATE.user || !STATE.bags.length) {
+      return Promise.resolve();
+    }
+
+    return supabaseClient.rpc('minbag_get_my_bag_store_selections')
+      .then(function (res) {
+        if (res.error) throw res.error;
+
+        var rows = res.data || [];
+        var preloads = [];
+
+        for (var i = 0; i < rows.length; i += 1) {
+          var row = rows[i];
+          if (!row.quickbutik_product_id) continue;
+
+          STATE.storeBagSelections[row.bag_id] = row;
+          preloads.push(
+            ensureStoreBagImage(row.quickbutik_product_id)
+              .catch(function () {})
+          );
+        }
+
+        return Promise.all(preloads);
+      });
+  }
+
+  function ensureStoreBagImage(productId) {
+    var id = trim(productId);
+    if (!id) return Promise.resolve('');
+
+    if (Object.prototype.hasOwnProperty.call(STATE.storeBagImageUrls, id)) {
+      return Promise.resolve(STATE.storeBagImageUrls[id] || '');
+    }
+
+    if (STATE.storeBagImageLoading[id]) {
+      return STATE.storeBagImageLoading[id];
+    }
+
+    var url = CONFIG.WORKER_URL + CONFIG.STORE_BAG_IMAGE_ENDPOINT +
+      '?product_id=' + encodeURIComponent(id);
+
+    STATE.storeBagImageLoading[id] = fetch(url, {
+      method: 'GET',
+      credentials: 'omit',
+      cache: 'force-cache'
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error('Bildeoppslag feilet (' + res.status + ').');
+        return res.json();
+      })
+      .then(function (data) {
+        var images = data && Array.isArray(data.images) ? data.images : [];
+        var imageUrl = images.length && images[0].image_url
+          ? safe(images[0].image_url)
+          : '';
+        STATE.storeBagImageUrls[id] = imageUrl;
+        return imageUrl;
+      })
+      .catch(function (err) {
+        STATE.storeBagImageUrls[id] = '';
+        console.warn('[GK MIN BAG V3] Kunne ikke hente butikksekk-bilde', id, err);
+        return '';
+      })
+      .finally(function () {
+        delete STATE.storeBagImageLoading[id];
+      });
+
+    return STATE.storeBagImageLoading[id];
+  }
+
+  function observeStoreBagImage(holder, productId, name) {
+    if (!holder || !holder.isConnected) return;
+
+    function load() {
+      ensureStoreBagImage(productId).then(function (imageUrl) {
+        if (!holder || !holder.isConnected) return;
+        clear(holder);
+
+        if (imageUrl) {
+          var img = document.createElement('img');
+          img.src = imageUrl;
+          img.alt = safe(name || 'GolfKongen-sekk');
+          img.loading = 'lazy';
+          holder.appendChild(img);
+        } else {
+          holder.textContent = '🎒';
+          holder.style.fontSize = '24px';
+        }
+      });
+    }
+
+    if ('IntersectionObserver' in window) {
+      var observer = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i += 1) {
+          if (entries[i].isIntersecting) {
+            observer.disconnect();
+            load();
+            break;
+          }
+        }
+      }, { rootMargin: '120px' });
+      observer.observe(holder);
+    } else {
+      load();
+    }
+  }
+
+  function setGolfkongenBag(bag, product) {
+    if (!STATE.user || !bag || !bag.id || STATE.storeBagBusy || STATE.bagImageBusy) return;
+
+    var productId = product ? safe(product.quickbutik_product_id) : null;
+    var label = product ? safe(product.name) : 'eget bilde';
+
+    STATE.storeBagBusy = true;
+    render();
+    status(product ? 'Velger GolfKongen-sekk…' : 'Bytter til eget bilde…');
+
+    supabaseClient.rpc('minbag_set_golfkongen_bag', {
+      p_bag_id: bag.id,
+      p_quickbutik_product_id: productId
+    })
+      .then(function (res) {
+        if (res.error) throw res.error;
+        if (productId) return ensureStoreBagImage(productId);
+      })
+      .then(function () {
+        return loadBags(bag.id);
+      })
+      .then(function () {
+        STATE.storeBagBusy = false;
+        STATE.storeBagPickerOpen = false;
+        render();
+        status(product ? ('Sekken er satt til ' + label + '.') : 'Eget bilde er aktivt igjen.', 'ok');
+      })
+      .catch(function (err) {
+        STATE.storeBagBusy = false;
+        render();
+        status('Kunne ikke endre sekkvalg: ' + errorMessage(err), 'err');
       });
   }
 
@@ -1570,8 +1930,12 @@
         }
 
         STATE.activeBagId = nextId;
+        STATE.storeBagPickerOpen = false;
 
-        return loadBagImages();
+        return Promise.all([
+          loadBagImages(),
+          loadStoreBagSelections()
+        ]);
       });
   }
 
