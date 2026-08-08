@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.12';
+  var VERSION = '2026-08-08.12.1';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -2524,34 +2524,42 @@
   function saveRecoProfile() {
     if (!STATE.user || STATE.recoBusy) return;
 
-    STATE.recoBusy = true;
-    render();
-    status('Lagrer spillerprofil…');
-
-    supabaseClient.rpc('minbag_set_reco_profile', {
+    // Les svarene FØR render(), ellers blir skjemaet bygget opp på nytt
+    // og brukerens valgte verdier kan falle tilbake til profil/default.
+    var payload = {
       p_skill_level: getInputValue('gkmb3-reco-skill'),
       p_throw_distance_band: getInputValue('gkmb3-reco-distance'),
       p_handedness: getInputValue('gkmb3-reco-hand'),
       p_throw_style: getInputValue('gkmb3-reco-throw-style'),
       p_course_style: getInputValue('gkmb3-reco-course'),
       p_wind_style: getInputValue('gkmb3-reco-wind'),
-      p_include_putter_recommendations: getCheckboxValue('gkmb3-reco-putter')
-    }).then(function (res) {
-      if (res.error) throw res.error;
+      p_include_putter_recommendations: getChecked('gkmb3-reco-putter')
+    };
 
-      return loadRecoProfile();
-    }).then(function () {
-      STATE.recoProfileOpen = false;
-      return loadGapAnalysis();
-    }).then(function () {
-      STATE.recoBusy = false;
-      render();
-      status('Spillerprofil lagret og bagen analysert.', 'ok');
-    }).catch(function (err) {
-      STATE.recoBusy = false;
-      render();
-      status('Kunne ikke lagre spillerprofil: ' + errorMessage(err), 'err');
-    });
+    STATE.recoBusy = true;
+    render();
+    status('Lagrer spillerprofil…');
+
+    supabaseClient.rpc('minbag_set_reco_profile', payload)
+      .then(function (res) {
+        if (res.error) throw res.error;
+
+        return loadRecoProfile();
+      })
+      .then(function () {
+        STATE.recoProfileOpen = false;
+        return loadGapAnalysis();
+      })
+      .then(function () {
+        STATE.recoBusy = false;
+        render();
+        status('Spillerprofil lagret og bagen analysert.', 'ok');
+      })
+      .catch(function (err) {
+        STATE.recoBusy = false;
+        render();
+        status('Kunne ikke lagre spillerprofil: ' + errorMessage(err), 'err');
+      });
   }
 
   function loadBrands() {
