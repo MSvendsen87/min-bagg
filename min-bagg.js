@@ -17,6 +17,9 @@
    - Gi bag nytt navn via sikker RPC
    - Flytt fysisk disc mellom egne bager via sikker RPC
    - Ny bag opprettes i eget sidepanel, ikke browser-prompt
+   - Favoritt kan toggles direkte på disc-kortet
+   - Favoritter sorteres først innen hver disctype
+   - Ny disc kan legges direkte i valgfri egen bag
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -28,7 +31,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.9';
+  var VERSION = '2026-08-08.10';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -74,6 +77,7 @@
     newBagOpen: false,
     renameBagOpen: false,
     bagActionBusy: false,
+    addTargetBagId: null,
     editDiscId: null,
     discBusy: false,
     loading: false
@@ -131,6 +135,23 @@
       }
     }
     return null;
+  }
+
+  function bagById(bagId) {
+    for (var i = 0; i < STATE.bags.length; i += 1) {
+      if (STATE.bags[i].id === bagId) return STATE.bags[i];
+    }
+    return null;
+  }
+
+  function selectedAddBagId() {
+    var wanted = STATE.addTargetBagId || STATE.activeBagId;
+    return bagById(wanted) ? wanted : STATE.activeBagId;
+  }
+
+  function selectedAddBagName() {
+    var bag = bagById(selectedAddBagId());
+    return bag ? bag.name : 'aktiv bag';
   }
 
   function discTypeLabel(type) {
@@ -1100,6 +1121,19 @@
 
       if (!items.length) continue;
 
+      items.sort(function (a, b) {
+        if (!!a.is_favorite !== !!b.is_favorite) {
+          return a.is_favorite ? -1 : 1;
+        }
+
+        var aName = safe(a.mold_name || a.name).toLowerCase();
+        var bName = safe(b.mold_name || b.name).toLowerCase();
+        var nameCompare = aName.localeCompare(bName, 'nb');
+        if (nameCompare !== 0) return nameCompare;
+
+        return safe(a.created_at).localeCompare(safe(b.created_at));
+      });
+
       var section = el('div', 'gkmb3-category');
       var head = el('div', 'gkmb3-category-title');
       head.appendChild(el('strong', '', label));
@@ -1176,6 +1210,19 @@
       link.rel = 'noopener';
       actions.appendChild(link);
     }
+
+    var favoriteBtn = el(
+      'button',
+      disc.is_favorite ? 'gkmb3-btn' : 'gkmb3-btn secondary',
+      disc.is_favorite ? '★ Favoritt' : '☆ Favoritt'
+    );
+    favoriteBtn.type = 'button';
+    favoriteBtn.disabled = STATE.discBusy;
+    favoriteBtn.title = disc.is_favorite ? 'Fjern som favoritt' : 'Sett som favoritt / go-to disc';
+    favoriteBtn.onclick = function () {
+      toggleDiscFavorite(disc);
+    };
+    actions.appendChild(favoriteBtn);
 
     var editBtn = el(
       'button',
@@ -1362,6 +1409,33 @@
       '',
       'Velg en GolfKongen-disc eller registrer en disc manuelt.'
     ));
+
+    if (STATE.bags.length > 1) {
+      var targetField = el('label', 'gkmb3-field');
+      targetField.style.marginBottom = '12px';
+      targetField.appendChild(document.createTextNode('Legg discen i'));
+
+      var targetSelect = el('select', 'gkmb3-select');
+      targetSelect.id = 'gkmb3-add-target-bag';
+
+      var selectedTarget = selectedAddBagId();
+
+      for (var b = 0; b < STATE.bags.length; b += 1) {
+        var targetOption = document.createElement('option');
+        targetOption.value = STATE.bags[b].id;
+        targetOption.textContent = STATE.bags[b].name + (STATE.bags[b].is_default ? ' ★' : '');
+        if (STATE.bags[b].id === selectedTarget) targetOption.selected = true;
+        targetSelect.appendChild(targetOption);
+      }
+
+      targetSelect.onchange = function () {
+        STATE.addTargetBagId = safe(targetSelect.value);
+        status('Nye discer legges i ' + selectedAddBagName() + '.', '');
+      };
+
+      targetField.appendChild(targetSelect);
+      card.appendChild(targetField);
+    }
 
     var tabs = el('div', 'gkmb3-tabs');
 
@@ -1742,6 +1816,7 @@
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
     STATE.bagActionBusy = false;
+    STATE.addTargetBagId = null;
     STATE.editDiscId = null;
     STATE.discBusy = false;
   }
@@ -1783,6 +1858,7 @@
         STATE.newBagOpen = false;
         STATE.renameBagOpen = false;
         STATE.bagActionBusy = false;
+        STATE.addTargetBagId = null;
         STATE.editDiscId = null;
         STATE.discBusy = false;
         render();
@@ -2289,6 +2365,11 @@
         }
 
         STATE.activeBagId = nextId;
+
+        if (!bagById(STATE.addTargetBagId)) {
+          STATE.addTargetBagId = STATE.activeBagId;
+        }
+
         STATE.storeBagPickerOpen = false;
 
         return Promise.all([
@@ -2324,6 +2405,7 @@
     if (!bagId || bagId === STATE.activeBagId) return;
 
     STATE.activeBagId = bagId;
+    STATE.addTargetBagId = bagId;
     STATE.catalogResults = [];
     STATE.catalogQuery = '';
     STATE.catalogType = '';
@@ -2368,6 +2450,7 @@
       if (res.error) throw res.error;
 
       var newBagId = res.data;
+      STATE.addTargetBagId = newBagId;
 
       return loadBags(newBagId).then(function () {
         return loadActiveBagDiscs();
@@ -2489,6 +2572,42 @@
     });
   }
 
+
+  function toggleDiscFavorite(disc) {
+    if (!STATE.user || !disc || !disc.id || STATE.discBusy) return;
+
+    var nextFavorite = !disc.is_favorite;
+    var label = disc.name || disc.mold_name || 'Discen';
+
+    STATE.discBusy = true;
+    render();
+    status(nextFavorite ? 'Setter favoritt…' : 'Fjerner favoritt…');
+
+    supabaseClient.rpc('minbag_update_disc', {
+      p_disc_id: disc.id,
+      p_plastic: disc.plastic || null,
+      p_weight_grams: disc.weight_grams === null || disc.weight_grams === undefined ? null : disc.weight_grams,
+      p_color: disc.color || null,
+      p_note: disc.note || null,
+      p_is_favorite: nextFavorite
+    }).then(function (res) {
+      if (res.error) throw res.error;
+      return loadActiveBagDiscs();
+    }).then(function () {
+      STATE.discBusy = false;
+      render();
+      status(
+        nextFavorite
+          ? label + ' er satt som favoritt / go-to disc.'
+          : label + ' er fjernet som favoritt.',
+        'ok'
+      );
+    }).catch(function (err) {
+      STATE.discBusy = false;
+      render();
+      status('Kunne ikke endre favoritt: ' + errorMessage(err), 'err');
+    });
+  }
 
   function updateDisc(disc) {
     if (!STATE.user || !disc || !disc.id || STATE.discBusy) return;
@@ -2663,56 +2782,78 @@
   }
 
   function addCatalogDisc(product) {
-    if (!STATE.activeBagId || !product || !product.id) {
-      status('Mangler aktiv bag eller katalog-ID.', 'err');
+    var targetBagId = selectedAddBagId();
+
+    if (!targetBagId || !product || !product.id) {
+      status('Mangler målbag eller katalog-ID.', 'err');
       return;
     }
 
-    var duplicate = findCatalogDuplicate(product);
+    var targetName = selectedAddBagName();
 
-    if (duplicate) {
-      var proceed = confirm(
-        'Du har allerede en ' +
-        (duplicate.brand ? duplicate.brand + ' ' : '') +
-        (duplicate.mold_name || duplicate.name) +
-        ' i denne baggen.\n\nVil du legge til enda ett eksemplar?'
-      );
+    setLoading(true, 'Kontrollerer ' + targetName + '…');
 
-      if (!proceed) return;
-    }
+    getDiscsForDuplicateCheck(targetBagId)
+      .then(function (targetDiscs) {
+        var duplicate = findCatalogDuplicate(product, targetDiscs);
 
-    setLoading(true, 'Legger disc i bag…');
+        if (duplicate) {
+          var proceed = confirm(
+            'Du har allerede en ' +
+            (duplicate.brand ? duplicate.brand + ' ' : '') +
+            (duplicate.mold_name || duplicate.name) +
+            ' i "' + targetName + '".\n\nVil du legge til enda ett eksemplar?'
+          );
 
-    supabaseClient.rpc('minbag_add_catalog_disc', {
-      p_bag_id: STATE.activeBagId,
-      p_catalog_id: product.id,
-      p_weight_grams: null,
-      p_color: null,
-      p_note: null
-    }).then(function (res) {
-      if (res.error) throw res.error;
+          if (!proceed) return null;
+        }
 
-      return Promise.all([
-        loadBags(STATE.activeBagId),
-        loadActiveBagDiscs(),
-        loadPublicTop3()
-      ]);
-    }).then(function () {
-      setLoading(false);
-      render();
-      status('Disc lagt til fra GolfKongen.', 'ok');
-    }).catch(function (err) {
-      setLoading(false);
-      status('Kunne ikke legge til disc: ' + errorMessage(err), 'err');
-    });
+        status('Legger disc i ' + targetName + '…');
+
+        return supabaseClient.rpc('minbag_add_catalog_disc', {
+          p_bag_id: targetBagId,
+          p_catalog_id: product.id,
+          p_weight_grams: null,
+          p_color: null,
+          p_note: null
+        });
+      })
+      .then(function (res) {
+        if (!res) {
+          setLoading(false);
+          status('Discen ble ikke lagt til.', '');
+          return null;
+        }
+
+        if (res.error) throw res.error;
+
+        return Promise.all([
+          loadBags(STATE.activeBagId),
+          loadActiveBagDiscs(),
+          loadPublicTop3()
+        ]);
+      })
+      .then(function (result) {
+        if (result === null) return;
+        setLoading(false);
+        render();
+        status('Disc lagt til fra GolfKongen i ' + targetName + '.', 'ok');
+      })
+      .catch(function (err) {
+        setLoading(false);
+        status('Kunne ikke legge til disc: ' + errorMessage(err), 'err');
+      });
   }
 
   function addManualDisc() {
-    if (!STATE.activeBagId) {
-      status('Mangler aktiv bag.', 'err');
+    var targetBagId = selectedAddBagId();
+
+    if (!targetBagId) {
+      status('Mangler målbag.', 'err');
       return;
     }
 
+    var targetName = selectedAddBagName();
     var brandNode = document.getElementById('gkmb3-manual-brand');
     var selected = brandNode && brandNode.options.length
       ? brandNode.options[brandNode.selectedIndex]
@@ -2752,53 +2893,70 @@
       return;
     }
 
-    var duplicate = findManualDuplicate(mold, brandId, customBrand);
+    var selectedBrand = manualBrandName(brandId, customBrand);
 
-    if (duplicate) {
-      var proceed = confirm(
-        'Du har allerede en ' +
-        (duplicate.brand ? duplicate.brand + ' ' : '') +
-        (duplicate.mold_name || duplicate.name) +
-        ' i denne baggen.\n\nVil du legge til enda ett eksemplar?'
-      );
+    setLoading(true, 'Kontrollerer ' + targetName + '…');
 
-      if (!proceed) return;
-    }
+    getDiscsForDuplicateCheck(targetBagId)
+      .then(function (targetDiscs) {
+        var duplicate = findDuplicateByMold(selectedBrand, mold, targetDiscs);
 
-    setLoading(true, 'Lagrer egen disc…');
+        if (duplicate) {
+          var proceed = confirm(
+            'Du har allerede en ' +
+            (duplicate.brand ? duplicate.brand + ' ' : '') +
+            (duplicate.mold_name || duplicate.name) +
+            ' i "' + targetName + '".\n\nVil du legge til enda ett eksemplar?'
+          );
 
-    supabaseClient.rpc('minbag_add_manual_disc', {
-      p_bag_id: STATE.activeBagId,
-      p_brand_id: brandId,
-      p_name: name,
-      p_mold_name: mold,
-      p_disc_type: type,
-      p_custom_brand: isCustom ? customBrand : null,
-      p_plastic: plastic || null,
-      p_speed: numOrNull(getInputValue('gkmb3-manual-speed')),
-      p_glide: numOrNull(getInputValue('gkmb3-manual-glide')),
-      p_turn: numOrNull(getInputValue('gkmb3-manual-turn')),
-      p_fade: numOrNull(getInputValue('gkmb3-manual-fade')),
-      p_weight_grams: numOrNull(getInputValue('gkmb3-manual-weight')),
-      p_color: getInputValue('gkmb3-manual-color') || null,
-      p_note: getInputValue('gkmb3-manual-note') || null,
-      p_is_favorite: getChecked('gkmb3-manual-favorite')
-    }).then(function (res) {
-      if (res.error) throw res.error;
+          if (!proceed) return null;
+        }
 
-      return Promise.all([
-        loadBags(STATE.activeBagId),
-        loadActiveBagDiscs(),
-        loadPublicTop3()
-      ]);
-    }).then(function () {
-      setLoading(false);
-      render();
-      status('Egen disc lagret.', 'ok');
-    }).catch(function (err) {
-      setLoading(false);
-      status('Kunne ikke lagre disc: ' + errorMessage(err), 'err');
-    });
+        status('Lagrer egen disc i ' + targetName + '…');
+
+        return supabaseClient.rpc('minbag_add_manual_disc', {
+          p_bag_id: targetBagId,
+          p_brand_id: brandId,
+          p_name: name,
+          p_mold_name: mold,
+          p_disc_type: type,
+          p_custom_brand: isCustom ? customBrand : null,
+          p_plastic: plastic || null,
+          p_speed: numOrNull(getInputValue('gkmb3-manual-speed')),
+          p_glide: numOrNull(getInputValue('gkmb3-manual-glide')),
+          p_turn: numOrNull(getInputValue('gkmb3-manual-turn')),
+          p_fade: numOrNull(getInputValue('gkmb3-manual-fade')),
+          p_weight_grams: numOrNull(getInputValue('gkmb3-manual-weight')),
+          p_color: getInputValue('gkmb3-manual-color') || null,
+          p_note: getInputValue('gkmb3-manual-note') || null,
+          p_is_favorite: getChecked('gkmb3-manual-favorite')
+        });
+      })
+      .then(function (res) {
+        if (!res) {
+          setLoading(false);
+          status('Discen ble ikke lagt til.', '');
+          return null;
+        }
+
+        if (res.error) throw res.error;
+
+        return Promise.all([
+          loadBags(STATE.activeBagId),
+          loadActiveBagDiscs(),
+          loadPublicTop3()
+        ]);
+      })
+      .then(function (result) {
+        if (result === null) return;
+        setLoading(false);
+        render();
+        status('Egen disc lagret i ' + targetName + '.', 'ok');
+      })
+      .catch(function (err) {
+        setLoading(false);
+        status('Kunne ikke lagre disc: ' + errorMessage(err), 'err');
+      });
   }
 
   function normalizeLocalKey(value) {
@@ -2810,15 +2968,17 @@
       .replace(/^-+|-+$/g, '');
   }
 
-  function findDuplicateByMold(brandName, moldName) {
+  function findDuplicateByMold(brandName, moldName, discs) {
     var wanted = normalizeLocalKey(
       safe(brandName) + ' ' + safe(moldName)
     );
 
     if (!wanted) return null;
 
-    for (var i = 0; i < STATE.discs.length; i += 1) {
-      var disc = STATE.discs[i];
+    var rows = discs || STATE.discs;
+
+    for (var i = 0; i < rows.length; i += 1) {
+      var disc = rows[i];
 
       if (disc.mold_key && normalizeLocalKey(disc.mold_key) === wanted) {
         return disc;
@@ -2836,28 +2996,49 @@
     return null;
   }
 
-  function findCatalogDuplicate(product) {
+  function getDiscsForDuplicateCheck(bagId) {
+    if (bagId === STATE.activeBagId) {
+      return Promise.resolve(STATE.discs.slice());
+    }
+
+    return supabaseClient
+      .from('minbag_discs')
+      .select('id,brand,mold_name,name,mold_key')
+      .eq('bag_id', bagId)
+      .then(function (res) {
+        if (res.error) throw res.error;
+        return res.data || [];
+      });
+  }
+
+  function findCatalogDuplicate(product, discs) {
     if (!product) return null;
 
     return findDuplicateByMold(
       product.brand,
-      product.mold_name || product.product_name
+      product.mold_name || product.product_name,
+      discs
     );
   }
 
-  function findManualDuplicate(moldName, brandId, customBrand) {
-    var selectedBrand = '';
-
+  function manualBrandName(brandId, customBrand) {
     for (var i = 0; i < STATE.brands.length; i += 1) {
       if (Number(STATE.brands[i].id) === Number(brandId)) {
-        selectedBrand = STATE.brands[i].is_custom
+        return STATE.brands[i].is_custom
           ? customBrand
           : STATE.brands[i].name;
-        break;
       }
     }
 
-    return findDuplicateByMold(selectedBrand, moldName);
+    return customBrand || '';
+  }
+
+  function findManualDuplicate(moldName, brandId, customBrand, discs) {
+    return findDuplicateByMold(
+      manualBrandName(brandId, customBrand),
+      moldName,
+      discs
+    );
   }
 
   function boot() {
