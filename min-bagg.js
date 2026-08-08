@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.18';
+  var VERSION = '2026-08-08.18.1';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -1343,12 +1343,24 @@
       card.appendChild(renderCourseSubmitForm());
     }
 
+    var courseCountText = '';
+    if (STATE.coursesLoaded && !STATE.courseSearchBusy) {
+      courseCountText =
+        ' · ' +
+        STATE.courses.length +
+        ' treff';
+    }
+
     card.appendChild(el(
       'div',
       'gkmb3-course-sectiontitle',
       STATE.courseQuery
-        ? 'Treff for «' + STATE.courseQuery + '»'
-        : 'Offentlige baner'
+        ? 'Treff for «' +
+          STATE.courseQuery +
+          '»' +
+          courseCountText
+        : 'Offentlige baner' +
+          courseCountText
     ));
 
     if (!STATE.coursesLoaded || STATE.courseSearchBusy) {
