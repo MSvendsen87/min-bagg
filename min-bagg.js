@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.15';
+  var VERSION = '2026-08-08.16';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -103,6 +103,14 @@
     bagScore: null,
     bagScoreLoaded: false,
     bagScoreError: '',
+    throwDistance: '',
+    throwWind: 'calm',
+    throwLine: 'straight',
+    throwType: '',
+    throwResults: [],
+    throwHasSearched: false,
+    throwBusy: false,
+    throwError: '',
     recoBusy: false,
     loading: false
   };
@@ -326,6 +334,26 @@
       '.gkmb3-bagscore-meta span{padding:5px 7px;border-radius:999px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.72);font-size:9px;font-weight:850;}' +
       '.gkmb3-bagscore-next{margin-top:9px;padding:8px 10px;border-radius:11px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.17);color:#bbf7d0;font-size:9px;font-weight:800;line-height:1.45;}' +
       '@media(max-width:700px){.gkmb3-bagscore-top{grid-template-columns:1fr;}.gkmb3-bagscore-number{min-width:0;}.gkmb3-bagscore-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
+      '.gkmb3-throwadvisor{margin-top:12px;padding:12px;border-radius:16px;border:1px solid rgba(59,130,246,.24);background:linear-gradient(135deg,rgba(30,64,175,.12),rgba(2,10,6,.34));}' +
+      '.gkmb3-throwadvisor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:9px;}' +
+      '.gkmb3-throwadvisor-head h4{margin:0;color:#fff;font-size:13px;}' +
+      '.gkmb3-throwadvisor-head p{margin:4px 0 0;color:rgba(255,255,255,.58);font-size:9px;line-height:1.45;max-width:650px;}' +
+      '.gkmb3-throwgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;}' +
+      '.gkmb3-throwactions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;}' +
+      '.gkmb3-throwresults{display:grid;gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid rgba(59,130,246,.18);}' +
+      '.gkmb3-throwresult{display:grid;grid-template-columns:58px minmax(0,1fr);gap:10px;padding:10px;border-radius:13px;border:1px solid rgba(59,130,246,.18);background:rgba(2,10,20,.34);}' +
+      '.gkmb3-throwresult.best{border-color:rgba(34,197,94,.40);background:linear-gradient(135deg,rgba(20,83,45,.18),rgba(2,10,20,.38));}' +
+      '.gkmb3-throwimg{width:58px;height:58px;border-radius:11px;overflow:hidden;display:grid;place-items:center;background:#080d0a;border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.35);font-size:9px;font-weight:900;}' +
+      '.gkmb3-throwimg img{width:100%;height:100%;object-fit:contain;display:block;}' +
+      '.gkmb3-throwtop{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}' +
+      '.gkmb3-throwname{font-size:12px;font-weight:950;color:#fff;line-height:1.25;}' +
+      '.gkmb3-throwscore{flex:0 0 auto;padding:4px 7px;border-radius:999px;background:#2563eb;color:#fff;font-size:9px;font-weight:950;white-space:nowrap;}' +
+      '.gkmb3-throwresult.best .gkmb3-throwscore{background:#16a34a;}' +
+      '.gkmb3-throwlabel{margin-top:2px;color:#93c5fd;font-size:9px;font-weight:950;}' +
+      '.gkmb3-throwmeta{margin-top:3px;color:rgba(255,255,255,.55);font-size:9px;font-weight:750;}' +
+      '.gkmb3-throwreason{margin-top:6px;color:rgba(255,255,255,.66);font-size:9px;line-height:1.45;}' +
+      '@media(max-width:850px){.gkmb3-throwgrid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
+      '@media(max-width:520px){.gkmb3-throwgrid{grid-template-columns:1fr;}.gkmb3-throwresult{grid-template-columns:48px minmax(0,1fr);}.gkmb3-throwimg{width:48px;height:48px;}}' +
       '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
       '.gkmb3-bagform{margin-top:11px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.16));}' +
       '.gkmb3-bagform-title{font-size:13px;font-weight:950;color:#fff;margin-bottom:3px;}' +
@@ -1965,6 +1993,252 @@
     return wrap;
   }
 
+  function ensureThrowDefaults() {
+    if (!STATE.throwDistance) {
+      var profileDistance =
+        STATE.recoProfile &&
+        STATE.recoProfile.throw_distance_band
+          ? STATE.recoProfile.throw_distance_band
+          : '60_80';
+
+      if (profileDistance === 'under_60') {
+        STATE.throwDistance = '40_60';
+      } else if (profileDistance === '60_80') {
+        STATE.throwDistance = '60_80';
+      } else if (profileDistance === '80_100') {
+        STATE.throwDistance = '80_100';
+      } else {
+        STATE.throwDistance = '100_plus';
+      }
+    }
+
+    if (!STATE.throwType) {
+      STATE.throwType =
+        STATE.recoProfile &&
+        STATE.recoProfile.throw_style === 'forehand'
+          ? 'forehand'
+          : 'backhand';
+    }
+  }
+
+  function renderThrowResult(row, index) {
+    var result = el(
+      'article',
+      'gkmb3-throwresult' + (index === 0 ? ' best' : '')
+    );
+
+    var image = el('div', 'gkmb3-throwimg');
+
+    if (row.image_url) {
+      var img = document.createElement('img');
+      img.src = row.image_url;
+      img.alt = row.name || 'Disc';
+      img.loading = 'lazy';
+      image.appendChild(img);
+    } else {
+      image.textContent = 'DISC';
+    }
+
+    result.appendChild(image);
+
+    var body = el('div', '');
+    var top = el('div', 'gkmb3-throwtop');
+
+    top.appendChild(el(
+      'div',
+      'gkmb3-throwname',
+      '#' + (index + 1) + ' ' + safe(row.name)
+    ));
+
+    top.appendChild(el(
+      'div',
+      'gkmb3-throwscore',
+      Math.round(Number(row.throw_score) || 0) + ' %'
+    ));
+
+    body.appendChild(top);
+
+    body.appendChild(el(
+      'div',
+      'gkmb3-throwlabel',
+      safe(row.throw_label || (index === 0 ? 'Beste valg' : 'Alternativ'))
+    ));
+
+    var meta = [];
+    if (row.brand) meta.push(row.brand);
+    if (row.plastic) meta.push(row.plastic);
+    if (row.weight_grams !== null && row.weight_grams !== undefined) {
+      meta.push(safe(row.weight_grams) + ' g');
+    }
+    if (row.color) meta.push(row.color);
+    if (row.is_favorite) meta.push('★ Favoritt');
+
+    if (meta.length) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-throwmeta',
+        meta.join(' · ')
+      ));
+    }
+
+    body.appendChild(renderFlight(
+      row.speed,
+      row.glide,
+      row.turn,
+      row.fade
+    ));
+
+    if (row.throw_reason) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-throwreason',
+        safe(row.throw_reason)
+      ));
+    }
+
+    if (row.product_url) {
+      var actions = el('div', 'gkmb3-toolbar');
+      actions.style.marginTop = '7px';
+
+      var open = el(
+        'a',
+        'gkmb3-btn secondary',
+        'Se hos GolfKongen'
+      );
+      open.href = row.product_url;
+      open.target = '_blank';
+      open.rel = 'noopener';
+
+      actions.appendChild(open);
+      body.appendChild(actions);
+    }
+
+    result.appendChild(body);
+    return result;
+  }
+
+  function renderThrowAdvisor() {
+    ensureThrowDefaults();
+
+    var wrap = el('section', 'gkmb3-throwadvisor');
+    var head = el('div', 'gkmb3-throwadvisor-head');
+    var copy = el('div', '');
+
+    copy.appendChild(el('h4', '', '🥏 Hva bør jeg kaste?'));
+    copy.appendChild(el(
+      'p',
+      '',
+      'Velg kastet du står foran. Min Bag rangerer bare discene du faktisk har i denne bagen og forklarer hvorfor.'
+    ));
+
+    head.appendChild(copy);
+    wrap.appendChild(head);
+
+    var grid = el('div', 'gkmb3-throwgrid');
+
+    grid.appendChild(field(
+      'Avstand',
+      createRecoSelect(
+        'gkmb3-throw-distance',
+        [
+          ['under_40', 'Under 40 m'],
+          ['40_60', '40–60 m'],
+          ['60_80', '60–80 m'],
+          ['80_100', '80–100 m'],
+          ['100_plus', '100+ m']
+        ],
+        STATE.throwDistance
+      )
+    ));
+
+    grid.appendChild(field(
+      'Vind',
+      createRecoSelect(
+        'gkmb3-throw-wind',
+        [
+          ['calm', 'Lite / ingen vind'],
+          ['headwind', 'Motvind'],
+          ['tailwind', 'Medvind'],
+          ['crosswind', 'Sidevind']
+        ],
+        STATE.throwWind
+      )
+    ));
+
+    grid.appendChild(field(
+      'Ønsket linje',
+      createRecoSelect(
+        'gkmb3-throw-line',
+        [
+          ['straight', 'Rett'],
+          ['hyzer', 'Hyzer'],
+          ['turnover', 'Turnover'],
+          ['flex', 'Flex / S-kurve'],
+          ['max_distance', 'Maks lengde']
+        ],
+        STATE.throwLine
+      )
+    ));
+
+    grid.appendChild(field(
+      'Kast',
+      createRecoSelect(
+        'gkmb3-throw-type',
+        [
+          ['backhand', 'Backhand'],
+          ['forehand', 'Forehand']
+        ],
+        STATE.throwType
+      )
+    ));
+
+    wrap.appendChild(grid);
+
+    var actions = el('div', 'gkmb3-throwactions');
+
+    var find = el(
+      'button',
+      'gkmb3-btn',
+      STATE.throwBusy ? 'Vurderer bagen…' : '🥏 Finn beste disc'
+    );
+    find.type = 'button';
+    find.disabled = !!STATE.throwBusy;
+    find.onclick = findBestThrowDisc;
+
+    actions.appendChild(find);
+    wrap.appendChild(actions);
+
+    if (STATE.throwHasSearched) {
+      if (STATE.throwBusy) {
+        wrap.appendChild(el(
+          'div',
+          'gkmb3-note',
+          'Sammenligner flightene i bagen…'
+        ));
+      } else if (STATE.throwResults.length) {
+        var results = el('div', 'gkmb3-throwresults');
+
+        for (var i = 0; i < STATE.throwResults.length; i += 1) {
+          results.appendChild(
+            renderThrowResult(STATE.throwResults[i], i)
+          );
+        }
+
+        wrap.appendChild(results);
+      } else {
+        wrap.appendChild(el(
+          'div',
+          'gkmb3-note',
+          STATE.throwError
+            ? 'Kunne ikke beregne kastanbefalingen akkurat nå.'
+            : 'Fant ingen discer med komplette flight-tall for dette kastet.'
+        ));
+      }
+    }
+
+    return wrap;
+  }
+
   function renderRecommendationPanel() {
     var card = el('section', 'gkmb3-card gkmb3-reco');
     var head = el('div', 'gkmb3-recohead');
@@ -2030,6 +2304,7 @@
 
     if (STATE.discs.length) {
       card.appendChild(renderBagScore());
+      card.appendChild(renderThrowAdvisor());
     }
 
     if (!STATE.discs.length) {
@@ -2945,6 +3220,14 @@
     STATE.bagScore = null;
     STATE.bagScoreLoaded = false;
     STATE.bagScoreError = '';
+    STATE.throwDistance = '';
+    STATE.throwWind = 'calm';
+    STATE.throwLine = 'straight';
+    STATE.throwType = '';
+    STATE.throwResults = [];
+    STATE.throwHasSearched = false;
+    STATE.throwBusy = false;
+    STATE.throwError = '';
     STATE.recoBusy = false;
   }
 
@@ -2993,6 +3276,10 @@
         STATE.recoProfileOpen = false;
         STATE.recoFindings = [];
         STATE.recoLoaded = false;
+        STATE.throwResults = [];
+        STATE.throwHasSearched = false;
+        STATE.throwBusy = false;
+        STATE.throwError = '';
         STATE.recoBusy = false;
         render();
         return;
@@ -3054,6 +3341,68 @@
           STATE.recoProfileOpen = true;
         }
       });
+  }
+
+  function findBestThrowDisc() {
+    if (!STATE.user || !STATE.activeBagId || STATE.throwBusy) return;
+
+    var distance = getInputValue('gkmb3-throw-distance');
+    var wind = getInputValue('gkmb3-throw-wind');
+    var line = getInputValue('gkmb3-throw-line');
+    var throwType = getInputValue('gkmb3-throw-type');
+
+    STATE.throwDistance = distance || STATE.throwDistance || '60_80';
+    STATE.throwWind = wind || STATE.throwWind || 'calm';
+    STATE.throwLine = line || STATE.throwLine || 'straight';
+    STATE.throwType = throwType || STATE.throwType || 'backhand';
+
+    STATE.throwBusy = true;
+    STATE.throwHasSearched = true;
+    STATE.throwResults = [];
+    STATE.throwError = '';
+
+    render();
+    status('Vurderer discene i bagen…');
+
+    supabaseClient.rpc(
+      'minbag_get_throw_recommendations',
+      {
+        p_bag_id: STATE.activeBagId,
+        p_distance_band: STATE.throwDistance,
+        p_wind: STATE.throwWind,
+        p_line: STATE.throwLine,
+        p_throw_type: STATE.throwType
+      }
+    ).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.throwResults = res.data || [];
+      STATE.throwBusy = false;
+      render();
+
+      if (STATE.throwResults.length) {
+        status(
+          'Beste disc for kastet er ' +
+          safe(STATE.throwResults[0].name) +
+          '.',
+          'ok'
+        );
+      } else {
+        status(
+          'Fant ingen discer med komplette flight-tall for kastet.',
+          ''
+        );
+      }
+    }).catch(function (err) {
+      STATE.throwResults = [];
+      STATE.throwBusy = false;
+      STATE.throwError = errorMessage(err);
+      render();
+      status(
+        'Kunne ikke finne beste disc: ' + errorMessage(err),
+        'err'
+      );
+    });
   }
 
   function loadFunRecommendations() {
@@ -3748,6 +4097,10 @@
       STATE.bagScore = null;
       STATE.bagScoreLoaded = true;
       STATE.bagScoreError = '';
+      STATE.throwResults = [];
+      STATE.throwHasSearched = false;
+      STATE.throwBusy = false;
+      STATE.throwError = '';
       return Promise.resolve();
     }
 
@@ -3764,6 +4117,10 @@
       .then(function (res) {
         if (res.error) throw res.error;
         STATE.discs = res.data || [];
+        STATE.throwResults = [];
+        STATE.throwHasSearched = false;
+        STATE.throwBusy = false;
+        STATE.throwError = '';
         return loadGapAnalysis();
       });
   }
@@ -3792,6 +4149,10 @@
     STATE.bagScore = null;
     STATE.bagScoreLoaded = false;
     STATE.bagScoreError = '';
+    STATE.throwResults = [];
+    STATE.throwHasSearched = false;
+    STATE.throwBusy = false;
+    STATE.throwError = '';
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
 
