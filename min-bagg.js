@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.13';
+  var VERSION = '2026-08-08.14';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -95,6 +95,11 @@
     recoProducts: [],
     recoProductsLoaded: false,
     recoProductsError: '',
+    funRecommendations: [],
+    funRecommendationsLoaded: false,
+    funRecommendationsError: '',
+    funRecommendationsPage: 0,
+    funRecommendationsBusy: false,
     recoBusy: false,
     loading: false
   };
@@ -290,6 +295,17 @@
       '.gkmb3-recomatch .gkmb3-flight{margin-top:5px;}' +
       '.gkmb3-recomatch .gkmb3-toolbar{margin-top:6px;gap:5px;}' +
       '.gkmb3-recomatch .gkmb3-btn{min-height:31px;padding:7px 9px;font-size:9px;border-radius:10px;}' +
+      '.gkmb3-fun{margin-top:12px;padding:12px;border-radius:16px;border:1px solid rgba(168,85,247,.28);background:linear-gradient(135deg,rgba(88,28,135,.13),rgba(2,10,6,.35));}' +
+      '.gkmb3-funhead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px;}' +
+      '.gkmb3-funhead h4{margin:0;color:#fff;font-size:13px;line-height:1.2;}' +
+      '.gkmb3-funhead p{margin:4px 0 0;color:rgba(255,255,255,.57);font-size:9px;line-height:1.45;max-width:620px;}' +
+      '.gkmb3-funlist{display:grid;gap:7px;}' +
+      '.gkmb3-fun .gkmb3-recomatch{border-color:rgba(168,85,247,.22);}' +
+      '.gkmb3-fun .gkmb3-recomatch.best{border-color:rgba(168,85,247,.38);background:linear-gradient(135deg,rgba(126,34,206,.12),rgba(2,10,6,.45));}' +
+      '.gkmb3-funbadge{flex:0 0 auto;padding:4px 7px;border-radius:999px;background:linear-gradient(135deg,#7e22ce,#a855f7);color:#fff;font-size:9px;font-weight:950;white-space:nowrap;}' +
+      '.gkmb3-funchallenge{padding:11px;border-radius:12px;border:1px dashed rgba(168,85,247,.35);background:rgba(88,28,135,.08);}' +
+      '.gkmb3-funchallenge strong{display:block;color:#fff;font-size:11px;margin-bottom:4px;}' +
+      '.gkmb3-funchallenge div{color:rgba(255,255,255,.62);font-size:9px;line-height:1.45;}' +
       '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
       '.gkmb3-bagform{margin-top:11px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.16));}' +
       '.gkmb3-bagform-title{font-size:13px;font-weight:950;color:#fff;margin-bottom:3px;}' +
@@ -1601,6 +1617,199 @@
     return row;
   }
 
+  function localFunChallenge() {
+    if (STATE.discs.length) {
+      var index =
+        Math.abs(Number(STATE.funRecommendationsPage) || 0) %
+        STATE.discs.length;
+
+      var disc = STATE.discs[index];
+      var discName =
+        safe(disc.mold_name || disc.name || 'en disc fra bagen');
+
+      return {
+        challenge_only: true,
+        fun_label: 'Bag-utfordring',
+        product_name: discName,
+        fun_reason:
+          'Spill de neste 3 hullene med bare ' +
+          discName +
+          '. Prøv minst én linje eller vinkel du vanligvis ikke ville valgt.'
+      };
+    }
+
+    return {
+      challenge_only: true,
+      fun_label: 'Mini-bag challenge',
+      product_name: '3 discer – 1 runde',
+      fun_reason:
+        'Velg én putter, én midrange og én driver og spill en runde uten andre discer. En enkel måte å lære flightene bedre på.'
+    };
+  }
+
+  function renderFunRecommendation(rec, index) {
+    if (rec.challenge_only) {
+      var challenge = el('div', 'gkmb3-funchallenge');
+      challenge.appendChild(el(
+        'strong',
+        '',
+        '🎲 ' + safe(rec.fun_label) + ': ' + safe(rec.product_name)
+      ));
+      challenge.appendChild(el(
+        'div',
+        '',
+        safe(rec.fun_reason)
+      ));
+      return challenge;
+    }
+
+    var row = el(
+      'article',
+      'gkmb3-recomatch' + (index === 0 ? ' best' : '')
+    );
+
+    var image = el('div', 'gkmb3-recomatch-img');
+
+    if (rec.image_url) {
+      var img = document.createElement('img');
+      img.src = rec.image_url;
+      img.alt = rec.product_name || 'Gøy disc å prøve';
+      img.loading = 'lazy';
+      image.appendChild(img);
+    } else {
+      image.textContent = 'DISC';
+    }
+
+    row.appendChild(image);
+
+    var body = el('div', '');
+    var top = el('div', 'gkmb3-recomatch-top');
+
+    top.appendChild(el(
+      'div',
+      'gkmb3-recomatch-name',
+      safe(rec.product_name)
+    ));
+
+    top.appendChild(el(
+      'div',
+      'gkmb3-funbadge',
+      '🎲 ' + safe(rec.fun_label || 'Wildcard')
+    ));
+
+    body.appendChild(top);
+
+    var sub = [];
+    if (rec.brand) sub.push(rec.brand);
+    if (rec.plastic) sub.push(rec.plastic);
+    if (rec.disc_type) sub.push(recoTypeLabel(rec.disc_type));
+
+    if (sub.length) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-recomatch-sub',
+        sub.join(' · ')
+      ));
+    }
+
+    body.appendChild(renderFlight(
+      rec.speed,
+      rec.glide,
+      rec.turn,
+      rec.fade
+    ));
+
+    if (rec.fun_reason) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-recomatch-reason',
+        safe(rec.fun_reason)
+      ));
+    }
+
+    body.appendChild(el(
+      'div',
+      'gkmb3-recomatch-price',
+      rec.price_nok !== null && rec.price_nok !== undefined
+        ? safe(rec.price_nok) + ' kr · På lager'
+        : 'På lager'
+    ));
+
+    var toolbar = el('div', 'gkmb3-toolbar');
+
+    var add = el('button', 'gkmb3-btn', 'Legg i denne bagen');
+    add.type = 'button';
+    add.onclick = function () {
+      addFunRecommendedDisc(rec);
+    };
+    toolbar.appendChild(add);
+
+    if (rec.product_url) {
+      var open = el('a', 'gkmb3-btn secondary', 'Se produkt');
+      open.href = rec.product_url;
+      open.target = '_blank';
+      open.rel = 'noopener';
+      toolbar.appendChild(open);
+    }
+
+    body.appendChild(toolbar);
+    row.appendChild(body);
+
+    return row;
+  }
+
+  function renderFunRecommendations() {
+    var wrap = el('section', 'gkmb3-fun');
+
+    var head = el('div', 'gkmb3-funhead');
+    var textWrap = el('div', '');
+
+    textWrap.appendChild(el('h4', '', '🎲 Gøy å prøve'));
+    textWrap.appendChild(el(
+      'p',
+      '',
+      'Denne delen blir ikke ferdig selv om bagen blir komplett. Her får du nye molds, litt mer utfordrende flights og wildcards bare fordi discgolf skal være gøy.'
+    ));
+    head.appendChild(textWrap);
+
+    var refresh = el(
+      'button',
+      'gkmb3-btn secondary',
+      STATE.funRecommendationsBusy ? 'Finner nye…' : '🎲 Gi meg 3 nye'
+    );
+    refresh.type = 'button';
+    refresh.disabled = !!STATE.funRecommendationsBusy;
+    refresh.onclick = refreshFunRecommendations;
+    head.appendChild(refresh);
+
+    wrap.appendChild(head);
+
+    if (!STATE.funRecommendationsLoaded) {
+      wrap.appendChild(el(
+        'div',
+        'gkmb3-note',
+        'Finner noen morsomme utfordringer…'
+      ));
+      return wrap;
+    }
+
+    var rows = STATE.funRecommendations.slice(0, 3);
+
+    // Denne kategorien skal aldri stå tom.
+    if (!rows.length) {
+      rows = [localFunChallenge()];
+    }
+
+    var list = el('div', 'gkmb3-funlist');
+
+    for (var i = 0; i < rows.length; i += 1) {
+      list.appendChild(renderFunRecommendation(rows[i], i));
+    }
+
+    wrap.appendChild(list);
+    return wrap;
+  }
+
   function renderRecommendationPanel() {
     var card = el('section', 'gkmb3-card gkmb3-reco');
     var head = el('div', 'gkmb3-recohead');
@@ -1673,6 +1882,7 @@
         'Når bagen har discer analyserer vi flight-dekning, speed-områder og mulig overlapp.'
       ));
       card.appendChild(emptyBag);
+      card.appendChild(renderFunRecommendations());
       return card;
     }
 
@@ -1690,6 +1900,7 @@
         'Analysen finner ingen klare mangler eller kraftig overlapp i denne bagen akkurat nå.'
       ));
       card.appendChild(clean);
+      card.appendChild(renderFunRecommendations());
       return card;
     }
 
@@ -1778,6 +1989,7 @@
     }
 
     card.appendChild(list);
+    card.appendChild(renderFunRecommendations());
     return card;
   }
 
@@ -2566,6 +2778,11 @@
     STATE.recoProducts = [];
     STATE.recoProductsLoaded = false;
     STATE.recoProductsError = '';
+    STATE.funRecommendations = [];
+    STATE.funRecommendationsLoaded = false;
+    STATE.funRecommendationsError = '';
+    STATE.funRecommendationsPage = 0;
+    STATE.funRecommendationsBusy = false;
     STATE.recoBusy = false;
   }
 
@@ -2677,24 +2894,94 @@
       });
   }
 
+  function loadFunRecommendations() {
+    STATE.funRecommendations = [];
+    STATE.funRecommendationsLoaded = false;
+    STATE.funRecommendationsError = '';
+
+    if (!STATE.user || !STATE.activeBagId || !STATE.recoProfile) {
+      STATE.funRecommendationsLoaded = true;
+      return Promise.resolve();
+    }
+
+    return supabaseClient.rpc(
+      'minbag_get_fun_recommendations',
+      {
+        p_bag_id: STATE.activeBagId,
+        p_page: Math.max(
+          0,
+          Number(STATE.funRecommendationsPage) || 0
+        )
+      }
+    ).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.funRecommendations = res.data || [];
+      STATE.funRecommendationsLoaded = true;
+    }).catch(function (err) {
+      // Frontend lager lokal bag-utfordring hvis RPC/katalog noen gang er tom.
+      STATE.funRecommendations = [];
+      STATE.funRecommendationsLoaded = true;
+      STATE.funRecommendationsError = errorMessage(err);
+
+      console.warn(
+        '[GK MIN BAG V3] Gøy-anbefalinger feilet',
+        err
+      );
+    });
+  }
+
+  function refreshFunRecommendations() {
+    if (STATE.funRecommendationsBusy) return;
+
+    STATE.funRecommendationsBusy = true;
+    STATE.funRecommendationsPage =
+      Math.max(0, Number(STATE.funRecommendationsPage) || 0) + 1;
+
+    render();
+    status('Finner tre nye utfordringer…');
+
+    loadFunRecommendations()
+      .then(function () {
+        STATE.funRecommendationsBusy = false;
+        render();
+        status('Tre nye gøy-forslag er klare.', 'ok');
+      })
+      .catch(function (err) {
+        STATE.funRecommendationsBusy = false;
+        render();
+        status(
+          'Kunne ikke hente nye gøy-forslag: ' + errorMessage(err),
+          'err'
+        );
+      });
+  }
+
   function loadGapAnalysis() {
     STATE.recoFindings = [];
     STATE.recoLoaded = false;
     STATE.recoProducts = [];
     STATE.recoProductsLoaded = false;
     STATE.recoProductsError = '';
+    STATE.funRecommendations = [];
+    STATE.funRecommendationsLoaded = false;
+    STATE.funRecommendationsError = '';
 
     if (!STATE.user || !STATE.activeBagId || !STATE.recoProfile) {
       STATE.recoLoaded = true;
       STATE.recoProductsLoaded = true;
+      STATE.funRecommendationsLoaded = true;
       return Promise.resolve();
     }
 
     var bagId = STATE.activeBagId;
 
-    var gapPromise = supabaseClient.rpc('minbag_get_gap_analysis', {
-      p_bag_id: bagId
-    }).then(function (res) {
+    var gapPromise = supabaseClient.rpc(
+      'minbag_get_gap_analysis',
+      {
+        p_bag_id: bagId
+      }
+    ).then(function (res) {
       if (res.error) throw res.error;
       STATE.recoFindings = res.data || [];
       STATE.recoLoaded = true;
@@ -2718,10 +3005,19 @@
       STATE.recoProducts = [];
       STATE.recoProductsLoaded = true;
       STATE.recoProductsError = errorMessage(err);
-      console.warn('[GK MIN BAG V3] Produktanbefalinger feilet', err);
+      console.warn(
+        '[GK MIN BAG V3] Produktanbefalinger feilet',
+        err
+      );
     });
 
-    return Promise.all([gapPromise, productPromise]);
+    var funPromise = loadFunRecommendations();
+
+    return Promise.all([
+      gapPromise,
+      productPromise,
+      funPromise
+    ]);
   }
 
   function saveRecoProfile() {
@@ -3255,6 +3551,11 @@
       STATE.recoProducts = [];
       STATE.recoProductsLoaded = true;
       STATE.recoProductsError = '';
+      STATE.funRecommendations = [];
+      STATE.funRecommendationsLoaded = true;
+      STATE.funRecommendationsError = '';
+      STATE.funRecommendationsPage = 0;
+      STATE.funRecommendationsBusy = false;
       return Promise.resolve();
     }
 
@@ -3291,6 +3592,11 @@
     STATE.recoProducts = [];
     STATE.recoProductsLoaded = false;
     STATE.recoProductsError = '';
+    STATE.funRecommendations = [];
+    STATE.funRecommendationsLoaded = false;
+    STATE.funRecommendationsError = '';
+    STATE.funRecommendationsPage = 0;
+    STATE.funRecommendationsBusy = false;
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
 
@@ -3721,6 +4027,21 @@
 
     if (!bag || !rec || !rec.catalog_id) {
       status('Mangler aktiv bag eller anbefalt katalog-ID.', 'err');
+      return;
+    }
+
+    addCatalogDiscToBag(
+      recommendationAsCatalogProduct(rec),
+      bag.id,
+      bag.name
+    );
+  }
+
+  function addFunRecommendedDisc(rec) {
+    var bag = activeBag();
+
+    if (!bag || !rec || !rec.catalog_id) {
+      status('Mangler aktiv bag eller katalog-ID.', 'err');
       return;
     }
 
