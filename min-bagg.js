@@ -23,6 +23,8 @@
    - Egen bag kan søkes/filtreres lokalt
    - Kompakt bag-oppsummering med antall per disctype
    - Fysisk disc kan dupliseres via sikker RPC
+   - Anbefalingsprofil med nivå, kastelengde, hånd, kastestil, bane og vind
+   - Bag-analyse V1: hull i flight-dekning og tydelig overlapp
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -34,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.11';
+  var VERSION = '2026-08-08.12';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -85,6 +87,12 @@
     bagFilter: 'all',
     editDiscId: null,
     discBusy: false,
+    recoProfile: null,
+    recoProfileLoaded: false,
+    recoProfileOpen: false,
+    recoFindings: [],
+    recoLoaded: false,
+    recoBusy: false,
     loading: false
   };
 
@@ -250,6 +258,21 @@
       '.gkmb3-bagsummary span:first-child{border-color:rgba(34,197,94,.26);background:rgba(34,197,94,.08);color:#dcfce7;}' +
       '.gkmb3-bagtools{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:0 0 12px;}' +
       '.gkmb3-bagtools .gkmb3-field{margin:0;}' +
+      '.gkmb3-reco{margin-top:16px;}' +
+      '.gkmb3-recohead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;}' +
+      '.gkmb3-recopills{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 11px;}' +
+      '.gkmb3-recopill{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;border:1px solid rgba(34,197,94,.20);background:rgba(34,197,94,.07);color:#dcfce7;font-size:10px;font-weight:850;}' +
+      '.gkmb3-recoform{display:grid;gap:10px;margin-top:10px;}' +
+      '.gkmb3-recogrid{display:grid;grid-template-columns:1fr;gap:9px;}' +
+      '.gkmb3-recolist{display:grid;gap:8px;margin-top:10px;}' +
+      '.gkmb3-recofinding{padding:11px;border-radius:15px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.14);}' +
+      '.gkmb3-recofinding.gap{border-color:rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.14));}' +
+      '.gkmb3-recofinding.overlap{border-color:rgba(245,158,11,.24);background:linear-gradient(135deg,rgba(245,158,11,.06),rgba(0,0,0,.14));}' +
+      '.gkmb3-recofinding-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}' +
+      '.gkmb3-recofinding-title{font-size:12px;font-weight:950;color:#fff;line-height:1.25;}' +
+      '.gkmb3-recofinding-priority{flex:0 0 auto;padding:4px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.055);color:rgba(255,255,255,.62);font-size:9px;font-weight:900;}' +
+      '.gkmb3-recofinding-reason{margin-top:5px;font-size:10px;line-height:1.4;color:rgba(255,255,255,.53);}' +
+      '.gkmb3-recofinding-meta{margin-top:6px;font-size:9px;font-weight:850;color:#bbf7d0;}' +
       '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
       '.gkmb3-bagform{margin-top:11px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.16));}' +
       '.gkmb3-bagform-title{font-size:13px;font-weight:950;color:#fff;margin-bottom:3px;}' +
@@ -343,6 +366,7 @@
       '@media(min-width:620px){' +
         '.gkmb3-grid2{grid-template-columns:repeat(2,minmax(0,1fr));}' +
         '.gkmb3-bagtools{grid-template-columns:minmax(0,1fr) 190px;}' +
+        '.gkmb3-recogrid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
         '.gkmb3-bagform-row{grid-template-columns:minmax(0,1fr) auto;}' +
         '.gkmb3-movebox-row{grid-template-columns:minmax(0,1fr) auto;}' +
         '.gkmb3-grid4{grid-template-columns:repeat(4,minmax(0,1fr));}' +
@@ -603,6 +627,7 @@
 
     var left = el('div', '');
     left.appendChild(renderBagManager());
+    left.appendChild(renderRecommendationPanel());
     left.appendChild(renderBagContents());
 
     var right = el('div', 'gkmb3-sticky');
@@ -1216,6 +1241,369 @@
     wrap.appendChild(filterField);
 
     return wrap;
+  }
+
+
+  function recoLabel(value, kind) {
+    var maps = {
+      skill: {
+        beginner: 'Nybegynner',
+        intermediate: 'Litt erfaren',
+        advanced: 'Erfaren'
+      },
+      distance: {
+        under_60: 'Under 60 m',
+        '60_80': '60–80 m',
+        '80_100': '80–100 m',
+        '100_120': '100–120 m',
+        '120_plus': '120+ m'
+      },
+      hand: {
+        right: 'Høyrehendt',
+        left: 'Venstrehendt'
+      },
+      throwStyle: {
+        backhand: 'Mest backhand',
+        forehand: 'Mest forehand',
+        both: 'Backhand + forehand'
+      },
+      course: {
+        technical: 'Teknisk / skog',
+        open: 'Åpent / lengde',
+        mixed: 'Blandet bane'
+      },
+      wind: {
+        normal: 'Lite / normal vind',
+        windy: 'Mye vind',
+        mixed: 'Variert vind'
+      }
+    };
+
+    return maps[kind] && maps[kind][value]
+      ? maps[kind][value]
+      : safe(value);
+  }
+
+  function createRecoSelect(id, options, currentValue) {
+    var select = el('select', 'gkmb3-select');
+    select.id = id;
+
+    for (var i = 0; i < options.length; i += 1) {
+      var option = document.createElement('option');
+      option.value = options[i][0];
+      option.textContent = options[i][1];
+      if (safe(currentValue) === options[i][0]) option.selected = true;
+      select.appendChild(option);
+    }
+
+    return select;
+  }
+
+  function renderRecoProfileForm() {
+    var profile = STATE.recoProfile || {
+      skill_level: 'intermediate',
+      throw_distance_band: '60_80',
+      handedness: 'right',
+      throw_style: 'both',
+      course_style: 'mixed',
+      wind_style: 'mixed',
+      include_putter_recommendations: false
+    };
+
+    var form = el('div', 'gkmb3-recoform');
+    var grid = el('div', 'gkmb3-recogrid');
+
+    grid.appendChild(field(
+      'Nivå',
+      createRecoSelect(
+        'gkmb3-reco-skill',
+        [
+          ['beginner', 'Nybegynner'],
+          ['intermediate', 'Litt erfaren'],
+          ['advanced', 'Erfaren']
+        ],
+        profile.skill_level
+      )
+    ));
+
+    grid.appendChild(field(
+      'Kontrollert kastelengde',
+      createRecoSelect(
+        'gkmb3-reco-distance',
+        [
+          ['under_60', 'Under 60 m'],
+          ['60_80', '60–80 m'],
+          ['80_100', '80–100 m'],
+          ['100_120', '100–120 m'],
+          ['120_plus', '120+ m']
+        ],
+        profile.throw_distance_band
+      )
+    ));
+
+    grid.appendChild(field(
+      'Kastehånd',
+      createRecoSelect(
+        'gkmb3-reco-hand',
+        [
+          ['right', 'Høyrehendt'],
+          ['left', 'Venstrehendt']
+        ],
+        profile.handedness
+      )
+    ));
+
+    grid.appendChild(field(
+      'Kastestil',
+      createRecoSelect(
+        'gkmb3-reco-throw-style',
+        [
+          ['backhand', 'Mest backhand'],
+          ['forehand', 'Mest forehand'],
+          ['both', 'Backhand + forehand']
+        ],
+        profile.throw_style
+      )
+    ));
+
+    grid.appendChild(field(
+      'Banetype',
+      createRecoSelect(
+        'gkmb3-reco-course',
+        [
+          ['technical', 'Teknisk / skog'],
+          ['open', 'Åpent / lengde'],
+          ['mixed', 'Blandet bane']
+        ],
+        profile.course_style
+      )
+    ));
+
+    grid.appendChild(field(
+      'Vind',
+      createRecoSelect(
+        'gkmb3-reco-wind',
+        [
+          ['normal', 'Lite / normal vind'],
+          ['windy', 'Mye vind'],
+          ['mixed', 'Variert vind']
+        ],
+        profile.wind_style
+      )
+    ));
+
+    form.appendChild(grid);
+
+    var putterLabel = el('label', 'gkmb3-check');
+    var putter = document.createElement('input');
+    putter.id = 'gkmb3-reco-putter';
+    putter.type = 'checkbox';
+    putter.checked = !!profile.include_putter_recommendations;
+    putterLabel.appendChild(putter);
+    putterLabel.appendChild(document.createTextNode('Ta med puttere i anbefalingene'));
+    form.appendChild(putterLabel);
+
+    var actions = el('div', 'gkmb3-toolbar');
+
+    var save = el(
+      'button',
+      'gkmb3-btn',
+      STATE.recoBusy ? 'Lagrer profil…' : 'Lagre spillerprofil'
+    );
+    save.type = 'button';
+    save.disabled = !!STATE.recoBusy;
+    save.onclick = saveRecoProfile;
+    actions.appendChild(save);
+
+    if (STATE.recoProfile) {
+      var cancel = el('button', 'gkmb3-btn secondary', 'Avbryt');
+      cancel.type = 'button';
+      cancel.disabled = !!STATE.recoBusy;
+      cancel.onclick = function () {
+        STATE.recoProfileOpen = false;
+        render();
+      };
+      actions.appendChild(cancel);
+    }
+
+    form.appendChild(actions);
+    return form;
+  }
+
+  function recoPriorityLabel(priority) {
+    priority = Number(priority) || 0;
+    if (priority >= 90) return 'Høy prioritet';
+    if (priority >= 75) return 'Viktig';
+    if (priority >= 60) return 'Verdt å se på';
+    return 'Lavere prioritet';
+  }
+
+  function recoTypeLabel(type) {
+    if (type === 'putter') return 'Putter';
+    if (type === 'midrange') return 'Midrange';
+    if (type === 'fairway') return 'Fairway';
+    if (type === 'distance') return 'Distance';
+    return safe(type);
+  }
+
+  function recoStabilityLabel(stability) {
+    if (stability === 'understable') return 'Understabil';
+    if (stability === 'neutral') return 'Nøytral';
+    if (stability === 'stable') return 'Stabil';
+    if (stability === 'overstable') return 'Overstabil';
+    return safe(stability);
+  }
+
+  function renderRecommendationPanel() {
+    var card = el('section', 'gkmb3-card gkmb3-reco');
+    var head = el('div', 'gkmb3-recohead');
+    var headText = el('div', '');
+
+    headText.appendChild(el('h3', '', '🎯 Mine anbefalinger'));
+    headText.appendChild(el(
+      'p',
+      '',
+      'Min Bag analyserer spilleren og akkurat denne bagen. Først finner vi hull og mulig overlapp; konkrete GolfKongen-forslag kommer i neste steg.'
+    ));
+    head.appendChild(headText);
+
+    if (STATE.recoProfile) {
+      var edit = el(
+        'button',
+        'gkmb3-btn secondary',
+        STATE.recoProfileOpen ? 'Lukk profil' : '✏ Endre profil'
+      );
+      edit.type = 'button';
+      edit.disabled = !!STATE.recoBusy;
+      edit.onclick = function () {
+        STATE.recoProfileOpen = !STATE.recoProfileOpen;
+        render();
+      };
+      head.appendChild(edit);
+    }
+
+    card.appendChild(head);
+
+    if (!STATE.recoProfileLoaded) {
+      card.appendChild(el('div', 'gkmb3-empty', 'Laster spillerprofil…'));
+      return card;
+    }
+
+    if (!STATE.recoProfile) {
+      var intro = el('div', 'gkmb3-note');
+      intro.textContent =
+        'Svar på seks enkle spørsmål én gang. Profilen kan endres når som helst og brukes til å gjøre anbefalingene relevante for kastelengden og spillestilen din.';
+      card.appendChild(intro);
+      card.appendChild(renderRecoProfileForm());
+      return card;
+    }
+
+    var pills = el('div', 'gkmb3-recopills');
+    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.skill_level, 'skill')));
+    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.throw_distance_band, 'distance')));
+    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.handedness, 'hand')));
+    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.throw_style, 'throwStyle')));
+    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.course_style, 'course')));
+    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.wind_style, 'wind')));
+
+    if (STATE.recoProfile.include_putter_recommendations) {
+      pills.appendChild(el('span', 'gkmb3-recopill', 'Puttere med'));
+    }
+
+    card.appendChild(pills);
+
+    if (STATE.recoProfileOpen) {
+      card.appendChild(renderRecoProfileForm());
+      return card;
+    }
+
+    if (!STATE.discs.length) {
+      var emptyBag = el('div', 'gkmb3-empty');
+      emptyBag.appendChild(el('strong', '', 'Legg noen discer i bagen først'));
+      emptyBag.appendChild(el(
+        'div',
+        '',
+        'Når bagen har discer analyserer vi flight-dekning, speed-områder og mulig overlapp.'
+      ));
+      card.appendChild(emptyBag);
+      return card;
+    }
+
+    if (!STATE.recoLoaded) {
+      card.appendChild(el('div', 'gkmb3-empty', 'Analyserer bagen…'));
+      return card;
+    }
+
+    if (!STATE.recoFindings.length) {
+      var clean = el('div', 'gkmb3-empty');
+      clean.appendChild(el('strong', '', 'Ingen tydelige hull funnet'));
+      clean.appendChild(el(
+        'div',
+        '',
+        'Denne første analysen finner ingen klare mangler eller kraftig overlapp. Produktmatchingen i neste steg vil gi en mer detaljert vurdering.'
+      ));
+      card.appendChild(clean);
+      return card;
+    }
+
+    var list = el('div', 'gkmb3-recolist');
+    var max = Math.min(6, STATE.recoFindings.length);
+
+    for (var i = 0; i < max; i += 1) {
+      var finding = STATE.recoFindings[i];
+      var item = el(
+        'div',
+        'gkmb3-recofinding ' + (finding.finding_type === 'overlap' ? 'overlap' : 'gap')
+      );
+
+      var itemHead = el('div', 'gkmb3-recofinding-head');
+      var title = (finding.finding_type === 'overlap' ? '♻️ ' : '🎯 ') + safe(finding.title);
+      itemHead.appendChild(el('div', 'gkmb3-recofinding-title', title));
+      itemHead.appendChild(el(
+        'div',
+        'gkmb3-recofinding-priority',
+        recoPriorityLabel(finding.priority)
+      ));
+      item.appendChild(itemHead);
+
+      item.appendChild(el(
+        'div',
+        'gkmb3-recofinding-reason',
+        safe(finding.reason)
+      ));
+
+      var meta = [];
+      if (finding.disc_type) meta.push(recoTypeLabel(finding.disc_type));
+      if (finding.stability) meta.push(recoStabilityLabel(finding.stability));
+
+      if (
+        finding.target_speed_min !== null &&
+        finding.target_speed_min !== undefined &&
+        finding.target_speed_max !== null &&
+        finding.target_speed_max !== undefined
+      ) {
+        var minSpeed = Number(finding.target_speed_min);
+        var maxSpeed = Number(finding.target_speed_max);
+        meta.push(
+          minSpeed === maxSpeed
+            ? 'Speed ' + minSpeed
+            : 'Speed ' + minSpeed + '–' + maxSpeed
+        );
+      }
+
+      if (finding.finding_type === 'overlap' && Number(finding.disc_count) > 0) {
+        meta.push(Number(finding.disc_count) + ' discer');
+      }
+
+      if (meta.length) {
+        item.appendChild(el('div', 'gkmb3-recofinding-meta', meta.join(' · ')));
+      }
+
+      list.appendChild(item);
+    }
+
+    card.appendChild(list);
+    return card;
   }
 
   function renderBagContents() {
@@ -1995,6 +2383,12 @@
     STATE.addTargetBagId = null;
     STATE.editDiscId = null;
     STATE.discBusy = false;
+    STATE.recoProfile = null;
+    STATE.recoProfileLoaded = false;
+    STATE.recoProfileOpen = false;
+    STATE.recoFindings = [];
+    STATE.recoLoaded = false;
+    STATE.recoBusy = false;
   }
 
   function loadPublicTop3() {
@@ -2037,6 +2431,12 @@
         STATE.addTargetBagId = null;
         STATE.editDiscId = null;
         STATE.discBusy = false;
+        STATE.recoProfile = null;
+        STATE.recoProfileLoaded = false;
+        STATE.recoProfileOpen = false;
+        STATE.recoFindings = [];
+        STATE.recoLoaded = false;
+        STATE.recoBusy = false;
         render();
         return;
       }
@@ -2065,12 +2465,93 @@
         ]);
       })
       .then(function () {
+        return loadRecoProfile();
+      })
+      .then(function () {
         return loadActiveBagDiscs();
       })
       .then(function () {
         render();
         status('Min Bag er lastet.', 'ok');
       });
+  }
+
+
+  function loadRecoProfile() {
+    if (!STATE.user) {
+      STATE.recoProfile = null;
+      STATE.recoProfileLoaded = true;
+      STATE.recoProfileOpen = false;
+      return Promise.resolve();
+    }
+
+    return supabaseClient.rpc('minbag_get_reco_profile')
+      .then(function (res) {
+        if (res.error) throw res.error;
+
+        var rows = res.data || [];
+        STATE.recoProfile = rows.length ? rows[0] : null;
+        STATE.recoProfileLoaded = true;
+
+        if (!STATE.recoProfile) {
+          STATE.recoProfileOpen = true;
+        }
+      });
+  }
+
+  function loadGapAnalysis() {
+    STATE.recoFindings = [];
+    STATE.recoLoaded = false;
+
+    if (!STATE.user || !STATE.activeBagId || !STATE.recoProfile) {
+      STATE.recoLoaded = true;
+      return Promise.resolve();
+    }
+
+    return supabaseClient.rpc('minbag_get_gap_analysis', {
+      p_bag_id: STATE.activeBagId
+    }).then(function (res) {
+      if (res.error) throw res.error;
+      STATE.recoFindings = res.data || [];
+      STATE.recoLoaded = true;
+    }).catch(function (err) {
+      STATE.recoFindings = [];
+      STATE.recoLoaded = true;
+      console.warn('[GK MIN BAG V3] Gap-analyse feilet', err);
+    });
+  }
+
+  function saveRecoProfile() {
+    if (!STATE.user || STATE.recoBusy) return;
+
+    STATE.recoBusy = true;
+    render();
+    status('Lagrer spillerprofil…');
+
+    supabaseClient.rpc('minbag_set_reco_profile', {
+      p_skill_level: getInputValue('gkmb3-reco-skill'),
+      p_throw_distance_band: getInputValue('gkmb3-reco-distance'),
+      p_handedness: getInputValue('gkmb3-reco-hand'),
+      p_throw_style: getInputValue('gkmb3-reco-throw-style'),
+      p_course_style: getInputValue('gkmb3-reco-course'),
+      p_wind_style: getInputValue('gkmb3-reco-wind'),
+      p_include_putter_recommendations: getCheckboxValue('gkmb3-reco-putter')
+    }).then(function (res) {
+      if (res.error) throw res.error;
+
+      return loadRecoProfile();
+    }).then(function () {
+      STATE.recoProfileOpen = false;
+      return loadGapAnalysis();
+    }).then(function () {
+      STATE.recoBusy = false;
+      render();
+      status('Spillerprofil lagret og bagen analysert.', 'ok');
+    }).catch(function (err) {
+      STATE.recoBusy = false;
+      render();
+      status('Kunne ikke lagre spillerprofil: ' + errorMessage(err), 'err');
+    });
   }
 
   function loadBrands() {
@@ -2558,6 +3039,8 @@
   function loadActiveBagDiscs() {
     if (!STATE.activeBagId) {
       STATE.discs = [];
+      STATE.recoFindings = [];
+      STATE.recoLoaded = true;
       return Promise.resolve();
     }
 
@@ -2574,6 +3057,7 @@
       .then(function (res) {
         if (res.error) throw res.error;
         STATE.discs = res.data || [];
+        return loadGapAnalysis();
       });
   }
 
@@ -2588,6 +3072,8 @@
     STATE.bagSearch = '';
     STATE.bagFilter = 'all';
     STATE.editDiscId = null;
+    STATE.recoFindings = [];
+    STATE.recoLoaded = false;
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
 
