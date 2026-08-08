@@ -14,6 +14,9 @@
    - Mobil-først, mørkt GolfKongen-design
    - Bag-cover: velg GolfKongen-sekk eller bruk eget bilde
    - Rediger/slett fysisk disc-eksemplar via sikre RPC-er
+   - Gi bag nytt navn via sikker RPC
+   - Flytt fysisk disc mellom egne bager via sikker RPC
+   - Ny bag opprettes i eget sidepanel, ikke browser-prompt
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -25,7 +28,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.8';
+  var VERSION = '2026-08-08.9';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -68,6 +71,9 @@
     storeBagImageLoading: {},
     storeBagPickerOpen: false,
     storeBagBusy: false,
+    newBagOpen: false,
+    renameBagOpen: false,
+    bagActionBusy: false,
     editDiscId: null,
     discBusy: false,
     loading: false
@@ -214,6 +220,12 @@
       '.gkmb3-bags{display:flex;gap:8px;overflow-x:auto;padding-bottom:3px;margin-bottom:12px;scrollbar-width:thin;}' +
       '.gkmb3-bagbtn{flex:0 0 auto;min-height:42px;padding:9px 12px;border-radius:13px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.055);color:rgba(255,255,255,.75);font-weight:900;cursor:pointer;white-space:nowrap;}' +
       '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
+      '.gkmb3-bagform{margin-top:11px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.16));}' +
+      '.gkmb3-bagform-title{font-size:13px;font-weight:950;color:#fff;margin-bottom:3px;}' +
+      '.gkmb3-bagform-note{font-size:10px;line-height:1.35;color:rgba(255,255,255,.48);margin-bottom:9px;}' +
+      '.gkmb3-bagform-row{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;align-items:end;}' +
+      '.gkmb3-bagform-actions{display:flex;gap:7px;flex-wrap:wrap;}' +
+      '.gkmb3-bagform-actions .gkmb3-btn{min-height:38px;padding:8px 11px;font-size:11px;}' +
 
       '.gkmb3-category{margin-top:16px;}' +
       '.gkmb3-category-title{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:9px;}' +
@@ -238,6 +250,11 @@
       '.gkmb3-discedit-note{margin-top:3px;font-size:10px;line-height:1.35;color:rgba(255,255,255,.48);}' +
       '.gkmb3-discedit-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px;}' +
       '.gkmb3-discedit-actions .gkmb3-btn{min-height:38px;padding:8px 11px;font-size:11px;}' +
+      '.gkmb3-movebox{margin-top:11px;padding:11px;border-radius:13px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.035);}' +
+      '.gkmb3-movebox-title{font-size:12px;font-weight:950;color:#fff;margin-bottom:3px;}' +
+      '.gkmb3-movebox-note{font-size:10px;line-height:1.35;color:rgba(255,255,255,.46);margin-bottom:8px;}' +
+      '.gkmb3-movebox-row{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;align-items:end;}' +
+      '.gkmb3-movebox-row .gkmb3-btn{min-height:44px;}' +
 
       '.gkmb3-empty{padding:24px 16px;text-align:center;border:1px dashed rgba(255,255,255,.16);border-radius:17px;background:rgba(255,255,255,.025);color:rgba(255,255,255,.58);}' +
       '.gkmb3-empty strong{display:block;color:#fff;font-size:17px;margin-bottom:5px;}' +
@@ -294,6 +311,8 @@
 
       '@media(min-width:620px){' +
         '.gkmb3-grid2{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-bagform-row{grid-template-columns:minmax(0,1fr) auto;}' +
+        '.gkmb3-movebox-row{grid-template-columns:minmax(0,1fr) auto;}' +
         '.gkmb3-grid4{grid-template-columns:repeat(4,minmax(0,1fr));}' +
         '.gkmb3-discgrid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
         '.gkmb3-top3grid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
@@ -815,6 +834,112 @@
     return picker;
   }
 
+  function nextBagDefaultName() {
+    return 'Bag ' + (STATE.bags.length + 1);
+  }
+
+  function renderNewBagForm() {
+    var panel = el('div', 'gkmb3-bagform');
+    panel.appendChild(el('div', 'gkmb3-bagform-title', 'Opprett ny bag'));
+    panel.appendChild(el(
+      'div',
+      'gkmb3-bagform-note',
+      'Gi bagen et navn du kjenner igjen, for eksempel Turneringsbag, Glowbag eller Sommerbag.'
+    ));
+
+    var row = el('div', 'gkmb3-bagform-row');
+
+    var field = el('label', 'gkmb3-field');
+    field.appendChild(document.createTextNode('Navn på bag'));
+    var input = el('input', 'gkmb3-input');
+    input.id = 'gkmb3-new-bag-name';
+    input.type = 'text';
+    input.maxLength = 80;
+    input.value = nextBagDefaultName();
+    input.placeholder = 'F.eks. Turneringsbag';
+    input.onkeydown = function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        createBagFromForm();
+      }
+    };
+    field.appendChild(input);
+    row.appendChild(field);
+
+    var actions = el('div', 'gkmb3-bagform-actions');
+    var save = el('button', 'gkmb3-btn', STATE.bagActionBusy ? 'Oppretter…' : 'Opprett bag');
+    save.type = 'button';
+    save.disabled = STATE.bagActionBusy;
+    save.onclick = createBagFromForm;
+    actions.appendChild(save);
+
+    var cancel = el('button', 'gkmb3-btn secondary', 'Avbryt');
+    cancel.type = 'button';
+    cancel.disabled = STATE.bagActionBusy;
+    cancel.onclick = function () {
+      STATE.newBagOpen = false;
+      render();
+      status('Ny bag ble ikke opprettet.', '');
+    };
+    actions.appendChild(cancel);
+
+    row.appendChild(actions);
+    panel.appendChild(row);
+    return panel;
+  }
+
+  function renderRenameBagForm(bag) {
+    var panel = el('div', 'gkmb3-bagform');
+    panel.appendChild(el('div', 'gkmb3-bagform-title', 'Endre navn på denne bagen'));
+    panel.appendChild(el(
+      'div',
+      'gkmb3-bagform-note',
+      'Dette endrer bare navnet. Discer, sekkvalg, bilde og hovedbag-status beholdes.'
+    ));
+
+    var row = el('div', 'gkmb3-bagform-row');
+
+    var field = el('label', 'gkmb3-field');
+    field.appendChild(document.createTextNode('Bag-navn'));
+    var input = el('input', 'gkmb3-input');
+    input.id = 'gkmb3-rename-bag-name';
+    input.type = 'text';
+    input.maxLength = 80;
+    input.value = safe(bag.name);
+    input.placeholder = 'F.eks. Turneringsbag';
+    input.onkeydown = function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        renameBagFromForm(bag);
+      }
+    };
+    field.appendChild(input);
+    row.appendChild(field);
+
+    var actions = el('div', 'gkmb3-bagform-actions');
+    var save = el('button', 'gkmb3-btn', STATE.bagActionBusy ? 'Lagrer…' : 'Lagre navn');
+    save.type = 'button';
+    save.disabled = STATE.bagActionBusy;
+    save.onclick = function () {
+      renameBagFromForm(bag);
+    };
+    actions.appendChild(save);
+
+    var cancel = el('button', 'gkmb3-btn secondary', 'Avbryt');
+    cancel.type = 'button';
+    cancel.disabled = STATE.bagActionBusy;
+    cancel.onclick = function () {
+      STATE.renameBagOpen = false;
+      render();
+      status('Navnet ble ikke endret.', '');
+    };
+    actions.appendChild(cancel);
+
+    row.appendChild(actions);
+    panel.appendChild(row);
+    return panel;
+  }
+
   function renderBagManager() {
     var card = el('section', 'gkmb3-card');
     card.appendChild(el('h3', '', 'Dine bager'));
@@ -857,14 +982,50 @@
 
     var toolbar = el('div', 'gkmb3-toolbar');
 
-    var newBag = el('button', 'gkmb3-btn secondary', '+ Ny bag');
+    var newBag = el('button', 'gkmb3-btn secondary', STATE.newBagOpen ? 'Lukk ny bag' : '+ Ny bag');
     newBag.type = 'button';
-    newBag.onclick = createBagPrompt;
+    newBag.disabled = STATE.bagActionBusy;
+    newBag.onclick = function () {
+      STATE.newBagOpen = !STATE.newBagOpen;
+      STATE.renameBagOpen = false;
+      render();
+      if (STATE.newBagOpen) {
+        setTimeout(function () {
+          var input = document.getElementById('gkmb3-new-bag-name');
+          if (input) {
+            input.focus();
+            input.select();
+          }
+        }, 0);
+      }
+    };
     toolbar.appendChild(newBag);
+
+    if (current) {
+      var renameBtn = el('button', 'gkmb3-btn secondary', STATE.renameBagOpen ? 'Lukk navneendring' : '✏ Endre navn');
+      renameBtn.type = 'button';
+      renameBtn.disabled = STATE.bagActionBusy;
+      renameBtn.onclick = function () {
+        STATE.renameBagOpen = !STATE.renameBagOpen;
+        STATE.newBagOpen = false;
+        render();
+        if (STATE.renameBagOpen) {
+          setTimeout(function () {
+            var input = document.getElementById('gkmb3-rename-bag-name');
+            if (input) {
+              input.focus();
+              input.select();
+            }
+          }, 0);
+        }
+      };
+      toolbar.appendChild(renameBtn);
+    }
 
     if (current && !current.is_default) {
       var defaultBtn = el('button', 'gkmb3-btn secondary', 'Sett som hovedbag');
       defaultBtn.type = 'button';
+      defaultBtn.disabled = STATE.bagActionBusy;
       defaultBtn.onclick = function () {
         setDefaultBag(current.id);
       };
@@ -872,6 +1033,7 @@
 
       var deleteBtn = el('button', 'gkmb3-btn danger', 'Slett bag');
       deleteBtn.type = 'button';
+      deleteBtn.disabled = STATE.bagActionBusy;
       deleteBtn.onclick = function () {
         deleteBag(current);
       };
@@ -879,6 +1041,14 @@
     }
 
     card.appendChild(toolbar);
+
+    if (current && STATE.renameBagOpen) {
+      card.appendChild(renderRenameBagForm(current));
+    }
+
+    if (STATE.newBagOpen) {
+      card.appendChild(renderNewBagForm());
+    }
 
     return card;
   }
@@ -1102,6 +1272,55 @@
     note.value = safe(disc.note);
     noteField.appendChild(note);
     panel.appendChild(noteField);
+
+    var otherBags = [];
+    for (var i = 0; i < STATE.bags.length; i += 1) {
+      if (STATE.bags[i].id !== disc.bag_id) otherBags.push(STATE.bags[i]);
+    }
+
+    if (otherBags.length) {
+      var moveBox = el('div', 'gkmb3-movebox');
+      moveBox.appendChild(el('div', 'gkmb3-movebox-title', 'Flytt denne discen til en annen bag'));
+      moveBox.appendChild(el(
+        'div',
+        'gkmb3-movebox-note',
+        'Flytter bare dette fysiske eksemplaret. All vekt, farge, notat og favoritt-status følger med.'
+      ));
+
+      var moveRow = el('div', 'gkmb3-movebox-row');
+      var moveField = el('label', 'gkmb3-field');
+      moveField.appendChild(document.createTextNode('Flytt til'));
+
+      var moveSelect = el('select', 'gkmb3-select');
+      moveSelect.id = 'gkmb3-move-target-' + disc.id;
+
+      var placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Velg en annen bag…';
+      placeholder.selected = true;
+      moveSelect.appendChild(placeholder);
+
+      for (var j = 0; j < otherBags.length; j += 1) {
+        var option = document.createElement('option');
+        option.value = otherBags[j].id;
+        option.textContent = otherBags[j].name + (otherBags[j].is_default ? ' ★' : '');
+        moveSelect.appendChild(option);
+      }
+
+      moveField.appendChild(moveSelect);
+      moveRow.appendChild(moveField);
+
+      var moveBtn = el('button', 'gkmb3-btn secondary', STATE.discBusy ? 'Flytter…' : 'Flytt disc');
+      moveBtn.type = 'button';
+      moveBtn.disabled = STATE.discBusy;
+      moveBtn.onclick = function () {
+        moveDisc(disc);
+      };
+      moveRow.appendChild(moveBtn);
+
+      moveBox.appendChild(moveRow);
+      panel.appendChild(moveBox);
+    }
 
     var buttons = el('div', 'gkmb3-discedit-actions');
 
@@ -1520,6 +1739,9 @@
     STATE.storeBagImageLoading = {};
     STATE.storeBagPickerOpen = false;
     STATE.storeBagBusy = false;
+    STATE.newBagOpen = false;
+    STATE.renameBagOpen = false;
+    STATE.bagActionBusy = false;
     STATE.editDiscId = null;
     STATE.discBusy = false;
   }
@@ -1558,6 +1780,9 @@
         STATE.storeBagImageLoading = {};
         STATE.storeBagPickerOpen = false;
         STATE.storeBagBusy = false;
+        STATE.newBagOpen = false;
+        STATE.renameBagOpen = false;
+        STATE.bagActionBusy = false;
         STATE.editDiscId = null;
         STATE.discBusy = false;
         render();
@@ -2103,6 +2328,8 @@
     STATE.catalogQuery = '';
     STATE.catalogType = '';
     STATE.editDiscId = null;
+    STATE.newBagOpen = false;
+    STATE.renameBagOpen = false;
 
     render();
     status('Laster bag…');
@@ -2117,17 +2344,22 @@
       });
   }
 
-  function createBagPrompt() {
-    var name = prompt('Navn på ny bag:', 'Bag 2');
-    if (name === null) return;
+  function createBagFromForm() {
+    if (!STATE.user || STATE.bagActionBusy) return;
 
-    name = trim(name);
+    var name = trim(getInputValue('gkmb3-new-bag-name'));
 
     if (!name) {
       status('Bag-navn kan ikke være tomt.', 'err');
       return;
     }
 
+    if (name.length > 80) {
+      status('Bag-navnet kan ikke være lengre enn 80 tegn.', 'err');
+      return;
+    }
+
+    STATE.bagActionBusy = true;
     setLoading(true, 'Oppretter bag…');
 
     supabaseClient.rpc('minbag_create_bag', {
@@ -2141,12 +2373,63 @@
         return loadActiveBagDiscs();
       });
     }).then(function () {
+      STATE.bagActionBusy = false;
+      STATE.newBagOpen = false;
       setLoading(false);
       render();
-      status('Ny bag opprettet.', 'ok');
+      status('Ny bag opprettet: ' + name + '.', 'ok');
     }).catch(function (err) {
+      STATE.bagActionBusy = false;
       setLoading(false);
+      render();
       status('Kunne ikke opprette bag: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function renameBagFromForm(bag) {
+    if (!STATE.user || !bag || !bag.id || STATE.bagActionBusy) return;
+
+    var name = trim(getInputValue('gkmb3-rename-bag-name'));
+
+    if (!name) {
+      status('Bag-navn kan ikke være tomt.', 'err');
+      return;
+    }
+
+    if (name.length > 80) {
+      status('Bag-navnet kan ikke være lengre enn 80 tegn.', 'err');
+      return;
+    }
+
+    if (name === trim(bag.name)) {
+      STATE.renameBagOpen = false;
+      render();
+      status('Bag-navnet er uendret.', '');
+      return;
+    }
+
+    STATE.bagActionBusy = true;
+    setLoading(true, 'Lagrer bag-navn…');
+
+    supabaseClient.rpc('minbag_rename_bag', {
+      p_bag_id: bag.id,
+      p_name: name
+    }).then(function (res) {
+      if (res.error) throw res.error;
+      return loadBags(bag.id).then(function () {
+        return loadActiveBagDiscs();
+      });
+    }).then(function () {
+      STATE.bagActionBusy = false;
+      STATE.renameBagOpen = false;
+      setLoading(false);
+      render();
+      status('Bag-navnet er endret til ' + name + '.', 'ok');
+    }).catch(function (err) {
+      STATE.bagActionBusy = false;
+      setLoading(false);
+      render();
+      status('Kunne ikke endre bag-navn: ' + errorMessage(err), 'err');
     });
   }
 
@@ -2190,6 +2473,8 @@
       if (res.error) throw res.error;
 
       STATE.activeBagId = null;
+      STATE.newBagOpen = false;
+      STATE.renameBagOpen = false;
 
       return loadBags().then(function () {
         return loadActiveBagDiscs();
@@ -2248,6 +2533,54 @@
       STATE.discBusy = false;
       render();
       status('Kunne ikke oppdatere disc: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function moveDisc(disc) {
+    if (!STATE.user || !disc || !disc.id || STATE.discBusy) return;
+
+    var select = document.getElementById('gkmb3-move-target-' + disc.id);
+    var targetBagId = select ? safe(select.value) : '';
+
+    if (!targetBagId) {
+      status('Velg hvilken bag discen skal flyttes til.', 'err');
+      return;
+    }
+
+    var targetName = 'valgt bag';
+    for (var i = 0; i < STATE.bags.length; i += 1) {
+      if (STATE.bags[i].id === targetBagId) {
+        targetName = STATE.bags[i].name;
+        break;
+      }
+    }
+
+    var label = disc.name || disc.mold_name || 'Discen';
+
+    STATE.discBusy = true;
+    render();
+    status('Flytter disc…');
+
+    supabaseClient.rpc('minbag_move_disc', {
+      p_disc_id: disc.id,
+      p_target_bag_id: targetBagId
+    }).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.editDiscId = null;
+
+      return Promise.all([
+        loadBags(STATE.activeBagId),
+        loadActiveBagDiscs()
+      ]);
+    }).then(function () {
+      STATE.discBusy = false;
+      render();
+      status(label + ' er flyttet til ' + targetName + '.', 'ok');
+    }).catch(function (err) {
+      STATE.discBusy = false;
+      render();
+      status('Kunne ikke flytte disc: ' + errorMessage(err), 'err');
     });
   }
 
