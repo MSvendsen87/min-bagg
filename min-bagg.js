@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.19';
+  var VERSION = '2026-08-08.19.1';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -415,6 +415,8 @@
       '.gkmb3-course-record{margin-top:8px;padding:7px 9px;border-radius:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.16);color:#bbf7d0;font-size:9px;font-weight:850;}' +
       '.gkmb3-course-progress{margin-top:9px;padding:9px;border-radius:11px;background:rgba(34,197,94,.055);border:1px solid rgba(34,197,94,.14);}' +
       '.gkmb3-course-progress.played{background:linear-gradient(135deg,rgba(22,163,74,.09),rgba(4,12,18,.18));border-color:rgba(34,197,94,.25);}' +
+      '.gkmb3-course-progress .gkmb3-check{cursor:pointer;user-select:none;}' +
+      '.gkmb3-course-progress .gkmb3-check input{width:16px;height:16px;accent-color:#22c55e;cursor:pointer;}' +
       '.gkmb3-course-progress-grid{display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px;margin-top:8px;align-items:end;}' +
       '.gkmb3-course-progress-grid textarea{min-height:58px;resize:vertical;}' +
       '.gkmb3-course-progress-summary{margin-top:6px;color:#bbf7d0;font-size:9px;font-weight:850;line-height:1.4;}' +
@@ -894,13 +896,20 @@
     );
 
     var label = el('label', 'gkmb3-check');
+    label.style.cursor = busy ? 'wait' : 'pointer';
+
     var box = document.createElement('input');
     box.type = 'checkbox';
+    box.id = 'gkmb3-course-played-' + course.id;
     box.checked = played;
     box.disabled = busy;
+    box.style.cursor = busy ? 'wait' : 'pointer';
 
-    box.onchange = function () {
-      toggleCoursePlayed(course.id, box.checked);
+    box.onclick = function (event) {
+      if (event) event.stopPropagation();
+
+      var nextChecked = !!box.checked;
+      toggleCoursePlayed(course.id, nextChecked);
     };
 
     label.appendChild(box);
@@ -909,6 +918,14 @@
         ? '✓ Har spilt denne banen'
         : 'Har spilt denne banen'
     ));
+
+    label.onclick = function (event) {
+      if (busy) return;
+
+      // Native label handles clicks on checkbox/text.
+      // Stop course-card/container handlers from interfering.
+      if (event) event.stopPropagation();
+    };
 
     wrap.appendChild(label);
 
@@ -4755,13 +4772,23 @@
     }
 
     var existing = courseProgressFor(courseId);
+    var previous = existing
+      ? {
+          course_id: existing.course_id,
+          has_played: !!existing.has_played,
+          personal_best_to_par:
+            existing.personal_best_to_par,
+          comment: existing.comment || '',
+          updated_at: existing.updated_at || null
+        }
+      : null;
 
     if (!checked &&
-        existing &&
+        previous &&
         (
-          existing.personal_best_to_par !== null &&
-          existing.personal_best_to_par !== undefined
-          || trim(existing.comment)
+          previous.personal_best_to_par !== null &&
+          previous.personal_best_to_par !== undefined
+          || trim(previous.comment)
         )) {
       if (!window.confirm(
         'Fjerne «Har spilt» og samtidig slette personlig rekord og kommentar for denne banen?'
@@ -4772,7 +4799,47 @@
     }
 
     STATE.courseProgressBusyId = courseId;
+
+    // Optimistisk UI:
+    // Haken og feltene vises/fjernes umiddelbart.
+    if (checked) {
+      STATE.courseProgress[courseId] = {
+        course_id: courseId,
+        has_played: true,
+        personal_best_to_par:
+          previous &&
+          previous.personal_best_to_par !== undefined
+            ? previous.personal_best_to_par
+            : null,
+        comment:
+          previous && previous.comment
+            ? previous.comment
+            : '',
+        updated_at: new Date().toISOString()
+      };
+
+      if (!previous || !previous.has_played) {
+        STATE.coursePlayedCount =
+          Number(STATE.coursePlayedCount || 0) + 1;
+      }
+    } else {
+      delete STATE.courseProgress[courseId];
+
+      if (previous && previous.has_played) {
+        STATE.coursePlayedCount = Math.max(
+          0,
+          Number(STATE.coursePlayedCount || 0) - 1
+        );
+      }
+    }
+
     render();
+
+    status(
+      checked
+        ? 'Lagrer at banen er spilt…'
+        : 'Fjerner banen fra spilte baner…'
+    );
 
     supabaseClient.rpc(
       'minbag_set_course_progress',
@@ -4781,15 +4848,15 @@
         p_has_played: !!checked,
         p_personal_best_to_par:
           checked &&
-          existing &&
-          existing.personal_best_to_par !== undefined
-            ? existing.personal_best_to_par
+          previous &&
+          previous.personal_best_to_par !== undefined
+            ? previous.personal_best_to_par
             : null,
         p_comment:
           checked &&
-          existing &&
-          existing.comment
-            ? existing.comment
+          previous &&
+          previous.comment
+            ? previous.comment
             : null
       }
     ).then(function (res) {
@@ -4807,6 +4874,17 @@
         'ok'
       );
     }).catch(function (err) {
+      // Rull UI tilbake dersom Supabase ikke lagret.
+      if (previous && previous.has_played) {
+        STATE.courseProgress[courseId] = previous;
+      } else {
+        delete STATE.courseProgress[courseId];
+      }
+
+      STATE.coursePlayedCount = Object.keys(
+        STATE.courseProgress
+      ).length;
+
       STATE.courseProgressBusyId = null;
       render();
 
@@ -4817,6 +4895,7 @@
       );
     });
   }
+
 
   function saveCourseProgress(courseId) {
     if (!STATE.user ||
