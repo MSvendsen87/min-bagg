@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.12.1';
+  var VERSION = '2026-08-08.13';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -92,6 +92,9 @@
     recoProfileOpen: false,
     recoFindings: [],
     recoLoaded: false,
+    recoProducts: [],
+    recoProductsLoaded: false,
+    recoProductsError: '',
     recoBusy: false,
     loading: false
   };
@@ -273,6 +276,20 @@
       '.gkmb3-recofinding-priority{flex:0 0 auto;padding:4px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.055);color:rgba(255,255,255,.62);font-size:9px;font-weight:900;}' +
       '.gkmb3-recofinding-reason{margin-top:5px;font-size:10px;line-height:1.4;color:rgba(255,255,255,.53);}' +
       '.gkmb3-recofinding-meta{margin-top:6px;font-size:9px;font-weight:850;color:#bbf7d0;}' +
+      '.gkmb3-recomatches{display:grid;gap:7px;margin-top:9px;padding-top:9px;border-top:1px solid rgba(255,255,255,.075);}' +
+      '.gkmb3-recomatch{display:grid;grid-template-columns:48px minmax(0,1fr);gap:9px;padding:8px;border-radius:12px;border:1px solid rgba(34,197,94,.16);background:rgba(2,10,6,.42);}' +
+      '.gkmb3-recomatch.best{border-color:rgba(34,197,94,.34);background:linear-gradient(135deg,rgba(34,197,94,.12),rgba(2,10,6,.45));}' +
+      '.gkmb3-recomatch-img{width:48px;height:48px;border-radius:10px;overflow:hidden;display:grid;place-items:center;background:#090d0a;border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.35);font-size:9px;font-weight:900;}' +
+      '.gkmb3-recomatch-img img{width:100%;height:100%;object-fit:contain;display:block;}' +
+      '.gkmb3-recomatch-top{display:flex;align-items:flex-start;justify-content:space-between;gap:7px;}' +
+      '.gkmb3-recomatch-name{font-size:11px;font-weight:950;color:#fff;line-height:1.25;}' +
+      '.gkmb3-recomatch-score{flex:0 0 auto;padding:4px 7px;border-radius:999px;background:#16a34a;color:#fff;font-size:9px;font-weight:950;white-space:nowrap;}' +
+      '.gkmb3-recomatch-sub{margin-top:2px;color:rgba(255,255,255,.55);font-size:9px;font-weight:750;}' +
+      '.gkmb3-recomatch-reason{margin-top:5px;color:rgba(255,255,255,.64);font-size:9px;line-height:1.4;}' +
+      '.gkmb3-recomatch-price{margin-top:5px;color:#bbf7d0;font-size:10px;font-weight:950;}' +
+      '.gkmb3-recomatch .gkmb3-flight{margin-top:5px;}' +
+      '.gkmb3-recomatch .gkmb3-toolbar{margin-top:6px;gap:5px;}' +
+      '.gkmb3-recomatch .gkmb3-btn{min-height:31px;padding:7px 9px;font-size:9px;border-radius:10px;}' +
       '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
       '.gkmb3-bagform{margin-top:11px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.16));}' +
       '.gkmb3-bagform-title{font-size:13px;font-weight:950;color:#fff;margin-bottom:3px;}' +
@@ -1454,6 +1471,136 @@
     return safe(stability);
   }
 
+  function recommendationsForFinding(finding) {
+    if (!finding || finding.finding_type !== 'gap') return [];
+
+    var rows = [];
+
+    for (var i = 0; i < STATE.recoProducts.length; i += 1) {
+      var row = STATE.recoProducts[i];
+
+      if (
+        row.gap_disc_type === finding.disc_type &&
+        row.gap_stability === finding.stability
+      ) {
+        rows.push(row);
+      }
+    }
+
+    rows.sort(function (a, b) {
+      return Number(a.match_rank || 999) - Number(b.match_rank || 999);
+    });
+
+    return rows;
+  }
+
+  function recommendationAsCatalogProduct(rec) {
+    return {
+      id: rec.catalog_id,
+      product_name: rec.product_name,
+      brand: rec.brand,
+      mold_name: rec.mold_name,
+      plastic: rec.plastic,
+      disc_type: rec.disc_type,
+      speed: rec.speed,
+      glide: rec.glide,
+      turn: rec.turn,
+      fade: rec.fade,
+      price_nok: rec.price_nok,
+      image_url: rec.image_url,
+      product_url: rec.product_url
+    };
+  }
+
+  function renderRecommendationMatch(rec) {
+    var row = el(
+      'article',
+      'gkmb3-recomatch' + (Number(rec.match_rank) === 1 ? ' best' : '')
+    );
+
+    var image = el('div', 'gkmb3-recomatch-img');
+
+    if (rec.image_url) {
+      var img = document.createElement('img');
+      img.src = rec.image_url;
+      img.alt = rec.product_name || 'Anbefalt disc';
+      img.loading = 'lazy';
+      image.appendChild(img);
+    } else {
+      image.textContent = 'DISC';
+    }
+
+    row.appendChild(image);
+
+    var body = el('div', '');
+    var top = el('div', 'gkmb3-recomatch-top');
+
+    var nameText =
+      (Number(rec.match_rank) ? '#' + Number(rec.match_rank) + ' ' : '') +
+      safe(rec.product_name);
+
+    top.appendChild(el('div', 'gkmb3-recomatch-name', nameText));
+    top.appendChild(el(
+      'div',
+      'gkmb3-recomatch-score',
+      Math.round(Number(rec.match_score) || 0) + ' % match'
+    ));
+
+    body.appendChild(top);
+
+    var sub = [];
+    if (rec.brand) sub.push(rec.brand);
+    if (rec.plastic) sub.push(rec.plastic);
+    sub.push(recoTypeLabel(rec.disc_type));
+
+    body.appendChild(el('div', 'gkmb3-recomatch-sub', sub.join(' · ')));
+    body.appendChild(renderFlight(rec.speed, rec.glide, rec.turn, rec.fade));
+
+    if (rec.match_reason) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-recomatch-reason',
+        safe(rec.match_reason)
+      ));
+    }
+
+    if (rec.price_nok !== null && rec.price_nok !== undefined) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-recomatch-price',
+        safe(rec.price_nok) + ' kr · På lager'
+      ));
+    } else {
+      body.appendChild(el(
+        'div',
+        'gkmb3-recomatch-price',
+        'På lager'
+      ));
+    }
+
+    var toolbar = el('div', 'gkmb3-toolbar');
+
+    var add = el('button', 'gkmb3-btn', 'Legg i denne bagen');
+    add.type = 'button';
+    add.onclick = function () {
+      addRecommendedDisc(rec);
+    };
+    toolbar.appendChild(add);
+
+    if (rec.product_url) {
+      var open = el('a', 'gkmb3-btn secondary', 'Se produkt');
+      open.href = rec.product_url;
+      open.target = '_blank';
+      open.rel = 'noopener';
+      toolbar.appendChild(open);
+    }
+
+    body.appendChild(toolbar);
+    row.appendChild(body);
+
+    return row;
+  }
+
   function renderRecommendationPanel() {
     var card = el('section', 'gkmb3-card gkmb3-reco');
     var head = el('div', 'gkmb3-recohead');
@@ -1463,7 +1610,7 @@
     headText.appendChild(el(
       'p',
       '',
-      'Min Bag analyserer spilleren og akkurat denne bagen. Først finner vi hull og mulig overlapp; konkrete GolfKongen-forslag kommer i neste steg.'
+      'Min Bag analyserer spilleren og akkurat denne bagen, finner hull og viser konkrete GolfKongen-discer som passer profilen din.'
     ));
     head.appendChild(headText);
 
@@ -1540,7 +1687,7 @@
       clean.appendChild(el(
         'div',
         '',
-        'Denne første analysen finner ingen klare mangler eller kraftig overlapp. Produktmatchingen i neste steg vil gi en mer detaljert vurdering.'
+        'Analysen finner ingen klare mangler eller kraftig overlapp i denne bagen akkurat nå.'
       ));
       card.appendChild(clean);
       return card;
@@ -1597,6 +1744,34 @@
 
       if (meta.length) {
         item.appendChild(el('div', 'gkmb3-recofinding-meta', meta.join(' · ')));
+      }
+
+      if (finding.finding_type === 'gap') {
+        if (!STATE.recoProductsLoaded) {
+          item.appendChild(el(
+            'div',
+            'gkmb3-note',
+            'Finner de beste GolfKongen-matchene…'
+          ));
+        } else {
+          var matches = recommendationsForFinding(finding);
+
+          if (matches.length) {
+            var matchList = el('div', 'gkmb3-recomatches');
+
+            for (var j = 0; j < matches.length; j += 1) {
+              matchList.appendChild(renderRecommendationMatch(matches[j]));
+            }
+
+            item.appendChild(matchList);
+          } else {
+            item.appendChild(el(
+              'div',
+              'gkmb3-note',
+              'Ingen god lagerført GolfKongen-match for akkurat dette gapet nå.'
+            ));
+          }
+        }
       }
 
       list.appendChild(item);
@@ -2388,6 +2563,9 @@
     STATE.recoProfileOpen = false;
     STATE.recoFindings = [];
     STATE.recoLoaded = false;
+    STATE.recoProducts = [];
+    STATE.recoProductsLoaded = false;
+    STATE.recoProductsError = '';
     STATE.recoBusy = false;
   }
 
@@ -2502,14 +2680,20 @@
   function loadGapAnalysis() {
     STATE.recoFindings = [];
     STATE.recoLoaded = false;
+    STATE.recoProducts = [];
+    STATE.recoProductsLoaded = false;
+    STATE.recoProductsError = '';
 
     if (!STATE.user || !STATE.activeBagId || !STATE.recoProfile) {
       STATE.recoLoaded = true;
+      STATE.recoProductsLoaded = true;
       return Promise.resolve();
     }
 
-    return supabaseClient.rpc('minbag_get_gap_analysis', {
-      p_bag_id: STATE.activeBagId
+    var bagId = STATE.activeBagId;
+
+    var gapPromise = supabaseClient.rpc('minbag_get_gap_analysis', {
+      p_bag_id: bagId
     }).then(function (res) {
       if (res.error) throw res.error;
       STATE.recoFindings = res.data || [];
@@ -2519,6 +2703,25 @@
       STATE.recoLoaded = true;
       console.warn('[GK MIN BAG V3] Gap-analyse feilet', err);
     });
+
+    var productPromise = supabaseClient.rpc(
+      'minbag_get_product_recommendations',
+      {
+        p_bag_id: bagId,
+        p_limit_per_gap: 3
+      }
+    ).then(function (res) {
+      if (res.error) throw res.error;
+      STATE.recoProducts = res.data || [];
+      STATE.recoProductsLoaded = true;
+    }).catch(function (err) {
+      STATE.recoProducts = [];
+      STATE.recoProductsLoaded = true;
+      STATE.recoProductsError = errorMessage(err);
+      console.warn('[GK MIN BAG V3] Produktanbefalinger feilet', err);
+    });
+
+    return Promise.all([gapPromise, productPromise]);
   }
 
   function saveRecoProfile() {
@@ -3049,6 +3252,9 @@
       STATE.discs = [];
       STATE.recoFindings = [];
       STATE.recoLoaded = true;
+      STATE.recoProducts = [];
+      STATE.recoProductsLoaded = true;
+      STATE.recoProductsError = '';
       return Promise.resolve();
     }
 
@@ -3082,6 +3288,9 @@
     STATE.editDiscId = null;
     STATE.recoFindings = [];
     STATE.recoLoaded = false;
+    STATE.recoProducts = [];
+    STATE.recoProductsLoaded = false;
+    STATE.recoProductsError = '';
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
 
@@ -3502,13 +3711,33 @@
 
   function addCatalogDisc(product) {
     var targetBagId = selectedAddBagId();
+    var targetName = selectedAddBagName();
 
+    addCatalogDiscToBag(product, targetBagId, targetName);
+  }
+
+  function addRecommendedDisc(rec) {
+    var bag = activeBag();
+
+    if (!bag || !rec || !rec.catalog_id) {
+      status('Mangler aktiv bag eller anbefalt katalog-ID.', 'err');
+      return;
+    }
+
+    addCatalogDiscToBag(
+      recommendationAsCatalogProduct(rec),
+      bag.id,
+      bag.name
+    );
+  }
+
+  function addCatalogDiscToBag(product, targetBagId, targetName) {
     if (!targetBagId || !product || !product.id) {
       status('Mangler målbag eller katalog-ID.', 'err');
       return;
     }
 
-    var targetName = selectedAddBagName();
+    targetName = targetName || 'aktiv bag';
 
     setLoading(true, 'Kontrollerer ' + targetName + '…');
 
