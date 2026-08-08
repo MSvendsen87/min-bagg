@@ -20,6 +20,9 @@
    - Favoritt kan toggles direkte på disc-kortet
    - Favoritter sorteres først innen hver disctype
    - Ny disc kan legges direkte i valgfri egen bag
+   - Egen bag kan søkes/filtreres lokalt
+   - Kompakt bag-oppsummering med antall per disctype
+   - Fysisk disc kan dupliseres via sikker RPC
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -31,7 +34,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.10';
+  var VERSION = '2026-08-08.11';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -78,6 +81,8 @@
     renameBagOpen: false,
     bagActionBusy: false,
     addTargetBagId: null,
+    bagSearch: '',
+    bagFilter: 'all',
     editDiscId: null,
     discBusy: false,
     loading: false
@@ -240,6 +245,11 @@
 
       '.gkmb3-bags{display:flex;gap:8px;overflow-x:auto;padding-bottom:3px;margin-bottom:12px;scrollbar-width:thin;}' +
       '.gkmb3-bagbtn{flex:0 0 auto;min-height:42px;padding:9px 12px;border-radius:13px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.055);color:rgba(255,255,255,.75);font-weight:900;cursor:pointer;white-space:nowrap;}' +
+      '.gkmb3-bagsummary{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 11px;}' +
+      '.gkmb3-bagsummary span{display:inline-flex;align-items:center;min-height:29px;padding:5px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.045);color:rgba(255,255,255,.68);font-size:10px;font-weight:850;}' +
+      '.gkmb3-bagsummary span:first-child{border-color:rgba(34,197,94,.26);background:rgba(34,197,94,.08);color:#dcfce7;}' +
+      '.gkmb3-bagtools{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:0 0 12px;}' +
+      '.gkmb3-bagtools .gkmb3-field{margin:0;}' +
       '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
       '.gkmb3-bagform{margin-top:11px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.16));}' +
       '.gkmb3-bagform-title{font-size:13px;font-weight:950;color:#fff;margin-bottom:3px;}' +
@@ -332,6 +342,7 @@
 
       '@media(min-width:620px){' +
         '.gkmb3-grid2{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-bagtools{grid-template-columns:minmax(0,1fr) 190px;}' +
         '.gkmb3-bagform-row{grid-template-columns:minmax(0,1fr) auto;}' +
         '.gkmb3-movebox-row{grid-template-columns:minmax(0,1fr) auto;}' +
         '.gkmb3-grid4{grid-template-columns:repeat(4,minmax(0,1fr));}' +
@@ -1074,6 +1085,139 @@
     return card;
   }
 
+
+  function bagSummaryCounts() {
+    var counts = {
+      total: STATE.discs.length,
+      putter: 0,
+      midrange: 0,
+      fairway: 0,
+      distance: 0,
+      favorites: 0
+    };
+
+    for (var i = 0; i < STATE.discs.length; i += 1) {
+      var disc = STATE.discs[i];
+
+      if (counts[disc.disc_type] !== undefined) {
+        counts[disc.disc_type] += 1;
+      }
+
+      if (disc.is_favorite) counts.favorites += 1;
+    }
+
+    return counts;
+  }
+
+  function renderBagSummary() {
+    var counts = bagSummaryCounts();
+    var wrap = el('div', 'gkmb3-bagsummary');
+
+    var rows = [
+      'Totalt ' + counts.total,
+      'Putter ' + counts.putter,
+      'Midrange ' + counts.midrange,
+      'Fairway ' + counts.fairway,
+      'Distance ' + counts.distance,
+      '★ ' + counts.favorites
+    ];
+
+    for (var i = 0; i < rows.length; i += 1) {
+      wrap.appendChild(el('span', '', rows[i]));
+    }
+
+    return wrap;
+  }
+
+  function discMatchesBagView(disc) {
+    if (!disc) return false;
+
+    var filter = STATE.bagFilter || 'all';
+
+    if (filter === 'favorites' && !disc.is_favorite) return false;
+
+    if (
+      filter !== 'all' &&
+      filter !== 'favorites' &&
+      disc.disc_type !== filter
+    ) {
+      return false;
+    }
+
+    var wanted = trim(STATE.bagSearch).toLowerCase();
+    if (!wanted) return true;
+
+    var haystack = [
+      disc.name,
+      disc.mold_name,
+      disc.brand,
+      disc.plastic,
+      disc.color,
+      disc.note,
+      disc.disc_type
+    ].map(safe).join(' ').toLowerCase();
+
+    return haystack.indexOf(wanted) >= 0;
+  }
+
+  function renderBagTools() {
+    var wrap = el('div', 'gkmb3-bagtools');
+
+    var searchField = el('label', 'gkmb3-field');
+    searchField.appendChild(document.createTextNode('Søk i bagen'));
+
+    var search = el('input', 'gkmb3-input');
+    search.type = 'search';
+    search.placeholder = 'Navn, merke, plast, farge eller notat';
+    search.value = STATE.bagSearch || '';
+    search.oninput = function () {
+      STATE.bagSearch = search.value || '';
+      render();
+      var next = document.querySelector('#' + CONFIG.ROOT_ID + ' .gkmb3-bagtools input[type="search"]');
+      if (next) {
+        next.focus();
+        try {
+          next.setSelectionRange(next.value.length, next.value.length);
+        } catch (_) {}
+      }
+    };
+
+    searchField.appendChild(search);
+    wrap.appendChild(searchField);
+
+    var filterField = el('label', 'gkmb3-field');
+    filterField.appendChild(document.createTextNode('Vis'));
+
+    var filter = el('select', 'gkmb3-select');
+
+    var options = [
+      ['all', 'Alle discer'],
+      ['favorites', '★ Favoritter'],
+      ['putter', 'Puttere'],
+      ['midrange', 'Midrange'],
+      ['fairway', 'Fairway'],
+      ['distance', 'Distance']
+    ];
+
+    for (var i = 0; i < options.length; i += 1) {
+      var option = document.createElement('option');
+      option.value = options[i][0];
+      option.textContent = options[i][1];
+      if ((STATE.bagFilter || 'all') === options[i][0]) option.selected = true;
+      filter.appendChild(option);
+    }
+
+    filter.onchange = function () {
+      STATE.bagFilter = safe(filter.value) || 'all';
+      render();
+    };
+
+    filterField.appendChild(filter);
+    wrap.appendChild(filterField);
+
+    return wrap;
+  }
+
   function renderBagContents() {
     var card = el('section', 'gkmb3-card');
 
@@ -1089,6 +1233,11 @@
       return card;
     }
 
+    if (STATE.discs.length) {
+      card.appendChild(renderBagSummary());
+      card.appendChild(renderBagTools());
+    }
+
     if (!STATE.discs.length) {
       var empty = el('div', 'gkmb3-empty');
       empty.appendChild(el('strong', '', 'Bagen er tom'));
@@ -1100,6 +1249,8 @@
       card.appendChild(empty);
       return card;
     }
+
+    var matchedCount = 0;
 
     var groups = [
       ['putter', 'Puttere'],
@@ -1114,12 +1265,17 @@
       var items = [];
 
       for (var j = 0; j < STATE.discs.length; j += 1) {
-        if (STATE.discs[j].disc_type === type) {
+        if (
+          STATE.discs[j].disc_type === type &&
+          discMatchesBagView(STATE.discs[j])
+        ) {
           items.push(STATE.discs[j]);
         }
       }
 
       if (!items.length) continue;
+
+      matchedCount += items.length;
 
       items.sort(function (a, b) {
         if (!!a.is_favorite !== !!b.is_favorite) {
@@ -1148,6 +1304,17 @@
 
       section.appendChild(grid);
       card.appendChild(section);
+    }
+
+    if (!matchedCount) {
+      var noMatch = el('div', 'gkmb3-empty');
+      noMatch.appendChild(el('strong', '', 'Ingen treff'));
+      noMatch.appendChild(el(
+        'div',
+        '',
+        'Ingen discer matcher søket eller filteret. Prøv et annet søk eller velg Alle discer.'
+      ));
+      card.appendChild(noMatch);
     }
 
     return card;
@@ -1223,6 +1390,15 @@
       toggleDiscFavorite(disc);
     };
     actions.appendChild(favoriteBtn);
+
+    var duplicateBtn = el('button', 'gkmb3-btn secondary', '⧉ Dupliser');
+    duplicateBtn.type = 'button';
+    duplicateBtn.disabled = STATE.discBusy;
+    duplicateBtn.title = 'Lag et nytt fysisk eksemplar med de samme opplysningene';
+    duplicateBtn.onclick = function () {
+      duplicateDisc(disc);
+    };
+    actions.appendChild(duplicateBtn);
 
     var editBtn = el(
       'button',
@@ -2409,6 +2585,8 @@
     STATE.catalogResults = [];
     STATE.catalogQuery = '';
     STATE.catalogType = '';
+    STATE.bagSearch = '';
+    STATE.bagFilter = 'all';
     STATE.editDiscId = null;
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
@@ -2606,6 +2784,53 @@
       STATE.discBusy = false;
       render();
       status('Kunne ikke endre favoritt: ' + errorMessage(err), 'err');
+    });
+  }
+
+
+  function duplicateDisc(disc) {
+    if (!STATE.user || !disc || !disc.id || STATE.discBusy) return;
+
+    var label = disc.name || disc.mold_name || 'denne discen';
+
+    if (!confirm(
+      'Vil du lage et nytt fysisk eksemplar av "' + label + '" i samme bag?\n\n' +
+      'Plast, vekt, farge, notat og favorittstatus kopieres. Du kan redigere kopien etterpå.'
+    )) {
+      return;
+    }
+
+    STATE.discBusy = true;
+    render();
+    status('Dupliserer disc…');
+
+    var newDiscId = null;
+
+    supabaseClient.rpc('minbag_duplicate_disc', {
+      p_disc_id: disc.id
+    }).then(function (res) {
+      if (res.error) throw res.error;
+
+      if (res.data && res.data.id) {
+        newDiscId = res.data.id;
+      }
+
+      return Promise.all([
+        loadBags(STATE.activeBagId),
+        loadActiveBagDiscs()
+      ]);
+    }).then(function () {
+      STATE.discBusy = false;
+      STATE.editDiscId = newDiscId;
+      render();
+      status(
+        label + ' er duplisert. Kopien er klar til å få egen vekt, farge eller notat.',
+        'ok'
+      );
+    }).catch(function (err) {
+      STATE.discBusy = false;
+      render();
+      status('Kunne ikke duplisere disc: ' + errorMessage(err), 'err');
     });
   }
 
