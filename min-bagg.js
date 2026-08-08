@@ -36,7 +36,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.14';
+  var VERSION = '2026-08-08.15';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -100,6 +100,9 @@
     funRecommendationsError: '',
     funRecommendationsPage: 0,
     funRecommendationsBusy: false,
+    bagScore: null,
+    bagScoreLoaded: false,
+    bagScoreError: '',
     recoBusy: false,
     loading: false
   };
@@ -306,6 +309,23 @@
       '.gkmb3-funchallenge{padding:11px;border-radius:12px;border:1px dashed rgba(168,85,247,.35);background:rgba(88,28,135,.08);}' +
       '.gkmb3-funchallenge strong{display:block;color:#fff;font-size:11px;margin-bottom:4px;}' +
       '.gkmb3-funchallenge div{color:rgba(255,255,255,.62);font-size:9px;line-height:1.45;}' +
+      '.gkmb3-bagscore{margin-top:12px;padding:12px;border-radius:16px;border:1px solid rgba(34,197,94,.24);background:linear-gradient(135deg,rgba(20,83,45,.14),rgba(2,10,6,.34));}' +
+      '.gkmb3-bagscore-top{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:center;}' +
+      '.gkmb3-bagscore-number{min-width:92px;padding:12px 14px;border-radius:14px;text-align:center;background:rgba(0,0,0,.26);border:1px solid rgba(34,197,94,.24);}' +
+      '.gkmb3-bagscore-number strong{display:block;color:#fff;font-size:28px;line-height:1;font-weight:1000;}' +
+      '.gkmb3-bagscore-number span{display:block;margin-top:5px;color:#86efac;font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.03em;}' +
+      '.gkmb3-bagscore-copy h4{margin:0;color:#fff;font-size:13px;}' +
+      '.gkmb3-bagscore-copy p{margin:5px 0 0;color:rgba(255,255,255,.62);font-size:9px;line-height:1.45;}' +
+      '.gkmb3-bagscore-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:10px;}' +
+      '.gkmb3-scoremetric{padding:8px;border-radius:12px;background:rgba(0,0,0,.20);border:1px solid rgba(255,255,255,.07);}' +
+      '.gkmb3-scoremetric-top{display:flex;justify-content:space-between;gap:6px;color:rgba(255,255,255,.78);font-size:9px;font-weight:900;}' +
+      '.gkmb3-scoremetric-top b{color:#fff;}' +
+      '.gkmb3-scorebar{height:5px;margin-top:6px;border-radius:99px;overflow:hidden;background:rgba(255,255,255,.08);}' +
+      '.gkmb3-scorebar span{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#16a34a,#4ade80);}' +
+      '.gkmb3-bagscore-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;}' +
+      '.gkmb3-bagscore-meta span{padding:5px 7px;border-radius:999px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.72);font-size:9px;font-weight:850;}' +
+      '.gkmb3-bagscore-next{margin-top:9px;padding:8px 10px;border-radius:11px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.17);color:#bbf7d0;font-size:9px;font-weight:800;line-height:1.45;}' +
+      '@media(max-width:700px){.gkmb3-bagscore-top{grid-template-columns:1fr;}.gkmb3-bagscore-number{min-width:0;}.gkmb3-bagscore-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
       '.gkmb3-bagbtn.active{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.48);color:#dcfce7;}' +
       '.gkmb3-bagform{margin-top:11px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.16));}' +
       '.gkmb3-bagform-title{font-size:13px;font-weight:950;color:#fff;margin-bottom:3px;}' +
@@ -1810,6 +1830,141 @@
     return wrap;
   }
 
+  function renderBagScoreMetric(label, score) {
+    score = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
+
+    var metric = el('div', 'gkmb3-scoremetric');
+    var top = el('div', 'gkmb3-scoremetric-top');
+
+    top.appendChild(el('span', '', label));
+    top.appendChild(el('b', '', score));
+
+    metric.appendChild(top);
+
+    var bar = el('div', 'gkmb3-scorebar');
+    var fill = document.createElement('span');
+    fill.style.width = score + '%';
+    bar.appendChild(fill);
+    metric.appendChild(bar);
+
+    return metric;
+  }
+
+  function renderBagScore() {
+    var wrap = el('section', 'gkmb3-bagscore');
+
+    if (!STATE.bagScoreLoaded) {
+      wrap.appendChild(el('div', 'gkmb3-note', 'Beregner Bag-score…'));
+      return wrap;
+    }
+
+    if (!STATE.bagScore) {
+      wrap.appendChild(el(
+        'div',
+        'gkmb3-note',
+        STATE.bagScoreError
+          ? 'Kunne ikke beregne Bag-score akkurat nå.'
+          : 'Bag-score er ikke tilgjengelig ennå.'
+      ));
+      return wrap;
+    }
+
+    var score = STATE.bagScore;
+    var top = el('div', 'gkmb3-bagscore-top');
+
+    var number = el('div', 'gkmb3-bagscore-number');
+    number.appendChild(el(
+      'strong',
+      '',
+      Math.round(Number(score.overall_score) || 0) + '/100'
+    ));
+    number.appendChild(el(
+      'span',
+      '',
+      safe(score.score_label || 'Bag-score')
+    ));
+    top.appendChild(number);
+
+    var copy = el('div', 'gkmb3-bagscore-copy');
+    copy.appendChild(el('h4', '', '🏆 Bag-score'));
+
+    if (score.summary) {
+      copy.appendChild(el('p', '', safe(score.summary)));
+    }
+
+    top.appendChild(copy);
+    wrap.appendChild(top);
+
+    var grid = el('div', 'gkmb3-bagscore-grid');
+    grid.appendChild(renderBagScoreMetric(
+      'Dekning',
+      score.coverage_score
+    ));
+    grid.appendChild(renderBagScoreMetric(
+      'Allsidighet',
+      score.versatility_score
+    ));
+    grid.appendChild(renderBagScoreMetric(
+      'Vind',
+      score.wind_score
+    ));
+    grid.appendChild(renderBagScoreMetric(
+      'Lite overlapp',
+      score.overlap_score
+    ));
+    wrap.appendChild(grid);
+
+    var meta = el('div', 'gkmb3-bagscore-meta');
+
+    meta.appendChild(el(
+      'span',
+      '',
+      '🎯 Roller ' +
+      safe(score.covered_roles) +
+      '/' +
+      safe(score.eligible_roles)
+    ));
+
+    if (score.strongest_area) {
+      meta.appendChild(el(
+        'span',
+        '',
+        '💪 Sterkest: ' + safe(score.strongest_area)
+      ));
+    }
+
+    if (score.weakest_area) {
+      meta.appendChild(el(
+        'span',
+        '',
+        '🔧 Svakest: ' + safe(score.weakest_area)
+      ));
+    }
+
+    if (Number(score.overlap_group_count) > 0) {
+      meta.appendChild(el(
+        'span',
+        '',
+        '♻️ ' +
+        Number(score.overlap_group_count) +
+        ' overlappgruppe' +
+        (Number(score.overlap_group_count) === 1 ? '' : 'r')
+      ));
+    }
+
+    wrap.appendChild(meta);
+
+    if (score.next_step) {
+      wrap.appendChild(el(
+        'div',
+        'gkmb3-bagscore-next',
+        safe(score.next_step)
+      ));
+    }
+
+    return wrap;
+  }
+
   function renderRecommendationPanel() {
     var card = el('section', 'gkmb3-card gkmb3-reco');
     var head = el('div', 'gkmb3-recohead');
@@ -1871,6 +2026,10 @@
     if (STATE.recoProfileOpen) {
       card.appendChild(renderRecoProfileForm());
       return card;
+    }
+
+    if (STATE.discs.length) {
+      card.appendChild(renderBagScore());
     }
 
     if (!STATE.discs.length) {
@@ -2783,6 +2942,9 @@
     STATE.funRecommendationsError = '';
     STATE.funRecommendationsPage = 0;
     STATE.funRecommendationsBusy = false;
+    STATE.bagScore = null;
+    STATE.bagScoreLoaded = false;
+    STATE.bagScoreError = '';
     STATE.recoBusy = false;
   }
 
@@ -2966,11 +3128,15 @@
     STATE.funRecommendations = [];
     STATE.funRecommendationsLoaded = false;
     STATE.funRecommendationsError = '';
+    STATE.bagScore = null;
+    STATE.bagScoreLoaded = false;
+    STATE.bagScoreError = '';
 
     if (!STATE.user || !STATE.activeBagId || !STATE.recoProfile) {
       STATE.recoLoaded = true;
       STATE.recoProductsLoaded = true;
       STATE.funRecommendationsLoaded = true;
+      STATE.bagScoreLoaded = true;
       return Promise.resolve();
     }
 
@@ -3013,10 +3179,33 @@
 
     var funPromise = loadFunRecommendations();
 
+    var scorePromise = supabaseClient.rpc(
+      'minbag_get_bag_score',
+      {
+        p_bag_id: bagId
+      }
+    ).then(function (res) {
+      if (res.error) throw res.error;
+
+      var rows = res.data || [];
+      STATE.bagScore = rows.length ? rows[0] : null;
+      STATE.bagScoreLoaded = true;
+    }).catch(function (err) {
+      STATE.bagScore = null;
+      STATE.bagScoreLoaded = true;
+      STATE.bagScoreError = errorMessage(err);
+
+      console.warn(
+        '[GK MIN BAG V3] Bag-score feilet',
+        err
+      );
+    });
+
     return Promise.all([
       gapPromise,
       productPromise,
-      funPromise
+      funPromise,
+      scorePromise
     ]);
   }
 
@@ -3556,6 +3745,9 @@
       STATE.funRecommendationsError = '';
       STATE.funRecommendationsPage = 0;
       STATE.funRecommendationsBusy = false;
+      STATE.bagScore = null;
+      STATE.bagScoreLoaded = true;
+      STATE.bagScoreError = '';
       return Promise.resolve();
     }
 
@@ -3597,6 +3789,9 @@
     STATE.funRecommendationsError = '';
     STATE.funRecommendationsPage = 0;
     STATE.funRecommendationsBusy = false;
+    STATE.bagScore = null;
+    STATE.bagScoreLoaded = false;
+    STATE.bagScoreError = '';
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
 
