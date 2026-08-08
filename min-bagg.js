@@ -13,6 +13,7 @@
    - "Legg inn egen disc" via minbag_add_manual_disc
    - Mobil-først, mørkt GolfKongen-design
    - Bag-cover: velg GolfKongen-sekk eller bruk eget bilde
+   - Rediger/slett fysisk disc-eksemplar via sikre RPC-er
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -24,7 +25,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.7';
+  var VERSION = '2026-08-08.8';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -67,6 +68,8 @@
     storeBagImageLoading: {},
     storeBagPickerOpen: false,
     storeBagBusy: false,
+    editDiscId: null,
+    discBusy: false,
     loading: false
   };
 
@@ -227,6 +230,14 @@
       '.gkmb3-flight span{display:inline-flex;gap:4px;padding:5px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.055);font-size:10px;color:rgba(255,255,255,.54);}' +
       '.gkmb3-flight b{color:#bbf7d0;}' +
       '.gkmb3-discmeta{margin-top:7px;font-size:11px;color:rgba(255,255,255,.55);line-height:1.35;}' +
+      '.gkmb3-discactions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;}' +
+      '.gkmb3-discactions .gkmb3-btn{min-height:34px;padding:6px 10px;font-size:10px;}' +
+      '.gkmb3-discedit{grid-column:1/-1;margin-top:2px;padding:12px;border-radius:15px;border:1px solid rgba(34,197,94,.25);background:linear-gradient(135deg,rgba(34,197,94,.08),rgba(0,0,0,.18));}' +
+      '.gkmb3-discedit-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px;}' +
+      '.gkmb3-discedit-title{font-size:13px;font-weight:950;color:#fff;}' +
+      '.gkmb3-discedit-note{margin-top:3px;font-size:10px;line-height:1.35;color:rgba(255,255,255,.48);}' +
+      '.gkmb3-discedit-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px;}' +
+      '.gkmb3-discedit-actions .gkmb3-btn{min-height:38px;padding:8px 11px;font-size:11px;}' +
 
       '.gkmb3-empty{padding:24px 16px;text-align:center;border:1px dashed rgba(255,255,255,.16);border-radius:17px;background:rgba(255,255,255,.025);color:rgba(255,255,255,.58);}' +
       '.gkmb3-empty strong{display:block;color:#fff;font-size:17px;margin-bottom:5px;}' +
@@ -986,21 +997,142 @@
       body.appendChild(el('div', 'gkmb3-discmeta', disc.note));
     }
 
+    var actions = el('div', 'gkmb3-discactions');
+
     if (disc.product_url) {
       var link = el('a', 'gkmb3-btn secondary', 'Se hos GolfKongen');
       link.href = disc.product_url;
       link.target = '_blank';
       link.rel = 'noopener';
-      link.style.marginTop = '8px';
-      link.style.minHeight = '36px';
-      link.style.padding = '7px 10px';
-      link.style.fontSize = '11px';
-      body.appendChild(link);
+      actions.appendChild(link);
     }
 
+    var editBtn = el(
+      'button',
+      'gkmb3-btn secondary',
+      STATE.editDiscId === disc.id ? 'Lukk redigering' : '✏ Rediger'
+    );
+    editBtn.type = 'button';
+    editBtn.disabled = STATE.discBusy;
+    editBtn.onclick = function () {
+      STATE.editDiscId = STATE.editDiscId === disc.id ? null : disc.id;
+      render();
+      if (STATE.editDiscId) status('Redigerer ' + (disc.name || disc.mold_name || 'disc') + '.', '');
+    };
+    actions.appendChild(editBtn);
+
+    body.appendChild(actions);
     card.appendChild(body);
 
+    if (STATE.editDiscId === disc.id) {
+      card.appendChild(renderDiscEditPanel(disc));
+    }
+
     return card;
+  }
+
+  function renderDiscEditPanel(disc) {
+    var panel = el('div', 'gkmb3-discedit');
+
+    var head = el('div', 'gkmb3-discedit-head');
+    var headText = el('div', '');
+    headText.appendChild(el('div', 'gkmb3-discedit-title', 'Rediger dette eksemplaret'));
+    headText.appendChild(el(
+      'div',
+      'gkmb3-discedit-note',
+      'Endrer bare discen i din bag – ikke produktdata, flight-tall eller GolfKongen-katalogen.'
+    ));
+    head.appendChild(headText);
+    panel.appendChild(head);
+
+    var grid = el('div', 'gkmb3-grid2');
+
+    var plasticField = el('label', 'gkmb3-field');
+    plasticField.appendChild(document.createTextNode('Plast'));
+    var plastic = el('input', 'gkmb3-input');
+    plastic.id = 'gkmb3-edit-plastic-' + disc.id;
+    plastic.type = 'text';
+    plastic.placeholder = 'F.eks. Champion';
+    plastic.value = safe(disc.plastic);
+    plasticField.appendChild(plastic);
+    grid.appendChild(plasticField);
+
+    var weightField = el('label', 'gkmb3-field');
+    weightField.appendChild(document.createTextNode('Vekt (gram)'));
+    var weight = el('input', 'gkmb3-input');
+    weight.id = 'gkmb3-edit-weight-' + disc.id;
+    weight.type = 'number';
+    weight.min = '1';
+    weight.max = '300';
+    weight.step = '0.1';
+    weight.placeholder = 'F.eks. 175';
+    weight.value = disc.weight_grams === null || disc.weight_grams === undefined
+      ? ''
+      : safe(disc.weight_grams);
+    weightField.appendChild(weight);
+    grid.appendChild(weightField);
+
+    var colorField = el('label', 'gkmb3-field');
+    colorField.appendChild(document.createTextNode('Farge'));
+    var color = el('input', 'gkmb3-input');
+    color.id = 'gkmb3-edit-color-' + disc.id;
+    color.type = 'text';
+    color.placeholder = 'F.eks. rød';
+    color.value = safe(disc.color);
+    colorField.appendChild(color);
+    grid.appendChild(colorField);
+
+    var favoriteField = el('label', 'gkmb3-check');
+    var favorite = document.createElement('input');
+    favorite.id = 'gkmb3-edit-favorite-' + disc.id;
+    favorite.type = 'checkbox';
+    favorite.checked = !!disc.is_favorite;
+    favoriteField.appendChild(favorite);
+    favoriteField.appendChild(document.createTextNode('★ Favoritt / go-to disc'));
+    grid.appendChild(favoriteField);
+
+    panel.appendChild(grid);
+
+    var noteField = el('label', 'gkmb3-field');
+    noteField.style.marginTop = '10px';
+    noteField.appendChild(document.createTextNode('Notat'));
+    var note = el('textarea', 'gkmb3-textarea');
+    note.id = 'gkmb3-edit-note-' + disc.id;
+    note.placeholder = 'F.eks. mest brukt i motvind';
+    note.value = safe(disc.note);
+    noteField.appendChild(note);
+    panel.appendChild(noteField);
+
+    var buttons = el('div', 'gkmb3-discedit-actions');
+
+    var saveBtn = el('button', 'gkmb3-btn', STATE.discBusy ? 'Lagrer…' : 'Lagre endringer');
+    saveBtn.type = 'button';
+    saveBtn.disabled = STATE.discBusy;
+    saveBtn.onclick = function () {
+      updateDisc(disc);
+    };
+    buttons.appendChild(saveBtn);
+
+    var cancelBtn = el('button', 'gkmb3-btn secondary', 'Avbryt');
+    cancelBtn.type = 'button';
+    cancelBtn.disabled = STATE.discBusy;
+    cancelBtn.onclick = function () {
+      STATE.editDiscId = null;
+      render();
+      status('Ingen endringer lagret.', '');
+    };
+    buttons.appendChild(cancelBtn);
+
+    var deleteBtn = el('button', 'gkmb3-btn danger', 'Slett disc');
+    deleteBtn.type = 'button';
+    deleteBtn.disabled = STATE.discBusy;
+    deleteBtn.onclick = function () {
+      deleteDisc(disc);
+    };
+    buttons.appendChild(deleteBtn);
+
+    panel.appendChild(buttons);
+    return panel;
   }
 
   function renderAddPanel() {
@@ -1388,6 +1520,8 @@
     STATE.storeBagImageLoading = {};
     STATE.storeBagPickerOpen = false;
     STATE.storeBagBusy = false;
+    STATE.editDiscId = null;
+    STATE.discBusy = false;
   }
 
   function loadPublicTop3() {
@@ -1424,6 +1558,8 @@
         STATE.storeBagImageLoading = {};
         STATE.storeBagPickerOpen = false;
         STATE.storeBagBusy = false;
+        STATE.editDiscId = null;
+        STATE.discBusy = false;
         render();
         return;
       }
@@ -1966,6 +2102,7 @@
     STATE.catalogResults = [];
     STATE.catalogQuery = '';
     STATE.catalogType = '';
+    STATE.editDiscId = null;
 
     render();
     status('Laster bag…');
@@ -2064,6 +2201,91 @@
     }).catch(function (err) {
       setLoading(false);
       status('Kunne ikke slette bag: ' + errorMessage(err), 'err');
+    });
+  }
+
+
+  function updateDisc(disc) {
+    if (!STATE.user || !disc || !disc.id || STATE.discBusy) return;
+
+    var plastic = getInputValue('gkmb3-edit-plastic-' + disc.id) || null;
+    var weightText = getInputValue('gkmb3-edit-weight-' + disc.id);
+    var weight = numOrNull(weightText);
+    var color = getInputValue('gkmb3-edit-color-' + disc.id) || null;
+    var note = getInputValue('gkmb3-edit-note-' + disc.id) || null;
+    var isFavorite = getChecked('gkmb3-edit-favorite-' + disc.id);
+
+    if (trim(weightText) && weight === null) {
+      status('Vekten må være et gyldig tall.', 'err');
+      return;
+    }
+
+    if (weight !== null && (weight <= 0 || weight > 300)) {
+      status('Vekten må være mellom 0 og 300 gram.', 'err');
+      return;
+    }
+
+    STATE.discBusy = true;
+    render();
+    status('Lagrer endringer…');
+
+    supabaseClient.rpc('minbag_update_disc', {
+      p_disc_id: disc.id,
+      p_plastic: plastic,
+      p_weight_grams: weight,
+      p_color: color,
+      p_note: note,
+      p_is_favorite: isFavorite
+    }).then(function (res) {
+      if (res.error) throw res.error;
+      return loadActiveBagDiscs();
+    }).then(function () {
+      STATE.discBusy = false;
+      STATE.editDiscId = null;
+      render();
+      status('Disc oppdatert.', 'ok');
+    }).catch(function (err) {
+      STATE.discBusy = false;
+      render();
+      status('Kunne ikke oppdatere disc: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function deleteDisc(disc) {
+    if (!STATE.user || !disc || !disc.id || STATE.discBusy) return;
+
+    var label = disc.name || disc.mold_name || 'denne discen';
+
+    if (!confirm(
+      'Vil du slette "' + label + '" fra denne bagen?\n\nDette sletter bare dette fysiske eksemplaret fra Min Bag.'
+    )) {
+      return;
+    }
+
+    STATE.discBusy = true;
+    render();
+    status('Sletter disc…');
+
+    supabaseClient.rpc('minbag_delete_disc', {
+      p_disc_id: disc.id
+    }).then(function (res) {
+      if (res.error) throw res.error;
+
+      STATE.editDiscId = null;
+
+      return Promise.all([
+        loadBags(STATE.activeBagId),
+        loadActiveBagDiscs(),
+        loadPublicTop3()
+      ]);
+    }).then(function () {
+      STATE.discBusy = false;
+      render();
+      status('Disc slettet fra bagen.', 'ok');
+    }).catch(function (err) {
+      STATE.discBusy = false;
+      render();
+      status('Kunne ikke slette disc: ' + errorMessage(err), 'err');
     });
   }
 
