@@ -25,6 +25,7 @@
    - Fysisk disc kan dupliseres via sikker RPC
    - Anbefalingsprofil med nivå, kastelengde, hånd, kastestil, bane og vind
    - Bag-analyse V1: hull i flight-dekning og tydelig overlapp
+   - v19.3: Baner vises først etter søk; totalantall aktive vises fortsatt
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -36,7 +37,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-08.19.2';
+  var VERSION = '2026-08-09.19.3';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -1511,25 +1512,32 @@
     }
 
     var courseCountText = '';
-    if (STATE.coursesLoaded && !STATE.courseSearchBusy) {
-      var totalCourseHits =
-        Math.max(
-          Number(STATE.courseTotalCount || 0),
-          STATE.courses.length
-        );
+    var totalCourseHits =
+      Math.max(
+        Number(STATE.courseTotalCount || 0),
+        STATE.courses.length
+      );
 
-      if (totalCourseHits > STATE.courses.length) {
-        courseCountText =
-          ' · viser ' +
-          STATE.courses.length +
-          ' av ' +
-          totalCourseHits +
-          ' treff';
+    if (STATE.coursesLoaded && !STATE.courseSearchBusy) {
+      if (STATE.courseQuery) {
+        if (totalCourseHits > STATE.courses.length) {
+          courseCountText =
+            ' · viser ' +
+            STATE.courses.length +
+            ' av ' +
+            totalCourseHits +
+            ' treff';
+        } else {
+          courseCountText =
+            ' · ' +
+            totalCourseHits +
+            ' treff';
+        }
       } else {
         courseCountText =
           ' · ' +
           totalCourseHits +
-          ' treff';
+          ' aktive';
       }
     }
 
@@ -1549,15 +1557,23 @@
       card.appendChild(el(
         'div',
         'gkmb3-note',
-        'Laster baner…'
+        STATE.courseQuery
+          ? 'Søker etter baner…'
+          : 'Laster antall aktive baner…'
+      ));
+    } else if (!STATE.courseQuery) {
+      card.appendChild(el(
+        'div',
+        'gkmb3-note',
+        totalCourseHits > 0
+          ? 'Søk på fylke, kommune, sted eller banenavn for å vise baner.'
+          : 'Banedatabasen er klar, men vi har ikke lagt inn offentlige baner ennå.'
       ));
     } else if (!STATE.courses.length) {
       card.appendChild(el(
         'div',
         'gkmb3-note',
-        STATE.courseQuery
-          ? 'Fant ingen godkjente baner på dette søket ennå.'
-          : 'Banedatabasen er klar, men vi har ikke lagt inn offentlige baner ennå.'
+        'Fant ingen godkjente baner på dette søket ennå.'
       ));
     } else {
       var list = el('div', 'gkmb3-course-list');
@@ -4886,18 +4902,44 @@
     STATE.courseQuery = wanted;
     STATE.courseSearchBusy = true;
 
-    var searchPromise = supabaseClient.rpc(
-      'minbag_search_courses',
-      {
-        p_query: wanted || null,
-        p_limit: 100
-      }
-    );
-
     var countPromise = supabaseClient.rpc(
       'minbag_count_courses',
       {
         p_query: wanted || null
+      }
+    );
+
+    // Ingen søketekst: hent bare totalantallet aktive offentlige baner.
+    // Selve banelisten skal være tom til brukeren søker.
+    if (!wanted) {
+      STATE.courses = [];
+
+      return countPromise.then(function (countRes) {
+        if (countRes.error) throw countRes.error;
+
+        STATE.courses = [];
+        STATE.courseTotalCount =
+          Number(countRes.data || 0);
+        STATE.coursesLoaded = true;
+        STATE.courseSearchBusy = false;
+      }).catch(function (err) {
+        STATE.courses = [];
+        STATE.courseTotalCount = 0;
+        STATE.coursesLoaded = true;
+        STATE.courseSearchBusy = false;
+
+        console.warn(
+          '[GK MIN BAG V3] Antall baner feilet',
+          err
+        );
+      });
+    }
+
+    var searchPromise = supabaseClient.rpc(
+      'minbag_search_courses',
+      {
+        p_query: wanted,
+        p_limit: 100
       }
     );
 
@@ -5065,10 +5107,26 @@
   function searchCoursesFromForm() {
     if (STATE.courseSearchBusy) return;
 
-    var query = getInputValue('gkmb3-course-search');
+    var query = trim(getInputValue('gkmb3-course-search'));
 
     STATE.courseSearchBusy = true;
     render();
+
+    if (!query) {
+      status('Nullstiller banesøket…');
+
+      loadCourses('')
+        .then(function () {
+          render();
+          status(
+            'Skriv inn fylke, kommune, sted eller banenavn for å vise baner.',
+            ''
+          );
+        });
+
+      return;
+    }
+
     status('Søker etter baner…');
 
     loadCourses(query)
