@@ -5542,8 +5542,11 @@
 
     var speed = numericInput('gkmb3-manual-speed', 'Speed');
     var glide = numericInput('gkmb3-manual-glide', 'Glide');
-    var turn = numericInput('gkmb3-manual-turn', 'Turn');
+    var turn = numericInput('gkmb3-manual-turn', 'Turn', true);
     var fade = numericInput('gkmb3-manual-fade', 'Fade');
+
+    turn.min = '-5';
+    turn.max = '1';
 
     var flightGrid = el('div', 'gkmb3-grid4');
     flightGrid.appendChild(field('Speed', speed));
@@ -5598,12 +5601,23 @@
     return label;
   }
 
-  function numericInput(id, placeholder) {
+  function numericInput(id, placeholder, allowNegative) {
     var input = el('input', 'gkmb3-input');
     input.id = id;
-    input.type = 'number';
-    input.step = '0.1';
-    input.inputMode = 'decimal';
+
+    if (allowNegative) {
+      input.type = 'text';
+      input.inputMode = 'text';
+      input.pattern = '-?[0-9]*([.,][0-9]+)?';
+      input.autocomplete = 'off';
+      input.autocapitalize = 'off';
+      input.spellcheck = false;
+    } else {
+      input.type = 'number';
+      input.step = '0.1';
+      input.inputMode = 'decimal';
+    }
+
     input.placeholder = placeholder || '';
     return input;
   }
