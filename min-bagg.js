@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.20.2';
+  var VERSION = '2026-08-09.20.3';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -71,6 +71,7 @@
     user: null,
     activeView: 'home',
     appMenuOpen: false,
+    addDiscOpen: false,
     bags: [],
     activeBagId: null,
     discs: [],
@@ -704,13 +705,19 @@
       '.gkmb3-featurecard>.gkmb3-bagscore,.gkmb3-featurecard>.gkmb3-throwadvisor,.gkmb3-featurecard>.gkmb3-roundbag{margin-top:0;}' +
       '.gkmb3-featurelinks{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 3px;}' +
       '.gkmb3-featurelinks .gkmb3-btn{min-height:35px;padding:7px 9px;font-size:9px;}' +
-      '.gkmb3-discworkspace{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.70fr);gap:14px;align-items:start;}' +
-      '.gkmb3-discworkspace>.gkmb3-card:nth-child(2){position:sticky;top:18px;}' +
+      '.gkmb3-discworkspace{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:start;}' +
+      '.gkmb3-addpanel{padding:0;overflow:hidden;}' +
+      '.gkmb3-addpanel-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 16px;}' +
+      '.gkmb3-addpanel-head h3{margin:0 0 3px;}' +
+      '.gkmb3-addpanel-head p{margin:0;font-size:11px;}' +
+      '.gkmb3-addpanel-body{padding:0 16px 16px;border-top:1px solid rgba(255,255,255,.08);}' +
+      '.gkmb3-addpanel-body>.gkmb3-field:first-child{margin-top:14px;}' +
+      '@media(min-width:761px){.gkmb3-addpanel.open .gkmb3-results{grid-template-columns:repeat(2,minmax(0,1fr));max-height:520px;overflow-y:auto;padding-right:4px;}}' +
 
       '.gkmb3-mobilebar{display:none;}' +
       '.gkmb3-moresheet{display:none;}' +
 
-      '@media(max-width:1050px){.gkmb3-appframe{grid-template-columns:205px minmax(0,1fr);}.gkmb3-launch-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.gkmb3-discworkspace{grid-template-columns:1fr;}.gkmb3-discworkspace>.gkmb3-card:nth-child(2){position:static;order:-1;}}' +
+      '@media(max-width:1050px){.gkmb3-appframe{grid-template-columns:205px minmax(0,1fr);}.gkmb3-launch-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
       '@media(max-width:760px){' +
         '#min-bag-root{margin-top:8px;}' +
         '.gkmb3-shell.gkmb3-appshell{padding-bottom:88px;}' +
@@ -1255,6 +1262,7 @@
     var addDisc = el('button', 'gkmb3-btn', '+ Legg til disc');
     addDisc.type = 'button';
     addDisc.onclick = function () {
+      STATE.addDiscOpen = true;
       openAppView('discs');
     };
     quick.appendChild(addDisc);
@@ -1521,8 +1529,8 @@
 
   function renderDiscsWorkspace() {
     var wrap = el('div', 'gkmb3-discworkspace');
-    wrap.appendChild(renderBagContents());
     wrap.appendChild(renderAddPanel());
+    wrap.appendChild(renderBagContents());
     return wrap;
   }
 
@@ -5241,13 +5249,44 @@
   }
 
   function renderAddPanel() {
-    var card = el('section', 'gkmb3-card');
-    card.appendChild(el('h3', '', 'Legg til disc'));
-    card.appendChild(el(
+    var card = el(
+      'section',
+      'gkmb3-card gkmb3-addpanel ' +
+      (STATE.addDiscOpen ? 'open' : 'closed')
+    );
+
+    var head = el('div', 'gkmb3-addpanel-head');
+    var copy = el('div', '');
+
+    copy.appendChild(el('h3', '', '➕ Legg til disc'));
+    copy.appendChild(el(
       'p',
       '',
-      'Velg en GolfKongen-disc eller registrer en disc manuelt.'
+      STATE.addDiscOpen
+        ? 'Velg en GolfKongen-disc eller registrer en disc manuelt.'
+        : 'Søk etter en disc eller registrer en du allerede eier.'
     ));
+
+    var toggle = el(
+      'button',
+      STATE.addDiscOpen ? 'gkmb3-btn secondary' : 'gkmb3-btn',
+      STATE.addDiscOpen ? '− Lukk' : '+ Åpne'
+    );
+    toggle.type = 'button';
+    toggle.onclick = function () {
+      STATE.addDiscOpen = !STATE.addDiscOpen;
+      render();
+    };
+
+    head.appendChild(copy);
+    head.appendChild(toggle);
+    card.appendChild(head);
+
+    if (!STATE.addDiscOpen) {
+      return card;
+    }
+
+    var body = el('div', 'gkmb3-addpanel-body');
 
     if (STATE.bags.length > 1) {
       var targetField = el('label', 'gkmb3-field');
@@ -5262,34 +5301,50 @@
       for (var b = 0; b < STATE.bags.length; b += 1) {
         var targetOption = document.createElement('option');
         targetOption.value = STATE.bags[b].id;
-        targetOption.textContent = STATE.bags[b].name + (STATE.bags[b].is_default ? ' ★' : '');
-        if (STATE.bags[b].id === selectedTarget) targetOption.selected = true;
+        targetOption.textContent =
+          STATE.bags[b].name +
+          (STATE.bags[b].is_default ? ' ★' : '');
+
+        if (STATE.bags[b].id === selectedTarget) {
+          targetOption.selected = true;
+        }
+
         targetSelect.appendChild(targetOption);
       }
 
       targetSelect.onchange = function () {
         STATE.addTargetBagId = safe(targetSelect.value);
-        status('Nye discer legges i ' + selectedAddBagName() + '.', '');
+        status(
+          'Nye discer legges i ' + selectedAddBagName() + '.',
+          ''
+        );
       };
 
       targetField.appendChild(targetSelect);
-      card.appendChild(targetField);
+      body.appendChild(targetField);
     }
 
     var tabs = el('div', 'gkmb3-tabs');
 
-    var catalogTab = el('button', 'gkmb3-tab active', 'Fra GolfKongen');
+    var catalogTab = el(
+      'button',
+      'gkmb3-tab active',
+      'Fra GolfKongen'
+    );
     catalogTab.type = 'button';
     catalogTab.dataset.target = 'catalog';
 
-    var manualTab = el('button', 'gkmb3-tab', 'Egen disc');
+    var manualTab = el(
+      'button',
+      'gkmb3-tab',
+      'Egen disc'
+    );
     manualTab.type = 'button';
     manualTab.dataset.target = 'manual';
 
     tabs.appendChild(catalogTab);
     tabs.appendChild(manualTab);
-
-    card.appendChild(tabs);
+    body.appendChild(tabs);
 
     var catalog = renderCatalogPanel();
     catalog.id = 'gkmb3-tab-catalog';
@@ -5312,8 +5367,9 @@
       catalog.style.display = 'none';
     };
 
-    card.appendChild(catalog);
-    card.appendChild(manual);
+    body.appendChild(catalog);
+    body.appendChild(manual);
+    card.appendChild(body);
 
     return card;
   }
@@ -5641,6 +5697,7 @@
     STATE.user = null;
     STATE.activeView = 'home';
     STATE.appMenuOpen = false;
+    STATE.addDiscOpen = false;
     STATE.bags = [];
     STATE.activeBagId = null;
     STATE.discs = [];
