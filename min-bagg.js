@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.20.1';
+  var VERSION = '2026-08-09.20.2';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -289,8 +289,34 @@
 
   function errorMessage(err) {
     if (!err) return 'Ukjent feil.';
-    if (typeof err === 'string') return err;
-    return err.message || err.error_description || err.details || JSON.stringify(err);
+
+    var raw = typeof err === 'string'
+      ? err
+      : (err.message || err.error_description || err.details || '');
+
+    raw = safe(raw);
+
+    if (!raw) return 'Noe gikk galt. Prøv igjen.';
+
+    var lower = raw.toLowerCase();
+    var technical = [
+      'supabase', 'postgres', 'postgrest', 'sqlstate', 'pgrst',
+      'rpc', 'row-level', 'rls', 'jwt', 'auth.uid', 'schema',
+      'relation ', 'column ', 'function ', 'permission denied',
+      'violates', 'uuid', 'failed to fetch', 'networkerror'
+    ];
+
+    for (var i = 0; i < technical.length; i += 1) {
+      if (lower.indexOf(technical[i]) !== -1) {
+        return 'Noe gikk galt. Prøv igjen.';
+      }
+    }
+
+    if (/\(\d{3}\)/.test(raw)) {
+      return 'Noe gikk galt. Prøv igjen.';
+    }
+
+    return raw;
   }
 
   function injectCss() {
@@ -735,7 +761,7 @@
             resolve();
           } else if (tries > 100) {
             clearInterval(timer);
-            reject(new Error('Supabase SDK brukte for lang tid på å laste.'));
+            reject(new Error('Innloggingstjenesten brukte for lang tid på å laste.'));
           }
         }, 100);
         return;
@@ -746,7 +772,7 @@
       script.src = CONFIG.SUPABASE_SDK;
       script.defer = true;
       script.onload = function () { resolve(); };
-      script.onerror = function () { reject(new Error('Kunne ikke laste Supabase SDK.')); };
+      script.onerror = function () { reject(new Error('Kunne ikke laste innloggingstjenesten.')); };
       document.head.appendChild(script);
     });
   }
@@ -807,7 +833,7 @@
     card.appendChild(el(
       'p',
       '',
-      'De mest brukte moldene blant Min Bag-brukerne. Hver bruker teller én gang per mold, og bare discer vi kan lenke til i GolfKongen vises.'
+      'De mest brukte discmodellene blant Min Bag-brukerne. Hver bruker teller én gang per modell, og bare modeller som finnes i GolfKongen-nettbutikken vises.'
     ));
 
     var grid = el('div', 'gkmb3-top3grid');
@@ -910,7 +936,7 @@
         icon: '🎯',
         title: 'Anbefalinger',
         short: 'Tips',
-        description: 'Spillerprofil, hull i bagen, overlapp og forslag som passer deg.'
+        description: 'Personlige forslag basert på spillestil, hva bagen dekker og hvilke discer som overlapper.'
       },
       score: {
         icon: '🏆',
@@ -946,7 +972,7 @@
         icon: '🔥',
         title: 'Topp 3',
         short: 'Toppliste',
-        description: 'Se hvilke molds som er mest brukt blant Min Bag-brukerne.'
+        description: 'Se hvilke discmodeller som er mest brukt blant Min Bag-brukerne.'
       }
     };
 
@@ -1007,7 +1033,7 @@
         view: 'recommendations',
         icon: '🎯',
         title: 'Anbefalinger',
-        desc: 'Hull, overlapp og personlige forslag.',
+        desc: 'Se hva som mangler, hva som overlapper og få personlige forslag.',
         stat: STATE.recoProfile
           ? Number(STATE.recoFindings.length || 0) + ' funn'
           : 'Lag profil',
@@ -1057,7 +1083,7 @@
         view: 'popular',
         icon: '🔥',
         title: 'Topp 3',
-        desc: 'Populære molds blant Min Bag-brukere.',
+        desc: 'Populære discmodeller blant Min Bag-brukere.',
         stat: STATE.top3Loaded ? STATE.top3.length + ' på lista' : 'Laster',
         accent: 'rgba(244,63,94,.16)'
       }
@@ -1196,7 +1222,7 @@
 
     var statRows = [
       [String(counts.total), 'Discer'],
-      [String(uniqueMoldCount()), 'Ulike molds'],
+      [String(uniqueMoldCount()), 'Ulike modeller'],
       [String(counts.favorites), 'Favoritter'],
       [String(Number(STATE.coursePlayedCount || 0)), 'Baner spilt']
     ];
@@ -1645,7 +1671,7 @@
       hero.appendChild(el(
         'div',
         'gkmb3-eyebrow',
-        'GolfKongen · Min Bag V3'
+        'GolfKongen · Min Bag'
       ));
       hero.appendChild(el('h2', '', 'Min bag'));
       hero.appendChild(el(
@@ -2557,7 +2583,7 @@
     wrap.appendChild(el(
       'div',
       'gkmb3-note',
-      'Ingen passord nødvendig. Etter innlogging kommer du tilbake til golfkongen.no/sider/min-bag.'
+      'Ingen passord nødvendig. Åpne lenken i e-posten, så kommer du tilbake hit ferdig innlogget.'
     ));
 
     return wrap;
@@ -3631,7 +3657,7 @@
     textWrap.appendChild(el(
       'p',
       '',
-      'Denne delen blir ikke ferdig selv om bagen blir komplett. Her får du nye molds, litt mer utfordrende flights og wildcards bare fordi discgolf skal være gøy.'
+      'Selv en komplett bag kan være morsom å utfordre. Her får du nye discmodeller, litt annerledes flights og små utfordringer bare fordi discgolf skal være gøy.'
     ));
     head.appendChild(textWrap);
 
@@ -3735,6 +3761,12 @@
     if (score.summary) {
       copy.appendChild(el('p', '', safe(score.summary)));
     }
+
+    copy.appendChild(el(
+      'p',
+      '',
+      'Scoren vurderer hvor godt bagen dekker relevante roller for spillerprofilen din, variasjon, vind og overlapp. Flere discer gir ikke automatisk høyere score.'
+    ));
 
     top.appendChild(copy);
     wrap.appendChild(top);
@@ -4195,7 +4227,7 @@
     copy.appendChild(el(
       'p',
       '',
-      'Velg hva slags runde du skal spille. Min Bag plukker et balansert utvalg av discene du faktisk eier og gir hver disc én tydelig jobb. Senere kan en valgt bane fylle inn baneprofilen automatisk.'
+      'Velg hva slags runde du skal spille. Min Bag plukker et balansert utvalg av discene du faktisk eier og gir hver disc én tydelig jobb. Velger du Rundebag fra en bane, fylles baneprofilen inn automatisk.'
     ));
 
     head.appendChild(copy);
@@ -4295,12 +4327,12 @@
           (actual === requested
             ? 'Rundebagen er klar: ' +
               actual +
-              ' ulike molds med hver sin hovedrolle.'
+              ' ulike discmodeller med hver sin hovedrolle.'
             : 'Rundebagen fant ' +
               actual +
               ' av ønsket ' +
               requested +
-              ' discer. Det betyr at denne bagen ikke har nok ulike molds med komplette flight-tall til å fylle alle plassene uten unødvendige dubletter.')
+              ' discer. Det betyr at denne bagen ikke har nok ulike discmodeller med komplette flight-tall til å fylle alle plassene uten unødvendige dubletter.')
         ));
 
         var list = el('div', 'gkmb3-roundbag-list');
@@ -4489,7 +4521,7 @@
       list.appendChild(el(
         'div',
         'gkmb3-note',
-        'Fant ikke de fysiske discene i dagens visning.'
+        'Fant ikke disse discene i den aktive bagen akkurat nå.'
       ));
       return list;
     }
@@ -4603,7 +4635,7 @@
     headText.appendChild(el(
       'p',
       '',
-      'Min Bag analyserer spilleren og akkurat denne bagen, finner hull og viser konkrete GolfKongen-discer som passer profilen din.'
+      'Min Bag bruker spillerprofilen og discene i denne bagen til å finne manglende roller, unødvendig overlapp og konkrete forslag som passer deg.'
     ));
     head.appendChild(headText);
 
@@ -4690,7 +4722,7 @@
       emptyBag.appendChild(el(
         'div',
         '',
-        'Når bagen har discer analyserer vi flight-dekning, speed-områder og mulig overlapp.'
+        'Når bagen har discer ser Min Bag på hvilke kast og roller du dekker, hvilke speed-områder du har og hvor discer gjør mye av den samme jobben.'
       ));
       card.appendChild(emptyBag);
       card.appendChild(renderFunRecommendations());
@@ -5064,7 +5096,7 @@
     headText.appendChild(el(
       'div',
       'gkmb3-discedit-note',
-      'Endrer bare discen i din bag – ikke produktdata, flight-tall eller GolfKongen-katalogen.'
+      'Endrer bare dette eksemplaret i bagen din. Produktinformasjon og flight-tall beholdes.'
     ));
     head.appendChild(headText);
     panel.appendChild(head);
@@ -5138,7 +5170,7 @@
       moveBox.appendChild(el(
         'div',
         'gkmb3-movebox-note',
-        'Flytter bare dette fysiske eksemplaret. All vekt, farge, notat og favoritt-status følger med.'
+        'Flytter bare dette eksemplaret. Vekt, farge, notat og favorittstatus følger med.'
       ));
 
       var moveRow = el('div', 'gkmb3-movebox-row');
@@ -5328,7 +5360,7 @@
       results.appendChild(el(
         'div',
         'gkmb3-note',
-        'Søk i Min Bag-katalogen. Resultatene kommer direkte fra GolfKongens synkede disc-katalog.'
+        'Søk etter discer som finnes hos GolfKongen. Treffene hentes fra nettbutikken vår.'
       ));
     }
 
@@ -5439,7 +5471,7 @@
 
     var grid1 = el('div', 'gkmb3-grid2');
     grid1.appendChild(field('Discnavn *', name));
-    grid1.appendChild(field('Mold / modell *', mold));
+    grid1.appendChild(field('Modell / mold *', mold));
     wrap.appendChild(grid1);
 
     var grid2 = el('div', 'gkmb3-grid2');
@@ -5478,7 +5510,7 @@
 
     var note = el('textarea', 'gkmb3-textarea');
     note.id = 'gkmb3-manual-note';
-    note.placeholder = 'Valgfritt notat om akkurat denne fysiske discen.';
+    note.placeholder = 'Valgfritt notat om akkurat dette eksemplaret.';
     wrap.appendChild(field('Notat', note));
 
     var favoriteLabel = el('label', 'gkmb3-check');
@@ -5497,7 +5529,7 @@
     wrap.appendChild(el(
       'div',
       'gkmb3-note',
-      'Merke, disc og eierskap valideres på serveren. Frontend sender aldri user_id som sannhetskilde.'
+      'Finner du ikke discen hos GolfKongen? Registrer den her med flight-tallene, så kan Min Bag bruke den i Bag-score, anbefalinger, caddien og Rundebag.'
     ));
 
     return wrap;
@@ -5722,7 +5754,7 @@
       authEpoch += 1;
       resetUserState();
       render();
-      status('Auth-feil: ' + errorMessage(err), 'err');
+      status('Innloggingen feilet: ' + errorMessage(err), 'err');
     });
   }
 
@@ -6186,7 +6218,7 @@
       render();
 
       status(
-        'Kunne ikke lagre baneprogresjon: ' +
+        'Kunne ikke oppdatere banen akkurat nå: ' +
         errorMessage(err),
         'err'
       );
@@ -6228,7 +6260,7 @@
 
     STATE.courseProgressBusyId = courseId;
     render();
-    status('Lagrer personlig banedata…');
+    status('Lagrer rekord og kommentar…');
 
     supabaseClient.rpc(
       'minbag_set_course_progress',
@@ -6251,7 +6283,7 @@
       render();
 
       status(
-        'Kunne ikke lagre personlig banedata: ' +
+        'Kunne ikke lagre rekord og kommentar: ' +
         errorMessage(err),
         'err'
       );
@@ -7798,7 +7830,7 @@
     var label = disc.name || disc.mold_name || 'denne discen';
 
     if (!confirm(
-      'Vil du slette "' + label + '" fra denne bagen?\n\nDette sletter bare dette fysiske eksemplaret fra Min Bag.'
+      'Vil du slette "' + label + '" fra denne bagen?\n\nDette sletter bare dette eksemplaret fra Min Bag.'
     )) {
       return;
     }
@@ -7852,7 +7884,7 @@
       setLoading(false);
 
       if (res.error) {
-        status('Katalogsøk feilet: ' + errorMessage(res.error), 'err');
+        status('Kunne ikke søke etter discer akkurat nå: ' + errorMessage(res.error), 'err');
         return;
       }
 
@@ -7860,13 +7892,13 @@
       render();
 
       if (STATE.catalogResults.length) {
-        status('Fant ' + STATE.catalogResults.length + ' katalogtreff.', 'ok');
+        status('Fant ' + STATE.catalogResults.length + ' treff.', 'ok');
       } else {
-        status('Fant ingen katalogtreff.', '');
+        status('Fant ingen treff.', '');
       }
     }).catch(function (err) {
       setLoading(false);
-      status('Katalogsøk feilet: ' + errorMessage(err), 'err');
+      status('Kunne ikke søke etter discer akkurat nå: ' + errorMessage(err), 'err');
     });
   }
 
@@ -7881,7 +7913,7 @@
     var bag = activeBag();
 
     if (!bag || !rec || !rec.catalog_id) {
-      status('Mangler aktiv bag eller anbefalt katalog-ID.', 'err');
+      status('Kunne ikke legge til den anbefalte discen akkurat nå.', 'err');
       return;
     }
 
@@ -7896,7 +7928,7 @@
     var bag = activeBag();
 
     if (!bag || !rec || !rec.catalog_id) {
-      status('Mangler aktiv bag eller katalog-ID.', 'err');
+      status('Kunne ikke legge til denne discen akkurat nå.', 'err');
       return;
     }
 
@@ -7909,7 +7941,7 @@
 
   function addCatalogDiscToBag(product, targetBagId, targetName) {
     if (!targetBagId || !product || !product.id) {
-      status('Mangler målbag eller katalog-ID.', 'err');
+      status('Velg hvilken bag discen skal legges i og prøv igjen.', 'err');
       return;
     }
 
@@ -7998,7 +8030,7 @@
     }
 
     if (!mold) {
-      status('Mold / modell er obligatorisk.', 'err');
+      status('Modell / mold er obligatorisk.', 'err');
       return;
     }
 
@@ -8181,7 +8213,7 @@
 
     clear(root);
 
-    var loading = el('div', 'gkmb3-status', 'Laster Min Bag V3…');
+    var loading = el('div', 'gkmb3-status', 'Laster Min Bag…');
     loading.id = 'gkmb3-status';
     root.appendChild(loading);
 
