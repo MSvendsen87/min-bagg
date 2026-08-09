@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.19.6';
+  var VERSION = '2026-08-09.20.0';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -69,6 +69,8 @@
 
   var STATE = {
     user: null,
+    activeView: 'home',
+    appMenuOpen: false,
     bags: [],
     activeBagId: null,
     discs: [],
@@ -604,7 +606,114 @@
         '.gkmb3-disc{grid-template-columns:70px minmax(0,1fr);}' +
         '.gkmb3-discimg{width:70px;height:70px;}' +
         '.gkmb3-storegrid{grid-template-columns:1fr;max-height:540px;}' +
-      '}';
+      '}' +
+
+      /* =======================================================================
+         V20 – APP/DASHBOARD LAYOUT
+         ======================================================================= */ +
+      '#min-bag-root{max-width:1280px;margin:18px auto 0;}' +
+      '.gkmb3-shell.gkmb3-appshell{gap:0;}' +
+      '.gkmb3-appframe{display:grid;grid-template-columns:230px minmax(0,1fr);gap:18px;align-items:start;}' +
+      '.gkmb3-appmain{min-width:0;display:grid;gap:14px;}' +
+      '.gkmb3-sidebar{position:sticky;top:18px;display:grid;gap:12px;padding:14px;border-radius:22px;border:1px solid rgba(34,197,94,.18);background:linear-gradient(180deg,rgba(10,27,17,.97),rgba(4,12,8,.97));box-shadow:0 18px 54px rgba(0,0,0,.24);}' +
+      '.gkmb3-sidebrand{padding:4px 4px 10px;border-bottom:1px solid rgba(255,255,255,.08);}' +
+      '.gkmb3-sidebrand strong{display:block;color:#fff;font-size:17px;font-weight:1000;letter-spacing:-.02em;}' +
+      '.gkmb3-sidebrand span{display:block;margin-top:4px;color:rgba(255,255,255,.48);font-size:10px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+      '.gkmb3-sidenav{display:grid;gap:5px;}' +
+      '.gkmb3-sidenav button{width:100%;min-height:44px;display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:13px;border:1px solid transparent;background:transparent;color:rgba(255,255,255,.70);font:inherit;font-size:11px;font-weight:900;text-align:left;cursor:pointer;transition:.15s ease;}' +
+      '.gkmb3-sidenav button:hover{background:rgba(255,255,255,.055);color:#fff;}' +
+      '.gkmb3-sidenav button.active{border-color:rgba(34,197,94,.28);background:linear-gradient(135deg,rgba(22,163,74,.24),rgba(34,197,94,.09));color:#dcfce7;}' +
+      '.gkmb3-sidenav-icon{width:26px;height:26px;display:grid;place-items:center;border-radius:9px;background:rgba(255,255,255,.06);font-size:14px;flex:0 0 auto;}' +
+      '.gkmb3-sidefooter{display:grid;gap:7px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);}' +
+      '.gkmb3-sidefooter .gkmb3-btn{width:100%;min-height:39px;font-size:10px;}' +
+
+      '.gkmb3-appbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:17px;border:1px solid rgba(255,255,255,.09);background:rgba(4,12,8,.82);box-shadow:0 10px 28px rgba(0,0,0,.15);}' +
+      '.gkmb3-appbar-copy{min-width:0;}' +
+      '.gkmb3-appbar-title{color:#fff;font-size:15px;font-weight:1000;line-height:1.15;}' +
+      '.gkmb3-appbar-sub{margin-top:3px;color:rgba(255,255,255,.46);font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+      '.gkmb3-appbar-actions{display:flex;gap:7px;flex:0 0 auto;}' +
+      '.gkmb3-appbar-actions .gkmb3-btn{min-height:36px;padding:7px 10px;font-size:10px;}' +
+      '.gkmb3-appstatus{margin:0;padding:8px 11px;border-radius:12px;font-size:10px;}' +
+
+      '.gkmb3-home{display:grid;gap:16px;}' +
+      '.gkmb3-homehero{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) 235px;gap:18px;align-items:stretch;padding:22px;border-radius:26px;border:1px solid rgba(34,197,94,.25);background:radial-gradient(circle at 85% 10%,rgba(34,197,94,.20),transparent 34%),radial-gradient(circle at 0 100%,rgba(59,130,246,.11),transparent 42%),linear-gradient(135deg,#07130c,#0c2115 60%,#06110b);box-shadow:0 22px 70px rgba(0,0,0,.28);}' +
+      '.gkmb3-homeeyebrow{display:inline-flex;width:max-content;padding:6px 9px;border-radius:999px;border:1px solid rgba(34,197,94,.30);background:rgba(34,197,94,.10);color:#bbf7d0;font-size:9px;font-weight:1000;letter-spacing:.07em;text-transform:uppercase;}' +
+      '.gkmb3-homehero h2{margin:10px 0 6px;color:#fff;font-size:clamp(30px,5vw,48px);line-height:.98;font-weight:1000;letter-spacing:-.045em;}' +
+      '.gkmb3-homelead{max-width:700px;color:rgba(255,255,255,.65);font-size:12px;line-height:1.5;}' +
+      '.gkmb3-homeinsight{margin-top:13px;padding:10px 12px;border-radius:14px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.07);color:#fde68a;font-size:10px;font-weight:850;line-height:1.45;}' +
+      '.gkmb3-homebagvisual{position:relative;min-height:225px;display:grid;place-items:center;border-radius:20px;border:1px solid rgba(255,255,255,.10);background:radial-gradient(circle at 50% 25%,rgba(34,197,94,.22),rgba(0,0,0,.18) 58%);overflow:hidden;}' +
+      '.gkmb3-homebagvisual img{width:100%;height:100%;object-fit:contain;display:block;padding:12px;}' +
+      '.gkmb3-homebagfallback{font-size:82px;filter:drop-shadow(0 12px 20px rgba(0,0,0,.32));}' +
+      '.gkmb3-home-score{position:absolute;right:10px;bottom:10px;min-width:76px;padding:9px 10px;border-radius:14px;border:1px solid rgba(34,197,94,.28);background:rgba(2,10,6,.88);text-align:center;backdrop-filter:blur(10px);}' +
+      '.gkmb3-home-score strong{display:block;color:#fff;font-size:20px;line-height:1;font-weight:1000;}' +
+      '.gkmb3-home-score span{display:block;margin-top:4px;color:#86efac;font-size:8px;font-weight:950;text-transform:uppercase;}' +
+
+      '.gkmb3-homestats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:15px;}' +
+      '.gkmb3-homestat{padding:10px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.045);}' +
+      '.gkmb3-homestat strong{display:block;color:#fff;font-size:19px;line-height:1;font-weight:1000;}' +
+      '.gkmb3-homestat span{display:block;margin-top:5px;color:rgba(255,255,255,.48);font-size:8px;font-weight:850;text-transform:uppercase;letter-spacing:.03em;}' +
+      '.gkmb3-homeflight{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}' +
+      '.gkmb3-homeflight span{padding:5px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035);color:rgba(255,255,255,.58);font-size:9px;font-weight:850;}' +
+
+      '.gkmb3-launch-head{display:flex;align-items:end;justify-content:space-between;gap:12px;}' +
+      '.gkmb3-launch-head h3{margin:0;color:#fff;font-size:19px;font-weight:1000;}' +
+      '.gkmb3-launch-head p{margin:4px 0 0;color:rgba(255,255,255,.48);font-size:10px;}' +
+      '.gkmb3-launch-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}' +
+      '.gkmb3-launch{position:relative;min-height:132px;display:grid;align-content:space-between;gap:12px;padding:14px;border-radius:18px;border:1px solid rgba(255,255,255,.09);background:linear-gradient(145deg,rgba(255,255,255,.055),rgba(255,255,255,.025));color:inherit;text-align:left;font:inherit;cursor:pointer;transition:.16s ease;overflow:hidden;}' +
+      '.gkmb3-launch:before{content:"";position:absolute;inset:auto -28px -34px auto;width:100px;height:100px;border-radius:50%;background:var(--gk-accent,rgba(34,197,94,.16));filter:blur(2px);}' +
+      '.gkmb3-launch:hover{transform:translateY(-2px);border-color:rgba(34,197,94,.28);background:linear-gradient(145deg,rgba(255,255,255,.075),rgba(34,197,94,.035));}' +
+      '.gkmb3-launch-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;position:relative;z-index:1;}' +
+      '.gkmb3-launch-icon{width:39px;height:39px;display:grid;place-items:center;border-radius:12px;background:rgba(0,0,0,.20);border:1px solid rgba(255,255,255,.08);font-size:20px;}' +
+      '.gkmb3-launch-stat{padding:5px 7px;border-radius:999px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.62);font-size:8px;font-weight:950;white-space:nowrap;}' +
+      '.gkmb3-launch-body{position:relative;z-index:1;}' +
+      '.gkmb3-launch-title{color:#fff;font-size:13px;font-weight:1000;}' +
+      '.gkmb3-launch-desc{margin-top:4px;color:rgba(255,255,255,.50);font-size:9px;line-height:1.35;}' +
+
+      '.gkmb3-pagehead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:4px 2px 2px;}' +
+      '.gkmb3-pagehead h2{margin:0;color:#fff;font-size:27px;line-height:1;font-weight:1000;letter-spacing:-.035em;}' +
+      '.gkmb3-pagehead p{margin:6px 0 0;max-width:720px;color:rgba(255,255,255,.52);font-size:11px;line-height:1.45;}' +
+      '.gkmb3-pagehead .gkmb3-btn{min-height:37px;padding:7px 10px;font-size:10px;}' +
+      '.gkmb3-featureview{display:grid;gap:13px;}' +
+      '.gkmb3-featurecard{border:1px solid rgba(255,255,255,.10);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.025));border-radius:22px;padding:15px;}' +
+      '.gkmb3-featurecard>.gkmb3-bagscore,.gkmb3-featurecard>.gkmb3-throwadvisor,.gkmb3-featurecard>.gkmb3-roundbag{margin-top:0;}' +
+      '.gkmb3-featurelinks{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 3px;}' +
+      '.gkmb3-featurelinks .gkmb3-btn{min-height:35px;padding:7px 9px;font-size:9px;}' +
+      '.gkmb3-discworkspace{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.70fr);gap:14px;align-items:start;}' +
+      '.gkmb3-discworkspace>.gkmb3-card:nth-child(2){position:sticky;top:18px;}' +
+
+      '.gkmb3-mobilebar{display:none;}' +
+      '.gkmb3-moresheet{display:none;}' +
+
+      '@media(max-width:1050px){.gkmb3-appframe{grid-template-columns:205px minmax(0,1fr);}.gkmb3-launch-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.gkmb3-discworkspace{grid-template-columns:1fr;}.gkmb3-discworkspace>.gkmb3-card:nth-child(2){position:static;order:-1;}}' +
+      '@media(max-width:760px){' +
+        '#min-bag-root{margin-top:8px;}' +
+        '.gkmb3-shell.gkmb3-appshell{padding-bottom:88px;}' +
+        '.gkmb3-appframe{display:block;}' +
+        '.gkmb3-sidebar{display:none;}' +
+        '.gkmb3-appmain{gap:11px;}' +
+        '.gkmb3-appbar{padding:9px 10px;border-radius:14px;}' +
+        '.gkmb3-appbar-actions .gkmb3-btn{min-width:42px;}' +
+        '.gkmb3-homehero{grid-template-columns:1fr;padding:16px;border-radius:21px;}' +
+        '.gkmb3-homebagvisual{min-height:180px;max-height:220px;}' +
+        '.gkmb3-homehero h2{font-size:34px;}' +
+        '.gkmb3-homestats{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-launch-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}' +
+        '.gkmb3-launch{min-height:124px;padding:12px;border-radius:16px;}' +
+        '.gkmb3-launch-title{font-size:12px;}' +
+        '.gkmb3-pagehead h2{font-size:24px;}' +
+        '.gkmb3-pagehead p{font-size:10px;}' +
+        '.gkmb3-sectionnav{display:none!important;}' +
+        '.gkmb3-mobilebar{position:fixed;left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));bottom:max(8px,env(safe-area-inset-bottom));z-index:9998;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;padding:6px;border-radius:18px;border:1px solid rgba(34,197,94,.26);background:rgba(3,11,7,.97);box-shadow:0 -8px 30px rgba(0,0,0,.48);backdrop-filter:blur(14px);}' +
+        '.gkmb3-mobilebar button{min-width:0;min-height:52px;display:grid;place-items:center;align-content:center;gap:2px;padding:5px 2px;border:1px solid transparent;border-radius:13px;background:transparent;color:rgba(255,255,255,.58);font:inherit;cursor:pointer;}' +
+        '.gkmb3-mobilebar button.active{border-color:rgba(34,197,94,.27);background:rgba(34,197,94,.13);color:#dcfce7;}' +
+        '.gkmb3-mobilebar b{font-size:18px;line-height:1;}' +
+        '.gkmb3-mobilebar span{max-width:100%;font-size:8px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+        '.gkmb3-moresheet{position:fixed;left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));bottom:78px;z-index:9997;display:grid;gap:10px;padding:13px;border-radius:20px;border:1px solid rgba(34,197,94,.24);background:rgba(5,16,10,.985);box-shadow:0 -16px 48px rgba(0,0,0,.52);}' +
+        '.gkmb3-moresheet-head{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#fff;font-size:13px;font-weight:1000;}' +
+        '.gkmb3-moresheet-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}' +
+        '.gkmb3-moresheet-grid button{min-height:58px;display:flex;align-items:center;gap:9px;padding:9px;border-radius:13px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.045);color:#fff;font:inherit;font-size:10px;font-weight:900;text-align:left;}' +
+      '}' +
+      '@media(max-width:420px){.gkmb3-launch-grid{grid-template-columns:1fr 1fr;}.gkmb3-launch{min-height:116px;}.gkmb3-homebagvisual{min-height:160px;}.gkmb3-mobilebar span{font-size:7.5px;}}';
 
     document.head.appendChild(style);
   }
@@ -783,178 +892,726 @@
   }
 
 
-  function sectionNavItems() {
-    var items = [
-      {
-        id: 'gkmb3-section-bag',
-        label: '🎒 Bag',
-        enabled: true
+  function appViewMeta(view) {
+    var map = {
+      home: {
+        icon: '⌂',
+        title: 'Hjem',
+        short: 'Hjem',
+        description: 'Oversikt over den aktive bagen og snarveier til hele Min Bag.'
       },
-      {
-        id: 'gkmb3-section-recommendations',
-        label: '🎯 Anbefalinger',
-        enabled: true
+      bag: {
+        icon: '🎒',
+        title: 'Bagen min',
+        short: 'Bag',
+        description: 'Bytt bag, endre navn og velg hvordan bagen skal se ut.'
       },
-      {
-        id: 'gkmb3-section-throw',
-        label: '🥏 Kast',
-        enabled: !!(STATE.recoProfile && STATE.discs.length)
+      recommendations: {
+        icon: '🎯',
+        title: 'Anbefalinger',
+        short: 'Tips',
+        description: 'Spillerprofil, hull i bagen, overlapp og forslag som passer deg.'
       },
-      {
-        id: 'gkmb3-roundbag-section',
-        label: '🧳 Rundebag',
-        enabled: !!(STATE.recoProfile && STATE.discs.length)
+      score: {
+        icon: '🏆',
+        title: 'Bag-score',
+        short: 'Score',
+        description: 'Se hvor komplett og balansert den aktive bagen er.'
       },
-      {
-        id: 'gkmb3-section-discs',
-        label: '💿 Discer',
-        enabled: true
+      throw: {
+        icon: '🥏',
+        title: 'Hva bør jeg kaste?',
+        short: 'Kast',
+        description: 'La Min Bag velge blant discene du faktisk har til kastet du står foran.'
       },
-      {
-        id: 'gkmb3-section-courses',
-        label: '🗺 Baner',
-        enabled: true
+      roundbag: {
+        icon: '🧳',
+        title: 'Rundebag',
+        short: 'Rundebag',
+        description: 'Bygg en kompakt bag for banen eller runden du skal spille.'
+      },
+      discs: {
+        icon: '💿',
+        title: 'Discer',
+        short: 'Discer',
+        description: 'Se, filtrer, rediger og legg til discer i den aktive bagen.'
+      },
+      courses: {
+        icon: '🗺',
+        title: 'Baner',
+        short: 'Baner',
+        description: 'Søk etter bane, registrer spilte baner og bygg Rundebag for valgt bane.'
+      },
+      popular: {
+        icon: '🔥',
+        title: 'Topp 3',
+        short: 'Toppliste',
+        description: 'Se hvilke molds som er mest brukt blant Min Bag-brukerne.'
       }
-    ];
-
-    var enabled = [];
-
-    for (var i = 0; i < items.length; i += 1) {
-      if (items[i].enabled) enabled.push(items[i]);
-    }
-
-    return enabled;
-  }
-
-  function scrollToMinBagSection(sectionId) {
-    var node = document.getElementById(sectionId);
-    if (!node) return;
-
-    var mobile = window.matchMedia &&
-      window.matchMedia('(max-width: 650px)').matches;
-
-    var offset = mobile ? 18 : 76;
-    var y = node.getBoundingClientRect().top +
-      (window.pageYOffset || document.documentElement.scrollTop || 0) -
-      offset;
-
-    window.scrollTo({
-      top: Math.max(0, y),
-      behavior: 'smooth'
-    });
-
-    window.setTimeout(updateActiveSectionNav, 160);
-  }
-
-  function updateActiveSectionNav() {
-    if (!root || !STATE.user) return;
-
-    var nav = root.querySelector('.gkmb3-sectionnav');
-    if (!nav) return;
-
-    var items = sectionNavItems();
-    var targetY = Math.max(90, window.innerHeight * 0.23);
-    var activeId = '';
-    var bestDistance = Infinity;
-
-    for (var i = 0; i < items.length; i += 1) {
-      var node = document.getElementById(items[i].id);
-      if (!node) continue;
-
-      var rect = node.getBoundingClientRect();
-      var distance;
-
-      if (rect.top <= targetY && rect.bottom >= targetY) {
-        distance = 0;
-      } else if (rect.top > targetY) {
-        distance = rect.top - targetY;
-      } else {
-        distance = targetY - rect.bottom + 1000;
-      }
-
-      if (distance <= bestDistance) {
-        bestDistance = distance;
-        activeId = items[i].id;
-      }
-    }
-
-    var buttons = nav.querySelectorAll('button[data-section-id]');
-
-    for (var j = 0; j < buttons.length; j += 1) {
-      var isActive =
-        buttons[j].getAttribute('data-section-id') === activeId;
-
-      buttons[j].classList.toggle('active', isActive);
-
-      if (isActive) {
-        buttons[j].setAttribute('aria-current', 'location');
-
-        if (
-          window.matchMedia &&
-          window.matchMedia('(max-width: 650px)').matches
-        ) {
-          var navRect = nav.getBoundingClientRect();
-          var btnRect = buttons[j].getBoundingClientRect();
-
-          if (
-            btnRect.left < navRect.left + 8 ||
-            btnRect.right > navRect.right - 8
-          ) {
-            buttons[j].scrollIntoView({
-              behavior: 'smooth',
-              block: 'nearest',
-              inline: 'center'
-            });
-          }
-        }
-      } else {
-        buttons[j].removeAttribute('aria-current');
-      }
-    }
-  }
-
-  function bindSectionNavTracking() {
-    if (sectionNavBound) return;
-
-    var schedule = function () {
-      if (sectionNavTicking) return;
-
-      sectionNavTicking = true;
-
-      window.requestAnimationFrame(function () {
-        sectionNavTicking = false;
-        updateActiveSectionNav();
-      });
     };
 
-    window.addEventListener('scroll', schedule, { passive: true });
-    window.addEventListener('resize', schedule);
-    sectionNavBound = true;
+    return map[view] || map.home;
   }
 
-  function renderSectionNav() {
-    var nav = el('nav', 'gkmb3-sectionnav');
-    nav.setAttribute('aria-label', 'Navigasjon i Min Bag');
+  function allAppViews() {
+    return [
+      'home',
+      'bag',
+      'recommendations',
+      'score',
+      'throw',
+      'roundbag',
+      'discs',
+      'courses',
+      'popular'
+    ];
+  }
 
-    var items = sectionNavItems();
+  function openAppView(view) {
+    var allowed = allAppViews();
+    STATE.activeView = allowed.indexOf(view) >= 0 ? view : 'home';
+    STATE.appMenuOpen = false;
+    render();
+
+    window.setTimeout(function () {
+      if (!root) return;
+
+      var y = root.getBoundingClientRect().top +
+        (window.pageYOffset || document.documentElement.scrollTop || 0) -
+        10;
+
+      window.scrollTo({
+        top: Math.max(0, y),
+        behavior: 'smooth'
+      });
+    }, 0);
+  }
+
+  function appMenuItems() {
+    var counts = bagSummaryCounts();
+    var scoreText =
+      STATE.bagScore && STATE.bagScoreLoaded
+        ? Math.round(Number(STATE.bagScore.overall_score) || 0) + '/100'
+        : 'Bag-score';
+
+    return [
+      {
+        view: 'bag',
+        icon: '🎒',
+        title: 'Bagen min',
+        desc: 'Bytt bag, bilde og navn.',
+        stat: STATE.bags.length + (STATE.bags.length === 1 ? ' bag' : ' bager'),
+        accent: 'rgba(34,197,94,.18)'
+      },
+      {
+        view: 'recommendations',
+        icon: '🎯',
+        title: 'Anbefalinger',
+        desc: 'Hull, overlapp og personlige forslag.',
+        stat: STATE.recoProfile
+          ? Number(STATE.recoFindings.length || 0) + ' funn'
+          : 'Lag profil',
+        accent: 'rgba(59,130,246,.18)'
+      },
+      {
+        view: 'score',
+        icon: '🏆',
+        title: 'Bag-score',
+        desc: 'Hvor komplett er bagen din?',
+        stat: scoreText,
+        accent: 'rgba(245,158,11,.19)'
+      },
+      {
+        view: 'throw',
+        icon: '🥏',
+        title: 'Hva bør jeg kaste?',
+        desc: 'Din digitale caddie til neste kast.',
+        stat: STATE.discs.length ? 'Klar' : 'Trenger discer',
+        accent: 'rgba(14,165,233,.18)'
+      },
+      {
+        view: 'roundbag',
+        icon: '🧳',
+        title: 'Rundebag',
+        desc: 'Plukk 5, 8 eller 12 discer til runden.',
+        stat: '5 · 8 · 12',
+        accent: 'rgba(249,115,22,.18)'
+      },
+      {
+        view: 'discs',
+        icon: '💿',
+        title: 'Discer',
+        desc: 'Se, rediger og legg til discer.',
+        stat: counts.total + ' · ★ ' + counts.favorites,
+        accent: 'rgba(168,85,247,.18)'
+      },
+      {
+        view: 'courses',
+        icon: '🗺',
+        title: 'Baner',
+        desc: 'Finn bane og hold styr på hvor du har spilt.',
+        stat: Number(STATE.coursePlayedCount || 0) + ' spilt',
+        accent: 'rgba(20,184,166,.18)'
+      },
+      {
+        view: 'popular',
+        icon: '🔥',
+        title: 'Topp 3',
+        desc: 'Populære molds blant Min Bag-brukere.',
+        stat: STATE.top3Loaded ? STATE.top3.length + ' på lista' : 'Laster',
+        accent: 'rgba(244,63,94,.16)'
+      }
+    ];
+  }
+
+  function renderLaunchButton(item) {
+    var button = el('button', 'gkmb3-launch');
+    button.type = 'button';
+    button.style.setProperty('--gk-accent', item.accent || 'rgba(34,197,94,.16)');
+
+    var top = el('div', 'gkmb3-launch-top');
+    top.appendChild(el('div', 'gkmb3-launch-icon', item.icon));
+    top.appendChild(el('div', 'gkmb3-launch-stat', item.stat || 'Åpne'));
+    button.appendChild(top);
+
+    var body = el('div', 'gkmb3-launch-body');
+    body.appendChild(el('div', 'gkmb3-launch-title', item.title));
+    body.appendChild(el('div', 'gkmb3-launch-desc', item.desc));
+    button.appendChild(body);
+
+    button.onclick = function () {
+      openAppView(item.view);
+    };
+
+    return button;
+  }
+
+  function dashboardBagImageUrl(bag) {
+    if (!bag) return '';
+
+    var own = STATE.bagImageUrls[bag.id] || '';
+    if (own) return own;
+
+    var selection = currentStoreBagSelection(bag.id);
+
+    if (selection && selection.quickbutik_product_id) {
+      return STATE.storeBagImageUrls[
+        safe(selection.quickbutik_product_id)
+      ] || '';
+    }
+
+    return '';
+  }
+
+  function uniqueMoldCount() {
+    var seen = {};
+
+    for (var i = 0; i < STATE.discs.length; i += 1) {
+      var disc = STATE.discs[i] || {};
+      var key = trim(disc.mold_key);
+
+      if (!key) {
+        key = [
+          trim(disc.brand).toLowerCase(),
+          trim(disc.mold_name || disc.name).toLowerCase()
+        ].join('|');
+      }
+
+      if (key && key !== '|') seen[key] = true;
+    }
+
+    return Object.keys(seen).length;
+  }
+
+  function dashboardInsight() {
+    if (!STATE.discs.length) {
+      return '🎒 Bagen er klar – nå mangler bare den første discen.';
+    }
+
+    if (!STATE.recoProfile) {
+      return '🎯 Lag spillerprofilen din, så kan Min Bag begynne å jobbe som digital caddie.';
+    }
+
+    if (STATE.bagScoreLoaded && STATE.bagScore) {
+      var score = Math.round(Number(STATE.bagScore.overall_score) || 0);
+
+      if (score >= 88) {
+        return '👑 Denne bagen ser svært komplett ut. Bruk caddien og Rundebag til å få mer ut av den.';
+      }
+
+      if (score >= 70) {
+        return '⚡ Solid utgangspunkt. Anbefalingene kan vise hvilke roller som fortsatt er verdt å fylle.';
+      }
+
+      return '🛠 Det er fortsatt noen tydelige muligheter i bagen – sjekk anbefalingene for de viktigste.';
+    }
+
+    return '🥏 ' + STATE.discs.length + ' discer er klare i den aktive bagen.';
+  }
+
+  function renderHomeDashboard() {
+    var wrap = el('div', 'gkmb3-home');
+    var bag = activeBag();
+    var counts = bagSummaryCounts();
+
+    var hero = el('section', 'gkmb3-homehero');
+    var copy = el('div', '');
+
+    copy.appendChild(el(
+      'div',
+      'gkmb3-homeeyebrow',
+      'GolfKongen · din digitale caddie'
+    ));
+
+    copy.appendChild(el(
+      'h2',
+      '',
+      bag ? bag.name : 'Min Bag'
+    ));
+
+    copy.appendChild(el(
+      'div',
+      'gkmb3-homelead',
+      STATE.user && STATE.user.email
+        ? 'Innlogget som ' + STATE.user.email + '. Her er status på bagen din akkurat nå.'
+        : 'Her er status på bagen din akkurat nå.'
+    ));
+
+    var stats = el('div', 'gkmb3-homestats');
+
+    var statRows = [
+      [String(counts.total), 'Discer'],
+      [String(uniqueMoldCount()), 'Ulike molds'],
+      [String(counts.favorites), 'Favoritter'],
+      [String(Number(STATE.coursePlayedCount || 0)), 'Baner spilt']
+    ];
+
+    for (var i = 0; i < statRows.length; i += 1) {
+      var stat = el('div', 'gkmb3-homestat');
+      stat.appendChild(el('strong', '', statRows[i][0]));
+      stat.appendChild(el('span', '', statRows[i][1]));
+      stats.appendChild(stat);
+    }
+
+    copy.appendChild(stats);
+
+    var flight = el('div', 'gkmb3-homeflight');
+    flight.appendChild(el('span', '', 'Putter ' + counts.putter));
+    flight.appendChild(el('span', '', 'Midrange ' + counts.midrange));
+    flight.appendChild(el('span', '', 'Fairway ' + counts.fairway));
+    flight.appendChild(el('span', '', 'Distance ' + counts.distance));
+    copy.appendChild(flight);
+
+    copy.appendChild(el(
+      'div',
+      'gkmb3-homeinsight',
+      dashboardInsight()
+    ));
+
+    var quick = el('div', 'gkmb3-toolbar');
+    quick.style.marginTop = '12px';
+
+    var addDisc = el('button', 'gkmb3-btn', '+ Legg til disc');
+    addDisc.type = 'button';
+    addDisc.onclick = function () {
+      openAppView('discs');
+    };
+    quick.appendChild(addDisc);
+
+    var caddie = el('button', 'gkmb3-btn secondary', '🥏 Åpne caddien');
+    caddie.type = 'button';
+    caddie.onclick = function () {
+      openAppView('throw');
+    };
+    quick.appendChild(caddie);
+
+    copy.appendChild(quick);
+    hero.appendChild(copy);
+
+    var visual = el('div', 'gkmb3-homebagvisual');
+    var bagImage = dashboardBagImageUrl(bag);
+
+    if (bagImage) {
+      var image = document.createElement('img');
+      image.src = bagImage;
+      image.alt = bag ? safe(bag.name) : 'Min Bag';
+      image.loading = 'lazy';
+      visual.appendChild(image);
+    } else {
+      visual.appendChild(el('div', 'gkmb3-homebagfallback', '🎒'));
+    }
+
+    if (STATE.bagScoreLoaded && STATE.bagScore) {
+      var score = el('div', 'gkmb3-home-score');
+      score.appendChild(el(
+        'strong',
+        '',
+        Math.round(Number(STATE.bagScore.overall_score) || 0) + '/100'
+      ));
+      score.appendChild(el(
+        'span',
+        '',
+        safe(STATE.bagScore.score_label || 'Bag-score')
+      ));
+      visual.appendChild(score);
+    }
+
+    hero.appendChild(visual);
+    wrap.appendChild(hero);
+
+    var launchHead = el('div', 'gkmb3-launch-head');
+    var launchCopy = el('div', '');
+    launchCopy.appendChild(el('h3', '', 'Hva vil du gjøre?'));
+    launchCopy.appendChild(el(
+      'p',
+      '',
+      'Velg en funksjon. Du slipper å lete deg gjennom én lang side.'
+    ));
+    launchHead.appendChild(launchCopy);
+    wrap.appendChild(launchHead);
+
+    var grid = el('div', 'gkmb3-launch-grid');
+    var items = appMenuItems();
+
+    for (var j = 0; j < items.length; j += 1) {
+      grid.appendChild(renderLaunchButton(items[j]));
+    }
+
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
+  function renderSidebar() {
+    var side = el('aside', 'gkmb3-sidebar');
+
+    var brand = el('div', 'gkmb3-sidebrand');
+    brand.appendChild(el('strong', '', '👑 GolfKongen'));
+    brand.appendChild(el(
+      'span',
+      '',
+      STATE.user && STATE.user.email
+        ? STATE.user.email
+        : 'Min Bag'
+    ));
+    side.appendChild(brand);
+
+    var nav = el('nav', 'gkmb3-sidenav');
+    nav.setAttribute('aria-label', 'Min Bag-funksjoner');
+
+    var order = [
+      'home',
+      'bag',
+      'recommendations',
+      'score',
+      'throw',
+      'roundbag',
+      'discs',
+      'courses',
+      'popular'
+    ];
+
+    for (var i = 0; i < order.length; i += 1) {
+      (function (view) {
+        var meta = appViewMeta(view);
+        var button = el(
+          'button',
+          STATE.activeView === view ? 'active' : ''
+        );
+        button.type = 'button';
+        button.appendChild(el('span', 'gkmb3-sidenav-icon', meta.icon));
+        button.appendChild(document.createTextNode(meta.title));
+        button.onclick = function () {
+          openAppView(view);
+        };
+        nav.appendChild(button);
+      })(order[i]);
+    }
+
+    side.appendChild(nav);
+
+    var footer = el('div', 'gkmb3-sidefooter');
+    var logoutBtn = el('button', 'gkmb3-btn secondary', 'Logg ut');
+    logoutBtn.type = 'button';
+    logoutBtn.onclick = logout;
+    footer.appendChild(logoutBtn);
+    side.appendChild(footer);
+
+    return side;
+  }
+
+  function renderAppBar() {
+    var meta = appViewMeta(STATE.activeView);
+    var bar = el('div', 'gkmb3-appbar');
+
+    var copy = el('div', 'gkmb3-appbar-copy');
+    copy.appendChild(el(
+      'div',
+      'gkmb3-appbar-title',
+      meta.icon + ' ' + meta.title
+    ));
+    copy.appendChild(el(
+      'div',
+      'gkmb3-appbar-sub',
+      activeBag()
+        ? safe(activeBag().name) + ' · ' + STATE.discs.length + ' discer'
+        : safe(STATE.user && STATE.user.email)
+    ));
+    bar.appendChild(copy);
+
+    var actions = el('div', 'gkmb3-appbar-actions');
+
+    if (STATE.activeView !== 'home') {
+      var home = el('button', 'gkmb3-btn secondary', '⌂ Hjem');
+      home.type = 'button';
+      home.onclick = function () {
+        openAppView('home');
+      };
+      actions.appendChild(home);
+    }
+
+    bar.appendChild(actions);
+    return bar;
+  }
+
+  function renderPageHead(view) {
+    var meta = appViewMeta(view);
+    var head = el('div', 'gkmb3-pagehead');
+    var copy = el('div', '');
+    copy.appendChild(el('h2', '', meta.icon + ' ' + meta.title));
+    copy.appendChild(el('p', '', meta.description));
+    head.appendChild(copy);
+
+    var home = el('button', 'gkmb3-btn secondary', '← Til forsiden');
+    home.type = 'button';
+    home.onclick = function () {
+      openAppView('home');
+    };
+    head.appendChild(home);
+
+    return head;
+  }
+
+  function renderFeatureGuidance(text, targetView, targetLabel) {
+    var card = el('section', 'gkmb3-card');
+    card.appendChild(el('div', 'gkmb3-empty', text));
+
+    if (targetView) {
+      var button = el(
+        'button',
+        'gkmb3-btn',
+        targetLabel || 'Fortsett'
+      );
+      button.type = 'button';
+      button.style.marginTop = '10px';
+      button.onclick = function () {
+        openAppView(targetView);
+      };
+      card.appendChild(button);
+    }
+
+    return card;
+  }
+
+  function renderScoreView() {
+    if (!STATE.recoProfile) {
+      return renderFeatureGuidance(
+        'Lag spillerprofilen først. Bag-score bruker profilen din for å vurdere hva som faktisk er relevant for deg.',
+        'recommendations',
+        '🎯 Lag spillerprofil'
+      );
+    }
+
+    if (!STATE.discs.length) {
+      return renderFeatureGuidance(
+        'Bagen trenger minst én disc før vi kan beregne en meningsfull Bag-score.',
+        'discs',
+        '💿 Legg til discer'
+      );
+    }
+
+    var card = el('section', 'gkmb3-featurecard');
+    card.appendChild(renderBagScore());
+    return card;
+  }
+
+  function renderThrowView() {
+    if (!STATE.recoProfile) {
+      return renderFeatureGuidance(
+        'Lag spillerprofilen først, så kjenner caddien kastelengden og spillestilen din.',
+        'recommendations',
+        '🎯 Lag spillerprofil'
+      );
+    }
+
+    if (!STATE.discs.length) {
+      return renderFeatureGuidance(
+        'Caddien kan bare velge blant discer du faktisk eier. Legg noen discer i bagen først.',
+        'discs',
+        '💿 Legg til discer'
+      );
+    }
+
+    var card = el('section', 'gkmb3-featurecard');
+    card.appendChild(renderThrowAdvisor());
+    return card;
+  }
+
+  function renderRoundBagView() {
+    if (!STATE.recoProfile) {
+      return renderFeatureGuidance(
+        'Lag spillerprofilen først, så kan Rundebag tilpasses nivået og kastelengden din.',
+        'recommendations',
+        '🎯 Lag spillerprofil'
+      );
+    }
+
+    if (!STATE.discs.length) {
+      return renderFeatureGuidance(
+        'Rundebag trenger discer å velge mellom. Legg noen discer i bagen først.',
+        'discs',
+        '💿 Legg til discer'
+      );
+    }
+
+    var card = el('section', 'gkmb3-featurecard');
+    card.appendChild(renderRoundBagBuilder());
+    return card;
+  }
+
+  function renderDiscsWorkspace() {
+    var wrap = el('div', 'gkmb3-discworkspace');
+    wrap.appendChild(renderBagContents());
+    wrap.appendChild(renderAddPanel());
+    return wrap;
+  }
+
+  function renderCurrentAppView() {
+    var view = STATE.activeView || 'home';
+
+    if (view === 'home') {
+      return renderHomeDashboard();
+    }
+
+    var wrap = el('div', 'gkmb3-featureview');
+    wrap.appendChild(renderPageHead(view));
+
+    if (view === 'bag') {
+      wrap.appendChild(renderBagManager());
+    } else if (view === 'recommendations') {
+      wrap.appendChild(renderRecommendationPanel());
+    } else if (view === 'score') {
+      wrap.appendChild(renderScoreView());
+    } else if (view === 'throw') {
+      wrap.appendChild(renderThrowView());
+    } else if (view === 'roundbag') {
+      wrap.appendChild(renderRoundBagView());
+    } else if (view === 'discs') {
+      wrap.appendChild(renderDiscsWorkspace());
+    } else if (view === 'courses') {
+      wrap.appendChild(renderCoursePanel());
+    } else if (view === 'popular') {
+      wrap.appendChild(renderTop3());
+    } else {
+      STATE.activeView = 'home';
+      return renderHomeDashboard();
+    }
+
+    return wrap;
+  }
+
+  function renderMobileBar() {
+    var bar = el('nav', 'gkmb3-mobilebar');
+    bar.setAttribute('aria-label', 'Hovednavigasjon i Min Bag');
+
+    var items = [
+      ['home', '⌂', 'Hjem'],
+      ['discs', '💿', 'Discer'],
+      ['throw', '🥏', 'Caddie'],
+      ['courses', '🗺', 'Baner']
+    ];
 
     for (var i = 0; i < items.length; i += 1) {
-      (function (item) {
-        var btn = el('button', '', item.label);
-        btn.type = 'button';
-        btn.setAttribute('data-section-id', item.id);
-        btn.onclick = function () {
-          scrollToMinBagSection(item.id);
+      (function (row) {
+        var button = el(
+          'button',
+          STATE.activeView === row[0] ? 'active' : ''
+        );
+        button.type = 'button';
+        button.appendChild(el('b', '', row[1]));
+        button.appendChild(el('span', '', row[2]));
+        button.onclick = function () {
+          openAppView(row[0]);
         };
-        nav.appendChild(btn);
+        bar.appendChild(button);
       })(items[i]);
     }
 
-    bindSectionNavTracking();
+    var more = el(
+      'button',
+      STATE.appMenuOpen ? 'active' : ''
+    );
+    more.type = 'button';
+    more.appendChild(el('b', '', '☰'));
+    more.appendChild(el('span', '', 'Mer'));
+    more.onclick = function () {
+      STATE.appMenuOpen = !STATE.appMenuOpen;
+      render();
+    };
+    bar.appendChild(more);
 
-    window.setTimeout(updateActiveSectionNav, 0);
+    return bar;
+  }
 
-    return nav;
+  function renderMoreSheet() {
+    if (!STATE.appMenuOpen) return null;
+
+    var sheet = el('div', 'gkmb3-moresheet');
+    var head = el('div', 'gkmb3-moresheet-head');
+    head.appendChild(document.createTextNode('Velg funksjon'));
+
+    var close = el('button', 'gkmb3-btn secondary', 'Lukk');
+    close.type = 'button';
+    close.style.minHeight = '32px';
+    close.style.padding = '5px 8px';
+    close.onclick = function () {
+      STATE.appMenuOpen = false;
+      render();
+    };
+    head.appendChild(close);
+    sheet.appendChild(head);
+
+    var grid = el('div', 'gkmb3-moresheet-grid');
+    var views = [
+      'bag',
+      'recommendations',
+      'score',
+      'roundbag',
+      'popular'
+    ];
+
+    for (var i = 0; i < views.length; i += 1) {
+      (function (view) {
+        var meta = appViewMeta(view);
+        var button = el('button', '');
+        button.type = 'button';
+        button.appendChild(el('span', '', meta.icon));
+        button.appendChild(document.createTextNode(meta.title));
+        button.onclick = function () {
+          openAppView(view);
+        };
+        grid.appendChild(button);
+      })(views[i]);
+    }
+
+    var logoutBtn = el('button', '');
+    logoutBtn.type = 'button';
+    logoutBtn.appendChild(el('span', '', '↪'));
+    logoutBtn.appendChild(document.createTextNode('Logg ut'));
+    logoutBtn.onclick = logout;
+    grid.appendChild(logoutBtn);
+
+    sheet.appendChild(grid);
+    return sheet;
   }
 
   function render() {
@@ -962,20 +1619,32 @@
 
     clear(root);
 
-    var shell = el('div', 'gkmb3-shell');
-    var hero = el('section', 'gkmb3-hero');
-
-    hero.appendChild(el('div', 'gkmb3-eyebrow', 'GolfKongen · Min Bag V3'));
-    hero.appendChild(el('h2', '', 'Min bag'));
+    var shell = el(
+      'div',
+      'gkmb3-shell' + (STATE.user ? ' gkmb3-appshell' : '')
+    );
 
     if (!STATE.user) {
+      var hero = el('section', 'gkmb3-hero');
+
+      hero.appendChild(el(
+        'div',
+        'gkmb3-eyebrow',
+        'GolfKongen · Min Bag V3'
+      ));
+      hero.appendChild(el('h2', '', 'Min bag'));
       hero.appendChild(el(
         'p',
         '',
         'Logg inn med e-post for å bygge og lagre discgolf-bagen din. Du får en sikker innloggingslenke på e-post.'
       ));
       hero.appendChild(renderLogin());
-      var loggedOutStatus = el('div', 'gkmb3-status', 'Ikke innlogget.');
+
+      var loggedOutStatus = el(
+        'div',
+        'gkmb3-status',
+        'Ikke innlogget.'
+      );
       loggedOutStatus.id = 'gkmb3-status';
       hero.appendChild(loggedOutStatus);
 
@@ -985,58 +1654,27 @@
       return;
     }
 
-    hero.appendChild(el(
-      'p',
-      '',
-      'Hold oversikt over discene dine, legg til fra GolfKongen-katalogen eller registrer discer vi aldri har solgt.'
-    ));
+    var frame = el('div', 'gkmb3-appframe');
+    frame.appendChild(renderSidebar());
 
-    var pills = el('div', 'gkmb3-pills');
-    pills.appendChild(el('span', 'gkmb3-pill', STATE.user.email || 'Innlogget'));
+    var main = el('main', 'gkmb3-appmain');
+    main.appendChild(renderAppBar());
 
-    var bag = activeBag();
-    if (bag) pills.appendChild(el('span', 'gkmb3-pill', 'Bag: ' + bag.name));
+    var appStatus = el(
+      'div',
+      'gkmb3-status ok gkmb3-appstatus',
+      'Klar.'
+    );
+    appStatus.id = 'gkmb3-status';
+    main.appendChild(appStatus);
+    main.appendChild(renderCurrentAppView());
 
-    pills.appendChild(el('span', 'gkmb3-pill', 'Discer: ' + STATE.discs.length));
-    pills.appendChild(el(
-      'span',
-      'gkmb3-pill',
-      '🏁 Baner spilt: ' + Number(STATE.coursePlayedCount || 0)
-    ));
-    hero.appendChild(pills);
+    frame.appendChild(main);
+    shell.appendChild(frame);
+    shell.appendChild(renderMobileBar());
 
-    var heroActions = el('div', 'gkmb3-toolbar');
-    heroActions.style.marginTop = '12px';
-
-    var logoutBtn = el('button', 'gkmb3-btn secondary', 'Logg ut');
-    logoutBtn.type = 'button';
-    logoutBtn.onclick = logout;
-    heroActions.appendChild(logoutBtn);
-
-    hero.appendChild(heroActions);
-
-    var heroStatus = el('div', 'gkmb3-status ok', 'Klar.');
-    heroStatus.id = 'gkmb3-status';
-    hero.appendChild(heroStatus);
-
-    shell.appendChild(hero);
-    shell.appendChild(renderTop3());
-
-    var layout = el('div', 'gkmb3-layout');
-
-    var left = el('div', '');
-    left.appendChild(renderSectionNav());
-    left.appendChild(renderBagManager());
-    left.appendChild(renderRecommendationPanel());
-    left.appendChild(renderBagContents());
-    left.appendChild(renderCoursePanel());
-
-    var right = el('div', 'gkmb3-sticky');
-    right.appendChild(renderAddPanel());
-
-    layout.appendChild(left);
-    layout.appendChild(right);
-    shell.appendChild(layout);
+    var sheet = renderMoreSheet();
+    if (sheet) shell.appendChild(sheet);
 
     root.appendChild(shell);
   }
@@ -3796,28 +4434,36 @@
       event.stopPropagation();
     }
 
-    var node = document.getElementById(
-      'gkmb3-disc-' + discId
-    );
-
-    if (!node) {
-      status(
-        'Discen finnes i bagen, men er skjult av aktivt søk/filter.',
-        ''
-      );
-      return;
-    }
-
-    node.classList.add('gkmb3-disc-focus');
-
-    node.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center'
-    });
+    STATE.activeView = 'discs';
+    STATE.appMenuOpen = false;
+    STATE.bagSearch = '';
+    STATE.bagFilter = 'all';
+    render();
 
     window.setTimeout(function () {
-      node.classList.remove('gkmb3-disc-focus');
-    }, 2600);
+      var node = document.getElementById(
+        'gkmb3-disc-' + discId
+      );
+
+      if (!node) {
+        status(
+          'Fant ikke discen i den aktive bagen akkurat nå.',
+          ''
+        );
+        return;
+      }
+
+      node.classList.add('gkmb3-disc-focus');
+
+      node.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+
+      window.setTimeout(function () {
+        node.classList.remove('gkmb3-disc-focus');
+      }, 2600);
+    }, 100);
   }
 
   function renderOverlapDetails(finding) {
@@ -3997,9 +4643,30 @@
     }
 
     if (STATE.discs.length) {
-      card.appendChild(renderBagScore());
-      card.appendChild(renderThrowAdvisor());
-      card.appendChild(renderRoundBagBuilder());
+      var featureLinks = el('div', 'gkmb3-featurelinks');
+
+      var scoreLink = el('button', 'gkmb3-btn secondary', '🏆 Bag-score');
+      scoreLink.type = 'button';
+      scoreLink.onclick = function () {
+        openAppView('score');
+      };
+      featureLinks.appendChild(scoreLink);
+
+      var throwLink = el('button', 'gkmb3-btn secondary', '🥏 Hva bør jeg kaste?');
+      throwLink.type = 'button';
+      throwLink.onclick = function () {
+        openAppView('throw');
+      };
+      featureLinks.appendChild(throwLink);
+
+      var roundLink = el('button', 'gkmb3-btn secondary', '🧳 Rundebag');
+      roundLink.type = 'button';
+      roundLink.onclick = function () {
+        openAppView('roundbag');
+      };
+      featureLinks.appendChild(roundLink);
+
+      card.appendChild(featureLinks);
     }
 
     if (!STATE.discs.length) {
@@ -4925,6 +5592,8 @@
 
   function resetUserState() {
     STATE.user = null;
+    STATE.activeView = 'home';
+    STATE.appMenuOpen = false;
     STATE.bags = [];
     STATE.activeBagId = null;
     STATE.discs = [];
@@ -5750,6 +6419,9 @@
       return;
     }
 
+    var userContext = captureUserContext();
+    var requestedBagId = STATE.activeBagId;
+
     STATE.roundBagCount =
       safe(countValue || STATE.roundBagCount || '8');
 
@@ -5795,6 +6467,11 @@
           STATE.roundBagFocus
       }
     ).then(function (res) {
+      if (!isCurrentUserContext(userContext) ||
+          STATE.activeBagId !== requestedBagId) {
+        return;
+      }
+
       if (res.error) throw res.error;
 
       STATE.roundBagResults = res.data || [];
@@ -5825,6 +6502,11 @@
         );
       }
     }).catch(function (err) {
+      if (!isCurrentUserContext(userContext) ||
+          STATE.activeBagId !== requestedBagId) {
+        return;
+      }
+
       STATE.roundBagResults = [];
       STATE.roundBagBusy = false;
       STATE.roundBagError = errorMessage(err);
@@ -5840,6 +6522,9 @@
 
   function buildRoundBagForCourse(course) {
     if (!course) return;
+
+    STATE.activeView = 'roundbag';
+    STATE.appMenuOpen = false;
 
     var focus =
       course.focus ||
