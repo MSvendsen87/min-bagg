@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.20.0';
+  var VERSION = '2026-08-09.20.1';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -1089,18 +1089,33 @@
   function dashboardBagImageUrl(bag) {
     if (!bag) return '';
 
-    var own = STATE.bagImageUrls[bag.id] || '';
-    if (own) return own;
-
+    // Hjem-siden skal bruke nøyaktig samme bildeprioritet som "Bagen min":
+    // Har bagen en valgt GolfKongen-sekk, er det DEN som representerer bagen.
+    // Eget opplastet bilde brukes bare når ingen GolfKongen-sekk er valgt.
     var selection = currentStoreBagSelection(bag.id);
 
     if (selection && selection.quickbutik_product_id) {
-      return STATE.storeBagImageUrls[
-        safe(selection.quickbutik_product_id)
-      ] || '';
+      var productId = safe(selection.quickbutik_product_id);
+      var storeUrl = STATE.storeBagImageUrls[productId] || '';
+
+      if (storeUrl) return storeUrl;
+
+      // Normalt er bildet allerede prelastet av loadStoreBagSelections().
+      // Denne fallbacken gjør dashboardet robust dersom bildet kommer litt senere.
+      if (!STATE.storeBagImageLoading[productId]) {
+        window.setTimeout(function () {
+          ensureStoreBagImage(productId)
+            .then(function () {
+              render();
+            })
+            .catch(function () {});
+        }, 0);
+      }
+
+      return '';
     }
 
-    return '';
+    return STATE.bagImageUrls[bag.id] || '';
   }
 
   function uniqueMoldCount() {
