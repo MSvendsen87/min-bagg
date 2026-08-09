@@ -26,6 +26,7 @@
    - Anbefalingsprofil med nivå, kastelengde, hånd, kastestil, bane og vind
    - Bag-analyse V1: hull i flight-dekning og tydelig overlapp
    - v19.3: Baner vises først etter søk; totalantall aktive vises fortsatt
+   - v19.4: Sikker brukeridentitet/session-reset ved Supabase-brukerbytte
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -37,7 +38,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.19.3';
+  var VERSION = '2026-08-09.19.4';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -59,6 +60,7 @@
   var root = null;
   var supabaseClient = null;
   var authSubscription = null;
+  var authEpoch = 0;
   var booting = false;
 
   var STATE = {
@@ -150,6 +152,42 @@
 
   function trim(value) {
     return safe(value).trim();
+  }
+
+  function currentUserId() {
+    return STATE.user && STATE.user.id
+      ? safe(STATE.user.id)
+      : '';
+  }
+
+  function captureUserContext() {
+    return {
+      userId: currentUserId(),
+      epoch: authEpoch
+    };
+  }
+
+  function isCurrentUserContext(context) {
+    return !!(
+      context &&
+      context.epoch === authEpoch &&
+      context.userId === currentUserId()
+    );
+  }
+
+  function applySessionUser(nextUser) {
+    var previousId = currentUserId();
+    var nextId = nextUser && nextUser.id
+      ? safe(nextUser.id)
+      : '';
+
+    if (previousId !== nextId) {
+      authEpoch += 1;
+      resetUserState();
+    }
+
+    STATE.user = nextUser || null;
+    return captureUserContext();
   }
 
   function numOrNull(value) {
@@ -4683,6 +4721,7 @@
         return;
       }
 
+      authEpoch += 1;
       resetUserState();
       render();
     }).catch(function (err) {
@@ -4786,51 +4825,14 @@
           ? res.data.session
           : null;
 
-      STATE.user =
+      var nextUser =
         session && session.user
           ? session.user
           : null;
 
+      var userContext = applySessionUser(nextUser);
+
       if (!STATE.user) {
-        STATE.bags = [];
-        STATE.activeBagId = null;
-        STATE.discs = [];
-        STATE.bagImageUrls = {};
-        STATE.storeBags = [];
-        STATE.storeBagSelections = {};
-        STATE.storeBagImageUrls = {};
-        STATE.storeBagImageLoading = {};
-        STATE.storeBagPickerOpen = false;
-        STATE.storeBagBusy = false;
-        STATE.newBagOpen = false;
-        STATE.renameBagOpen = false;
-        STATE.bagActionBusy = false;
-        STATE.addTargetBagId = null;
-        STATE.editDiscId = null;
-        STATE.discBusy = false;
-        STATE.recoProfile = null;
-        STATE.recoProfileLoaded = false;
-        STATE.recoProfileOpen = false;
-        STATE.recoFindings = [];
-        STATE.recoLoaded = false;
-        STATE.throwResults = [];
-        STATE.throwHasSearched = false;
-        STATE.throwBusy = false;
-        STATE.throwError = '';
-        STATE.courses = [];
-        STATE.coursesLoaded = false;
-        STATE.courseTotalCount = 0;
-        STATE.courseProgress = {};
-        STATE.courseProgressLoaded = false;
-        STATE.courseProgressBusyId = null;
-        STATE.coursePlayedCount = 0;
-        STATE.myCourses = [];
-        STATE.myCoursesLoaded = false;
-        STATE.courseAdmin = false;
-        STATE.courseAdminLoaded = false;
-        STATE.pendingCourses = [];
-        STATE.pendingCoursesLoaded = false;
-        STATE.recoBusy = false;
         render();
         return;
       }
@@ -4838,36 +4840,49 @@
       render();
       status('Laster Min Bag…');
 
-      return ensureAndLoad();
+      return ensureAndLoad(userContext);
     }).catch(function (err) {
+      authEpoch += 1;
       resetUserState();
       render();
       status('Auth-feil: ' + errorMessage(err), 'err');
     });
   }
 
-  function ensureAndLoad() {
+  function ensureAndLoad(userContext) {
+    if (!isCurrentUserContext(userContext)) {
+      return Promise.resolve();
+    }
+
     return supabaseClient.rpc('minbag_ensure_user')
       .then(function (res) {
+        if (!isCurrentUserContext(userContext)) return null;
         if (res.error) throw res.error;
         return loadBrands();
       })
       .then(function () {
+        if (!isCurrentUserContext(userContext)) return null;
+
         return Promise.all([
           loadStoreBagCatalog(),
           loadBags()
         ]);
       })
       .then(function () {
+        if (!isCurrentUserContext(userContext)) return null;
         return loadRecoProfile();
       })
       .then(function () {
+        if (!isCurrentUserContext(userContext)) return null;
+
         return Promise.all([
           loadActiveBagDiscs(),
           loadCourseModule()
         ]);
       })
       .then(function () {
+        if (!isCurrentUserContext(userContext)) return;
+
         render();
         status('Min Bag er lastet.', 'ok');
       });
@@ -4882,8 +4897,11 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
+
     return supabaseClient.rpc('minbag_get_reco_profile')
       .then(function (res) {
+        if (!isCurrentUserContext(userContext)) return;
         if (res.error) throw res.error;
 
         var rows = res.data || [];
@@ -4983,9 +5001,12 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
+
     return supabaseClient.rpc(
       'minbag_get_course_progress'
     ).then(function (res) {
+      if (!isCurrentUserContext(userContext)) return;
       if (res.error) throw res.error;
 
       var rows = res.data || [];
@@ -5001,6 +5022,8 @@
       STATE.coursePlayedCount = rows.length;
       STATE.courseProgressLoaded = true;
     }).catch(function (err) {
+      if (!isCurrentUserContext(userContext)) return;
+
       STATE.courseProgress = {};
       STATE.coursePlayedCount = 0;
       STATE.courseProgressLoaded = true;
@@ -5019,14 +5042,19 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
+
     return supabaseClient.rpc('minbag_get_my_courses')
       .then(function (res) {
+        if (!isCurrentUserContext(userContext)) return;
         if (res.error) throw res.error;
 
         STATE.myCourses = res.data || [];
         STATE.myCoursesLoaded = true;
       })
       .catch(function (err) {
+        if (!isCurrentUserContext(userContext)) return;
+
         STATE.myCourses = [];
         STATE.myCoursesLoaded = true;
 
@@ -5044,16 +5072,20 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
     STATE.pendingCoursesLoaded = false;
 
     return supabaseClient.rpc(
       'minbag_admin_get_pending_courses'
     ).then(function (res) {
+      if (!isCurrentUserContext(userContext)) return;
       if (res.error) throw res.error;
 
       STATE.pendingCourses = res.data || [];
       STATE.pendingCoursesLoaded = true;
     }).catch(function (err) {
+      if (!isCurrentUserContext(userContext)) return;
+
       STATE.pendingCourses = [];
       STATE.pendingCoursesLoaded = true;
 
@@ -5073,9 +5105,12 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
+
     return supabaseClient.rpc(
       'minbag_course_admin_status'
     ).then(function (res) {
+      if (!isCurrentUserContext(userContext)) return;
       if (res.error) throw res.error;
 
       STATE.courseAdmin = !!res.data;
@@ -5083,6 +5118,8 @@
 
       return loadPendingCourses();
     }).catch(function (err) {
+      if (!isCurrentUserContext(userContext)) return;
+
       STATE.courseAdmin = false;
       STATE.courseAdminLoaded = true;
       STATE.pendingCourses = [];
@@ -5554,7 +5591,7 @@
     supabaseClient.rpc(
       'minbag_build_round_bag',
       {
-        p_bag_id: STATE.activeBagId,
+        p_bag_id: requestedBagId,
         p_disc_count:
           Number(STATE.roundBagCount) || 8,
         p_course_style:
@@ -5728,6 +5765,9 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
+    var requestedBagId = STATE.activeBagId;
+
     return supabaseClient.rpc(
       'minbag_get_fun_recommendations',
       {
@@ -5738,11 +5778,14 @@
         )
       }
     ).then(function (res) {
+      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== requestedBagId) return;
       if (res.error) throw res.error;
 
       STATE.funRecommendations = res.data || [];
       STATE.funRecommendationsLoaded = true;
     }).catch(function (err) {
+      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== requestedBagId) return;
+
       // Frontend lager lokal bag-utfordring hvis RPC/katalog noen gang er tom.
       STATE.funRecommendations = [];
       STATE.funRecommendationsLoaded = true;
@@ -5802,6 +5845,7 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
     var bagId = STATE.activeBagId;
 
     var gapPromise = supabaseClient.rpc(
@@ -5810,10 +5854,12 @@
         p_bag_id: bagId
       }
     ).then(function (res) {
+      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
       if (res.error) throw res.error;
       STATE.recoFindings = res.data || [];
       STATE.recoLoaded = true;
     }).catch(function (err) {
+      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
       STATE.recoFindings = [];
       STATE.recoLoaded = true;
       console.warn('[GK MIN BAG V3] Gap-analyse feilet', err);
@@ -5826,10 +5872,12 @@
         p_limit_per_gap: 3
       }
     ).then(function (res) {
+      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
       if (res.error) throw res.error;
       STATE.recoProducts = res.data || [];
       STATE.recoProductsLoaded = true;
     }).catch(function (err) {
+      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
       STATE.recoProducts = [];
       STATE.recoProductsLoaded = true;
       STATE.recoProductsError = errorMessage(err);
@@ -5847,12 +5895,14 @@
         p_bag_id: bagId
       }
     ).then(function (res) {
+      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
       if (res.error) throw res.error;
 
       var rows = res.data || [];
       STATE.bagScore = rows.length ? rows[0] : null;
       STATE.bagScoreLoaded = true;
     }).catch(function (err) {
+      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
       STATE.bagScore = null;
       STATE.bagScoreLoaded = true;
       STATE.bagScoreError = errorMessage(err);
@@ -5940,8 +5990,11 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
+
     return supabaseClient.rpc('minbag_get_golfkongen_bags')
       .then(function (res) {
+        if (!isCurrentUserContext(userContext)) return;
         if (res.error) throw res.error;
         STATE.storeBags = res.data || [];
       });
@@ -5954,8 +6007,11 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
+
     return supabaseClient.rpc('minbag_get_my_bag_store_selections')
       .then(function (res) {
+        if (!isCurrentUserContext(userContext)) return;
         if (res.error) throw res.error;
 
         var rows = res.data || [];
@@ -6098,8 +6154,11 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
+
     return supabaseClient.rpc('minbag_get_my_bag_images')
       .then(function (res) {
+        if (!isCurrentUserContext(userContext)) return;
         if (res.error) throw res.error;
 
         var rows = res.data || [];
@@ -6125,6 +6184,7 @@
                   CONFIG.BAG_IMAGE_SIGNED_SECONDS
                 )
                 .then(function (signed) {
+                  if (!isCurrentUserContext(userContext)) return;
                   if (signed.error) throw signed.error;
 
                   if (
@@ -6135,6 +6195,7 @@
                   }
                 })
                 .catch(function (err) {
+                  if (!isCurrentUserContext(userContext)) return;
                   console.warn(
                     '[GK MIN BAG V3] Kunne ikke lage signert bag-bilde',
                     err
@@ -6347,8 +6408,11 @@
   }
 
   function loadBags(preferredBagId) {
+    var userContext = captureUserContext();
+
     return supabaseClient.rpc('minbag_get_my_bags')
       .then(function (res) {
+        if (!isCurrentUserContext(userContext)) return;
         if (res.error) throw res.error;
 
         STATE.bags = res.data || [];
@@ -6430,6 +6494,9 @@
       return Promise.resolve();
     }
 
+    var userContext = captureUserContext();
+    var requestedBagId = STATE.activeBagId;
+
     return supabaseClient
       .from('minbag_discs')
       .select(
@@ -6437,10 +6504,11 @@
         'product_url,image_url,speed,glide,turn,fade,weight_grams,color,note,' +
         'is_favorite,created_at,updated_at,mold_key'
       )
-      .eq('bag_id', STATE.activeBagId)
+      .eq('bag_id', requestedBagId)
       .order('disc_type', { ascending: true })
       .order('created_at', { ascending: true })
       .then(function (res) {
+        if (!isCurrentUserContext(userContext) || STATE.activeBagId !== requestedBagId) return;
         if (res.error) throw res.error;
         STATE.discs = res.data || [];
         STATE.throwResults = [];
