@@ -27,6 +27,7 @@
    - Bag-analyse V1: hull i flight-dekning og tydelig overlapp
    - v19.3: Baner vises først etter søk; totalantall aktive vises fortsatt
    - v19.4: Sikker brukeridentitet/session-reset ved Supabase-brukerbytte
+   - v19.5: Sticky seksjonsnavigasjon med smooth-scroll og aktiv markering
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -38,7 +39,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.19.4';
+  var VERSION = '2026-08-09.19.5';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -62,6 +63,8 @@
   var authSubscription = null;
   var authEpoch = 0;
   var booting = false;
+  var sectionNavBound = false;
+  var sectionNavTicking = false;
 
   var STATE = {
     user: null,
@@ -451,6 +454,13 @@
       '.gkmb3-roundbag-score{margin-top:5px;color:#fde68a;font-size:9px;font-weight:900;}' +
       '@media(max-width:850px){.gkmb3-roundbag-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
       '@media(max-width:520px){.gkmb3-roundbag-grid{grid-template-columns:1fr;}.gkmb3-roundbag-item{grid-template-columns:48px minmax(0,1fr);}.gkmb3-roundbag-img{width:48px;height:48px;}}' +
+      '.gkmb3-sectionnav{position:sticky;top:8px;z-index:45;display:flex;gap:6px;align-items:center;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:10px 0 14px;padding:7px;border-radius:16px;border:1px solid rgba(34,197,94,.20);background:rgba(4,10,7,.88);box-shadow:0 10px 28px rgba(0,0,0,.28);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}' +
+      '.gkmb3-sectionnav::-webkit-scrollbar{display:none;}' +
+      '.gkmb3-sectionnav button{appearance:none;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.045);color:rgba(255,255,255,.72);padding:7px 10px;border-radius:999px;font:inherit;font-size:10px;font-weight:900;line-height:1;white-space:nowrap;cursor:pointer;flex:0 0 auto;transition:.15s ease;}' +
+      '.gkmb3-sectionnav button:hover{border-color:rgba(34,197,94,.32);background:rgba(34,197,94,.09);color:#fff;}' +
+      '.gkmb3-sectionnav button.active{border-color:rgba(34,197,94,.58);background:linear-gradient(135deg,rgba(22,163,74,.34),rgba(34,197,94,.17));color:#dcfce7;box-shadow:inset 0 0 0 1px rgba(34,197,94,.10);}' +
+      '.gkmb3-section-anchor{scroll-margin-top:76px;}' +
+      '@media(max-width:650px){.gkmb3-sectionnav{top:5px;margin:8px -2px 12px;padding:6px;border-radius:14px;}.gkmb3-sectionnav button{padding:7px 9px;font-size:9px;}.gkmb3-section-anchor{scroll-margin-top:68px;}}' +
       '.gkmb3-courses{margin-top:0;}' +
       '.gkmb3-course-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;margin-top:10px;}' +
       '.gkmb3-course-list{display:grid;gap:9px;margin-top:11px;}' +
@@ -771,6 +781,159 @@
     return card;
   }
 
+
+  function sectionNavItems() {
+    var items = [
+      {
+        id: 'gkmb3-section-bag',
+        label: '🎒 Bag',
+        enabled: true
+      },
+      {
+        id: 'gkmb3-section-recommendations',
+        label: '🎯 Anbefalinger',
+        enabled: true
+      },
+      {
+        id: 'gkmb3-section-bagscore',
+        label: '🏆 Bag-score',
+        enabled: !!(STATE.recoProfile && STATE.discs.length)
+      },
+      {
+        id: 'gkmb3-section-throw',
+        label: '🥏 Kast',
+        enabled: !!(STATE.recoProfile && STATE.discs.length)
+      },
+      {
+        id: 'gkmb3-roundbag-section',
+        label: '🧳 Rundebag',
+        enabled: !!(STATE.recoProfile && STATE.discs.length)
+      },
+      {
+        id: 'gkmb3-section-discs',
+        label: '💿 Discer',
+        enabled: true
+      },
+      {
+        id: 'gkmb3-section-courses',
+        label: '🗺 Baner',
+        enabled: true
+      }
+    ];
+
+    var enabled = [];
+
+    for (var i = 0; i < items.length; i += 1) {
+      if (items[i].enabled) enabled.push(items[i]);
+    }
+
+    return enabled;
+  }
+
+  function scrollToMinBagSection(sectionId) {
+    var node = document.getElementById(sectionId);
+    if (!node) return;
+
+    node.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    });
+
+    window.setTimeout(updateActiveSectionNav, 120);
+  }
+
+  function updateActiveSectionNav() {
+    if (!root || !STATE.user) return;
+
+    var nav = root.querySelector('.gkmb3-sectionnav');
+    if (!nav) return;
+
+    var items = sectionNavItems();
+    var targetY = Math.max(90, window.innerHeight * 0.23);
+    var activeId = '';
+    var bestDistance = Infinity;
+
+    for (var i = 0; i < items.length; i += 1) {
+      var node = document.getElementById(items[i].id);
+      if (!node) continue;
+
+      var rect = node.getBoundingClientRect();
+      var distance;
+
+      if (rect.top <= targetY && rect.bottom >= targetY) {
+        distance = 0;
+      } else if (rect.top > targetY) {
+        distance = rect.top - targetY;
+      } else {
+        distance = targetY - rect.bottom + 1000;
+      }
+
+      if (distance <= bestDistance) {
+        bestDistance = distance;
+        activeId = items[i].id;
+      }
+    }
+
+    var buttons = nav.querySelectorAll('button[data-section-id]');
+
+    for (var j = 0; j < buttons.length; j += 1) {
+      var isActive =
+        buttons[j].getAttribute('data-section-id') === activeId;
+
+      buttons[j].classList.toggle('active', isActive);
+
+      if (isActive) {
+        buttons[j].setAttribute('aria-current', 'location');
+      } else {
+        buttons[j].removeAttribute('aria-current');
+      }
+    }
+  }
+
+  function bindSectionNavTracking() {
+    if (sectionNavBound) return;
+
+    var schedule = function () {
+      if (sectionNavTicking) return;
+
+      sectionNavTicking = true;
+
+      window.requestAnimationFrame(function () {
+        sectionNavTicking = false;
+        updateActiveSectionNav();
+      });
+    };
+
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    sectionNavBound = true;
+  }
+
+  function renderSectionNav() {
+    var nav = el('nav', 'gkmb3-sectionnav');
+    nav.setAttribute('aria-label', 'Navigasjon i Min Bag');
+
+    var items = sectionNavItems();
+
+    for (var i = 0; i < items.length; i += 1) {
+      (function (item) {
+        var btn = el('button', '', item.label);
+        btn.type = 'button';
+        btn.setAttribute('data-section-id', item.id);
+        btn.onclick = function () {
+          scrollToMinBagSection(item.id);
+        };
+        nav.appendChild(btn);
+      })(items[i]);
+    }
+
+    bindSectionNavTracking();
+
+    window.setTimeout(updateActiveSectionNav, 0);
+
+    return nav;
+  }
+
   function render() {
     if (!root) return;
 
@@ -834,6 +997,7 @@
     hero.appendChild(heroStatus);
 
     shell.appendChild(hero);
+    shell.appendChild(renderSectionNav());
     shell.appendChild(renderTop3());
 
     var layout = el('div', 'gkmb3-layout');
@@ -1483,7 +1647,8 @@
   }
 
   function renderCoursePanel() {
-    var card = el('section', 'gkmb3-card gkmb3-courses');
+    var card = el('section', 'gkmb3-card gkmb3-courses gkmb3-section-anchor');
+    card.id = 'gkmb3-section-courses';
 
     card.appendChild(el('h3', '', '🗺 Baner'));
     card.appendChild(el(
@@ -2052,7 +2217,8 @@
   }
 
   function renderBagManager() {
-    var card = el('section', 'gkmb3-card');
+    var card = el('section', 'gkmb3-card gkmb3-section-anchor');
+    card.id = 'gkmb3-section-bag';
     card.appendChild(el('h3', '', 'Dine bager'));
     card.appendChild(el('p', '', 'Velg aktiv bag eller opprett en ny. Én bag er alltid satt som hovedbag.'));
 
@@ -2852,7 +3018,8 @@
   }
 
   function renderBagScore() {
-    var wrap = el('section', 'gkmb3-bagscore');
+    var wrap = el('section', 'gkmb3-bagscore gkmb3-section-anchor');
+    wrap.id = 'gkmb3-section-bagscore';
 
     if (!STATE.bagScoreLoaded) {
       wrap.appendChild(el('div', 'gkmb3-note', 'Beregner Bag-score…'));
@@ -3093,7 +3260,8 @@
   function renderThrowAdvisor() {
     ensureThrowDefaults();
 
-    var wrap = el('section', 'gkmb3-throwadvisor');
+    var wrap = el('section', 'gkmb3-throwadvisor gkmb3-section-anchor');
+    wrap.id = 'gkmb3-section-throw';
     var head = el('div', 'gkmb3-throwadvisor-head');
     var copy = el('div', '');
 
@@ -3341,7 +3509,7 @@
   function renderRoundBagBuilder() {
     ensureRoundBagDefaults();
 
-    var wrap = el('section', 'gkmb3-roundbag');
+    var wrap = el('section', 'gkmb3-roundbag gkmb3-section-anchor');
     wrap.id = 'gkmb3-roundbag-section';
 
     var head = el('div', 'gkmb3-roundbag-head');
@@ -3742,7 +3910,8 @@
   }
 
   function renderRecommendationPanel() {
-    var card = el('section', 'gkmb3-card gkmb3-reco');
+    var card = el('section', 'gkmb3-card gkmb3-reco gkmb3-section-anchor');
+    card.id = 'gkmb3-section-recommendations';
     var head = el('div', 'gkmb3-recohead');
     var headText = el('div', '');
 
@@ -3974,7 +4143,8 @@
   }
 
   function renderBagContents() {
-    var card = el('section', 'gkmb3-card');
+    var card = el('section', 'gkmb3-card gkmb3-section-anchor');
+    card.id = 'gkmb3-section-discs';
 
     var bag = activeBag();
     card.appendChild(el('h3', '', bag ? bag.name : 'Min bag'));
