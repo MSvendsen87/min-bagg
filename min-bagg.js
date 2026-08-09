@@ -25,6 +25,7 @@
    - Fysisk disc kan dupliseres via sikker RPC
    - Anbefalingsprofil med nivå, kastelengde, hånd, kastestil, bane og vind
    - Bag-analyse V1: hull i flight-dekning og tydelig overlapp
+   - v19.6: desktop-nav i innholdskolonnen + stor fast mobil bunnnavigasjon
    - v19.3: Baner vises først etter søk; totalantall aktive vises fortsatt
    - v19.4: Sikker brukeridentitet/session-reset ved Supabase-brukerbytte
    - v19.5: Sticky seksjonsnavigasjon med smooth-scroll og aktiv markering
@@ -39,7 +40,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.19.5';
+  var VERSION = '2026-08-09.19.6';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -454,13 +455,13 @@
       '.gkmb3-roundbag-score{margin-top:5px;color:#fde68a;font-size:9px;font-weight:900;}' +
       '@media(max-width:850px){.gkmb3-roundbag-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}' +
       '@media(max-width:520px){.gkmb3-roundbag-grid{grid-template-columns:1fr;}.gkmb3-roundbag-item{grid-template-columns:48px minmax(0,1fr);}.gkmb3-roundbag-img{width:48px;height:48px;}}' +
-      '.gkmb3-sectionnav{position:sticky;top:8px;z-index:45;display:flex;gap:6px;align-items:center;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:10px 0 14px;padding:7px;border-radius:16px;border:1px solid rgba(34,197,94,.20);background:rgba(4,10,7,.88);box-shadow:0 10px 28px rgba(0,0,0,.28);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}' +
+      '.gkmb3-sectionnav{position:sticky;top:12px;z-index:45;display:flex;gap:7px;align-items:center;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:0 0 14px;padding:8px;border-radius:16px;border:1px solid rgba(34,197,94,.18);background:linear-gradient(135deg,rgba(8,18,12,.96),rgba(3,9,6,.96));box-shadow:0 9px 24px rgba(0,0,0,.22);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}' +
       '.gkmb3-sectionnav::-webkit-scrollbar{display:none;}' +
-      '.gkmb3-sectionnav button{appearance:none;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.045);color:rgba(255,255,255,.72);padding:7px 10px;border-radius:999px;font:inherit;font-size:10px;font-weight:900;line-height:1;white-space:nowrap;cursor:pointer;flex:0 0 auto;transition:.15s ease;}' +
+      '.gkmb3-sectionnav button{appearance:none;min-height:40px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.045);color:rgba(255,255,255,.78);padding:9px 12px;border-radius:12px;font:inherit;font-size:11px;font-weight:900;line-height:1.05;white-space:nowrap;cursor:pointer;flex:0 0 auto;transition:.15s ease;touch-action:manipulation;}' +
       '.gkmb3-sectionnav button:hover{border-color:rgba(34,197,94,.32);background:rgba(34,197,94,.09);color:#fff;}' +
-      '.gkmb3-sectionnav button.active{border-color:rgba(34,197,94,.58);background:linear-gradient(135deg,rgba(22,163,74,.34),rgba(34,197,94,.17));color:#dcfce7;box-shadow:inset 0 0 0 1px rgba(34,197,94,.10);}' +
-      '.gkmb3-section-anchor{scroll-margin-top:76px;}' +
-      '@media(max-width:650px){.gkmb3-sectionnav{top:5px;margin:8px -2px 12px;padding:6px;border-radius:14px;}.gkmb3-sectionnav button{padding:7px 9px;font-size:9px;}.gkmb3-section-anchor{scroll-margin-top:68px;}}' +
+      '.gkmb3-sectionnav button.active{border-color:rgba(34,197,94,.62);background:linear-gradient(135deg,rgba(22,163,74,.40),rgba(34,197,94,.18));color:#ecfdf5;box-shadow:inset 0 0 0 1px rgba(34,197,94,.12);}' +
+      '.gkmb3-section-anchor{scroll-margin-top:86px;}' +
+      '@media(max-width:650px){.gkmb3-shell{padding-bottom:88px;}.gkmb3-sectionnav{position:fixed;top:auto;left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;margin:0;padding:8px;gap:7px;border-radius:18px;border-color:rgba(34,197,94,.30);background:rgba(4,12,8,.97);box-shadow:0 -8px 28px rgba(0,0,0,.48),0 0 0 1px rgba(255,255,255,.03);}.gkmb3-sectionnav button{min-height:46px;padding:9px 13px;border-radius:13px;font-size:11px;line-height:1.12;}.gkmb3-section-anchor{scroll-margin-top:76px;}}' +
       '.gkmb3-courses{margin-top:0;}' +
       '.gkmb3-course-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;margin-top:10px;}' +
       '.gkmb3-course-list{display:grid;gap:9px;margin-top:11px;}' +
@@ -795,11 +796,6 @@
         enabled: true
       },
       {
-        id: 'gkmb3-section-bagscore',
-        label: '🏆 Bag-score',
-        enabled: !!(STATE.recoProfile && STATE.discs.length)
-      },
-      {
         id: 'gkmb3-section-throw',
         label: '🥏 Kast',
         enabled: !!(STATE.recoProfile && STATE.discs.length)
@@ -834,12 +830,20 @@
     var node = document.getElementById(sectionId);
     if (!node) return;
 
-    node.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start'
+    var mobile = window.matchMedia &&
+      window.matchMedia('(max-width: 650px)').matches;
+
+    var offset = mobile ? 18 : 76;
+    var y = node.getBoundingClientRect().top +
+      (window.pageYOffset || document.documentElement.scrollTop || 0) -
+      offset;
+
+    window.scrollTo({
+      top: Math.max(0, y),
+      behavior: 'smooth'
     });
 
-    window.setTimeout(updateActiveSectionNav, 120);
+    window.setTimeout(updateActiveSectionNav, 160);
   }
 
   function updateActiveSectionNav() {
@@ -884,6 +888,25 @@
 
       if (isActive) {
         buttons[j].setAttribute('aria-current', 'location');
+
+        if (
+          window.matchMedia &&
+          window.matchMedia('(max-width: 650px)').matches
+        ) {
+          var navRect = nav.getBoundingClientRect();
+          var btnRect = buttons[j].getBoundingClientRect();
+
+          if (
+            btnRect.left < navRect.left + 8 ||
+            btnRect.right > navRect.right - 8
+          ) {
+            buttons[j].scrollIntoView({
+              behavior: 'smooth',
+              block: 'nearest',
+              inline: 'center'
+            });
+          }
+        }
       } else {
         buttons[j].removeAttribute('aria-current');
       }
@@ -997,12 +1020,12 @@
     hero.appendChild(heroStatus);
 
     shell.appendChild(hero);
-    shell.appendChild(renderSectionNav());
     shell.appendChild(renderTop3());
 
     var layout = el('div', 'gkmb3-layout');
 
     var left = el('div', '');
+    left.appendChild(renderSectionNav());
     left.appendChild(renderBagManager());
     left.appendChild(renderRecommendationPanel());
     left.appendChild(renderBagContents());
