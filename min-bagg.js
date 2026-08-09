@@ -1,6 +1,6 @@
 /* ============================================================================
    GOLFKONGEN – MIN BAG V3 APP
-   Build: 2026-08-06.1
+   Build: 2026-08-09.20.5
 
    V3-prinsipper:
    - Supabase Auth / magic link
@@ -9,7 +9,7 @@
    - Ingen user_id fra frontend ved opprettelse av discer
    - Skriving av discer går via sikre RPC-er
    - Støtter flere bager
-   - "Legg til fra GolfKongen" via minbag_search_catalog + minbag_add_catalog_disc
+   - "Legg til fra GolfKongen" søker også historiske/skjulte katalogdiscer
    - "Legg inn egen disc" via minbag_add_manual_disc
    - Mobil-først, mørkt GolfKongen-design
    - Bag-cover: velg GolfKongen-sekk eller bruk eget bilde
@@ -29,6 +29,8 @@
    - v19.3: Baner vises først etter søk; totalantall aktive vises fortsatt
    - v19.4: Sikker brukeridentitet/session-reset ved Supabase-brukerbytte
    - v19.5: Sticky seksjonsnavigasjon med smooth-scroll og aktiv markering
+   - v20.4: Personlige anbefalinger, Bag-score V2 og historisk GolfKongen-katalog
+   - v20.5: Tilbakemelding lagres i Supabase og varsles server-side via Resend
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -40,7 +42,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.20.4';
+  var VERSION = '2026-08-09.20.5';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -999,6 +1001,12 @@
         title: 'Topp 3',
         short: 'Toppliste',
         description: 'Se hvilke discmodeller som er mest brukt blant Min Bag-brukerne.'
+      },
+      feedback: {
+        icon: '💬',
+        title: 'Tilbakemelding',
+        short: 'Tilbakemelding',
+        description: 'Send forslag, meld fra om noe som mangler eller fortell oss hvis noe ikke fungerer.'
       }
     };
 
@@ -1015,7 +1023,8 @@
       'roundbag',
       'discs',
       'courses',
-      'popular'
+      'popular',
+      'feedback'
     ];
   }
 
@@ -1398,6 +1407,20 @@
     side.appendChild(nav);
 
     var footer = el('div', 'gkmb3-sidefooter');
+
+    var feedbackBtn = el(
+      'button',
+      STATE.activeView === 'feedback'
+        ? 'gkmb3-btn'
+        : 'gkmb3-btn secondary',
+      '💬 Tilbakemelding'
+    );
+    feedbackBtn.type = 'button';
+    feedbackBtn.onclick = function () {
+      openAppView('feedback');
+    };
+    footer.appendChild(feedbackBtn);
+
     var logoutBtn = el('button', 'gkmb3-btn secondary', 'Logg ut');
     logoutBtn.type = 'button';
     logoutBtn.onclick = logout;
@@ -1553,6 +1576,269 @@
     return wrap;
   }
 
+
+  function feedbackTypeSelect() {
+    return createRecoSelect(
+      'gkmb3-feedback-type',
+      [
+        ['suggestion', 'Forslag'],
+        ['missing', 'Noe mangler'],
+        ['bug', 'Feil / noe fungerer ikke'],
+        ['other', 'Annet']
+      ],
+      'suggestion'
+    );
+  }
+
+  function renderFeedbackPanel() {
+    var card = el('section', 'gkmb3-featurecard');
+
+    card.appendChild(el(
+      'h3',
+      '',
+      'Hjelp oss å gjøre Min Bag bedre'
+    ));
+
+    card.appendChild(el(
+      'p',
+      'gkmb3-muted',
+      'Savner du en funksjon, finner du en disc eller bane som mangler, eller er det noe som ikke fungerer? Send det til oss her.'
+    ));
+
+    var form = el('div', 'gkmb3-recoform');
+
+    form.appendChild(field(
+      'Hva gjelder det?',
+      feedbackTypeSelect()
+    ));
+
+    var message = el('textarea', 'gkmb3-textarea');
+    message.id = 'gkmb3-feedback-message';
+    message.maxLength = 5000;
+    message.placeholder =
+      'Beskriv forslaget eller problemet så konkret du kan.';
+
+    var messageWrap = field(
+      'Tilbakemelding *',
+      message
+    );
+
+    var charCount = el(
+      'div',
+      'gkmb3-note',
+      '0 / 5000 tegn'
+    );
+
+    message.oninput = function () {
+      charCount.textContent =
+        String(message.value.length) +
+        ' / 5000 tegn';
+    };
+
+    messageWrap.appendChild(charCount);
+    form.appendChild(messageWrap);
+
+    var replyLabel = el('label', 'gkmb3-check');
+    var replyCheck = document.createElement('input');
+    replyCheck.type = 'checkbox';
+    replyCheck.id = 'gkmb3-feedback-reply';
+    replyCheck.checked = true;
+
+    replyLabel.appendChild(replyCheck);
+    replyLabel.appendChild(document.createTextNode(
+      'GolfKongen kan kontakte meg om denne tilbakemeldingen'
+    ));
+    form.appendChild(replyLabel);
+
+    var email = el('input', 'gkmb3-input');
+    email.id = 'gkmb3-feedback-email';
+    email.type = 'email';
+    email.autocomplete = 'email';
+    email.placeholder = 'E-post for svar';
+    email.value = safe(
+      STATE.user && STATE.user.email
+    );
+
+    var emailField = field(
+      'E-post for svar',
+      email
+    );
+    form.appendChild(emailField);
+
+    replyCheck.onchange = function () {
+      email.disabled = !replyCheck.checked;
+      emailField.style.opacity =
+        replyCheck.checked ? '1' : '.45';
+
+      if (
+        replyCheck.checked &&
+        !trim(email.value) &&
+        STATE.user &&
+        STATE.user.email
+      ) {
+        email.value = safe(STATE.user.email);
+      }
+    };
+
+    form.appendChild(el(
+      'div',
+      'gkmb3-note',
+      'Tilbakemeldingen knyttes til Min Bag-kontoen din for å hindre misbruk og gjøre feil enklere å følge opp. Kontakt-e-posten brukes bare dersom du ønsker svar. Innholdet i bagen din sendes ikke med.'
+    ));
+
+    var send = el(
+      'button',
+      'gkmb3-btn',
+      'Send tilbakemelding'
+    );
+    send.type = 'button';
+    send.id = 'gkmb3-feedback-submit';
+
+    var localStatus = el(
+      'div',
+      'gkmb3-status'
+    );
+    localStatus.style.display = 'none';
+
+    function setFeedbackStatus(text, type) {
+      localStatus.textContent = text || '';
+      localStatus.className =
+        'gkmb3-status' +
+        (type ? ' ' + type : '');
+      localStatus.style.display =
+        text ? 'block' : 'none';
+    }
+
+    send.onclick = function () {
+      var feedbackType =
+        getInputValue('gkmb3-feedback-type');
+
+      var feedbackMessage =
+        getInputValue('gkmb3-feedback-message');
+
+      var wantsReply = !!replyCheck.checked;
+
+      var contactEmail = wantsReply
+        ? getInputValue('gkmb3-feedback-email')
+        : '';
+
+      if (trim(feedbackMessage).length < 5) {
+        setFeedbackStatus(
+          'Skriv litt mer om tilbakemeldingen.',
+          'err'
+        );
+        message.focus();
+        return;
+      }
+
+      if (
+        wantsReply &&
+        (
+          !contactEmail ||
+          contactEmail.indexOf('@') <= 0
+        )
+      ) {
+        setFeedbackStatus(
+          'Skriv inn en gyldig e-postadresse, eller fjern valget om at vi kan kontakte deg.',
+          'err'
+        );
+        email.focus();
+        return;
+      }
+
+      send.disabled = true;
+      send.textContent = 'Sender…';
+
+      setFeedbackStatus(
+        'Lagrer tilbakemeldingen…',
+        ''
+      );
+
+      supabaseClient.rpc(
+        'minbag_submit_feedback',
+        {
+          p_feedback_type: feedbackType,
+          p_message: trim(feedbackMessage),
+          p_contact_email: wantsReply
+            ? trim(contactEmail)
+            : null,
+          p_app_version: VERSION,
+          p_app_view: STATE.activeView || 'feedback'
+        }
+      ).then(function (res) {
+        if (res.error) {
+          throw res.error;
+        }
+
+        var row = Array.isArray(res.data)
+          ? res.data[0]
+          : res.data;
+
+        var feedbackId =
+          row && row.feedback_id
+            ? safe(row.feedback_id)
+            : '';
+
+        if (!feedbackId) {
+          throw new Error(
+            'Tilbakemeldingen ble lagret, men mangler referanse.'
+          );
+        }
+
+        setFeedbackStatus(
+          'Tilbakemeldingen er lagret. Sender varsel til GolfKongen…',
+          ''
+        );
+
+        return supabaseClient.functions.invoke(
+          'minbag-feedback-email',
+          {
+            body: {
+              feedback_id: feedbackId
+            }
+          }
+        ).then(function (mailRes) {
+          message.value = '';
+          charCount.textContent = '0 / 5000 tegn';
+
+          if (mailRes.error) {
+            console.warn(
+              'Min Bag feedback email:',
+              mailRes.error
+            );
+
+            setFeedbackStatus(
+              'Takk! Tilbakemeldingen er lagret hos oss. E-postvarslingen kunne ikke sendes akkurat nå, men meldingen din er mottatt.',
+              'ok'
+            );
+            return;
+          }
+
+          setFeedbackStatus(
+            'Takk! Tilbakemeldingen er sendt til GolfKongen.',
+            'ok'
+          );
+        });
+      }).catch(function (err) {
+        setFeedbackStatus(
+          'Kunne ikke sende tilbakemeldingen: ' +
+          errorMessage(err),
+          'err'
+        );
+      }).finally(function () {
+        send.disabled = false;
+        send.textContent = 'Send tilbakemelding';
+      });
+    };
+
+    form.appendChild(send);
+    form.appendChild(localStatus);
+    card.appendChild(form);
+
+    return card;
+  }
+
+
   function renderCurrentAppView() {
     var view = STATE.activeView || 'home';
 
@@ -1579,6 +1865,8 @@
       wrap.appendChild(renderCoursePanel());
     } else if (view === 'popular') {
       wrap.appendChild(renderTop3());
+    } else if (view === 'feedback') {
+      wrap.appendChild(renderFeedbackPanel());
     } else {
       STATE.activeView = 'home';
       return renderHomeDashboard();
@@ -1654,7 +1942,8 @@
       'recommendations',
       'score',
       'roundbag',
-      'popular'
+      'popular',
+      'feedback'
     ];
 
     for (var i = 0; i < views.length; i += 1) {
