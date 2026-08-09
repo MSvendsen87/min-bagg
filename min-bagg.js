@@ -40,7 +40,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.20.3';
+  var VERSION = '2026-08-09.20.4';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -105,6 +105,8 @@
     recoProducts: [],
     recoProductsLoaded: false,
     recoProductsError: '',
+    recoInsights: null,
+    recoInsightsLoaded: false,
     funRecommendations: [],
     funRecommendationsLoaded: false,
     funRecommendationsError: '',
@@ -383,6 +385,18 @@
       '.gkmb3-recopill{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;border:1px solid rgba(34,197,94,.20);background:rgba(34,197,94,.07);color:#dcfce7;font-size:10px;font-weight:850;}' +
       '.gkmb3-recoform{display:grid;gap:10px;margin-top:10px;}' +
       '.gkmb3-recogrid{display:grid;grid-template-columns:1fr;gap:9px;}' +
+      '.gkmb3-recohelp{padding:10px 11px;border-radius:13px;border:1px solid rgba(59,130,246,.20);background:rgba(59,130,246,.07);color:rgba(255,255,255,.67);font-size:10px;line-height:1.45;}' +
+      '.gkmb3-recochoice{padding:10px 11px;border-radius:13px;border:1px solid rgba(255,255,255,.09);background:rgba(0,0,0,.14);}' +
+      '.gkmb3-recochoice-title{font-size:10px;font-weight:950;color:#fff;margin-bottom:7px;}' +
+      '.gkmb3-recochecks{display:flex;gap:7px;flex-wrap:wrap;}' +
+      '.gkmb3-recocheck{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.035);font-size:10px;font-weight:800;color:rgba(255,255,255,.72);}' +
+      '.gkmb3-recocheck input{accent-color:#22c55e;}' +
+      '.gkmb3-recocheck.disabled{opacity:.42;}' +
+      '.gkmb3-insights{margin:10px 0 12px;padding:12px;border-radius:16px;border:1px solid rgba(59,130,246,.22);background:linear-gradient(135deg,rgba(59,130,246,.09),rgba(0,0,0,.15));}' +
+      '.gkmb3-insights h4{margin:0 0 7px;font-size:12px;color:#fff;}' +
+      '.gkmb3-insightgrid{display:grid;grid-template-columns:1fr;gap:6px;}' +
+      '.gkmb3-insight{padding:7px 8px;border-radius:10px;background:rgba(255,255,255,.035);color:rgba(255,255,255,.66);font-size:10px;line-height:1.4;}' +
+      '.gkmb3-insight strong{color:#dbeafe;}' +
       '.gkmb3-recolist{display:grid;gap:8px;margin-top:10px;}' +
       '.gkmb3-recofinding{padding:11px;border-radius:15px;border:1px solid rgba(255,255,255,.10);background:rgba(0,0,0,.14);}' +
       '.gkmb3-recofinding.gap{border-color:rgba(34,197,94,.22);background:linear-gradient(135deg,rgba(34,197,94,.07),rgba(0,0,0,.14));}' +
@@ -567,6 +581,10 @@
       '.gkmb3-resultimg img{width:100%;height:100%;object-fit:cover;}' +
       '.gkmb3-resulttitle{font-weight:950;color:#fff;font-size:14px;line-height:1.2;margin-bottom:3px;}' +
       '.gkmb3-resultsub{font-size:11px;color:rgba(255,255,255,.52);margin-bottom:7px;}' +
+      '.gkmb3-availability{display:inline-flex;margin:0 0 7px;padding:4px 7px;border-radius:999px;font-size:9px;font-weight:900;border:1px solid rgba(255,255,255,.10);}' +
+      '.gkmb3-availability.available{color:#bbf7d0;border-color:rgba(34,197,94,.25);background:rgba(34,197,94,.08);}' +
+      '.gkmb3-availability.soldout{color:#fde68a;border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.08);}' +
+      '.gkmb3-availability.historical{color:#cbd5e1;border-color:rgba(148,163,184,.24);background:rgba(148,163,184,.08);}' +
       '.gkmb3-price{font-size:12px;font-weight:900;color:#bbf7d0;}' +
 
       '.gkmb3-login{max-width:620px;display:grid;gap:10px;}' +
@@ -615,6 +633,7 @@
         '.gkmb3-grid2{grid-template-columns:repeat(2,minmax(0,1fr));}' +
         '.gkmb3-bagtools{grid-template-columns:minmax(0,1fr) 190px;}' +
         '.gkmb3-recogrid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-insightgrid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
         '.gkmb3-bagform-row{grid-template-columns:minmax(0,1fr) auto;}' +
         '.gkmb3-movebox-row{grid-template-columns:minmax(0,1fr) auto;}' +
         '.gkmb3-grid4{grid-template-columns:repeat(4,minmax(0,1fr));}' +
@@ -3206,6 +3225,19 @@
         normal: 'Lite / normal vind',
         windy: 'Mye vind',
         mixed: 'Variert vind'
+      },
+      comfort: {
+        easy: 'Lettkastede discer',
+        balanced: 'Balanserte discer',
+        demanding: 'Krevende discer er OK'
+      },
+      goal: {
+        balanced: 'Balansert bag',
+        control: 'Mer kontroll',
+        distance: 'Mer lengde',
+        lines: 'Flere kastelinjer',
+        wind: 'Bedre i vind',
+        minimal: 'Enklere bag'
       }
     };
 
@@ -3237,10 +3269,28 @@
       throw_style: 'both',
       course_style: 'mixed',
       wind_style: 'mixed',
-      include_putter_recommendations: false
+      include_putter_recommendations: false,
+      brand_preference_mode: 'bag',
+      preferred_brand: '',
+      stability_preference_mode: 'auto',
+      preferred_stabilities: [
+        'understable',
+        'neutral',
+        'stable',
+        'overstable'
+      ],
+      disc_comfort: 'balanced',
+      improvement_goal: 'balanced'
     };
 
     var form = el('div', 'gkmb3-recoform');
+
+    form.appendChild(el(
+      'div',
+      'gkmb3-recohelp',
+      'Min Bag lærer både av svarene dine og av discene som faktisk ligger i bagen. Du kan la systemet lære automatisk, eller selv styre hvilke merker og stabiliteter du vil ha forslag på.'
+    ));
+
     var grid = el('div', 'gkmb3-recogrid');
 
     grid.appendChild(field(
@@ -3322,15 +3372,203 @@
       )
     ));
 
+    var brandMode = createRecoSelect(
+      'gkmb3-reco-brand-mode',
+      [
+        ['bag', 'Følg merkene i bagen min'],
+        ['specific', 'Prioriter ett bestemt merke'],
+        ['any', 'Merke spiller ingen rolle']
+      ],
+      profile.brand_preference_mode || 'bag'
+    );
+
+    grid.appendChild(field(
+      'Merker i forslagene',
+      brandMode
+    ));
+
+    var brandSelect = el('select', 'gkmb3-select');
+    brandSelect.id = 'gkmb3-reco-brand';
+
+    var emptyBrand = document.createElement('option');
+    emptyBrand.value = '';
+    emptyBrand.textContent = 'Velg merke…';
+    brandSelect.appendChild(emptyBrand);
+
+    var currentBrand = safe(profile.preferred_brand);
+
+    for (var b = 0; b < STATE.brands.length; b += 1) {
+      var brand = STATE.brands[b];
+
+      if (!brand || brand.is_custom || !brand.name) continue;
+
+      var brandOption = document.createElement('option');
+      brandOption.value = brand.name;
+      brandOption.textContent = brand.name;
+
+      if (
+        currentBrand.toLowerCase() ===
+        safe(brand.name).toLowerCase()
+      ) {
+        brandOption.selected = true;
+      }
+
+      brandSelect.appendChild(brandOption);
+    }
+
+    brandSelect.disabled =
+      (profile.brand_preference_mode || 'bag') !== 'specific';
+
+    grid.appendChild(field(
+      'Merke som skal prioriteres',
+      brandSelect
+    ));
+
+    var stabilityMode = createRecoSelect(
+      'gkmb3-reco-stability-mode',
+      [
+        ['auto', 'Lær av bagen min'],
+        ['custom', 'Jeg vil velge selv'],
+        ['all', 'Vurder alle stabiliteter']
+      ],
+      profile.stability_preference_mode || 'auto'
+    );
+
+    grid.appendChild(field(
+      'Stabilitet i anbefalingene',
+      stabilityMode
+    ));
+
+    grid.appendChild(field(
+      'Hva slags discer ønsker du?',
+      createRecoSelect(
+        'gkmb3-reco-comfort',
+        [
+          ['easy', 'Lettkastede og tilgivende'],
+          ['balanced', 'Balansert'],
+          ['demanding', 'Krevende discer er helt greit']
+        ],
+        profile.disc_comfort || 'balanced'
+      )
+    ));
+
+    grid.appendChild(field(
+      'Hva vil du først og fremst forbedre?',
+      createRecoSelect(
+        'gkmb3-reco-goal',
+        [
+          ['balanced', 'En balansert bag'],
+          ['control', 'Mer kontroll'],
+          ['distance', 'Mer lengde'],
+          ['lines', 'Kunne forme flere kastelinjer'],
+          ['wind', 'Spille bedre i vind'],
+          ['minimal', 'En enklere bag med færre roller']
+        ],
+        profile.improvement_goal || 'balanced'
+      )
+    ));
+
     form.appendChild(grid);
+
+    var stabilityBox = el('div', 'gkmb3-recochoice');
+
+    stabilityBox.appendChild(el(
+      'div',
+      'gkmb3-recochoice-title',
+      'Stabiliteter du trives med'
+    ));
+
+    var selectedStabilities =
+      Array.isArray(profile.preferred_stabilities)
+        ? profile.preferred_stabilities
+        : [
+            'understable',
+            'neutral',
+            'stable',
+            'overstable'
+          ];
+
+    var stabilityOptions = [
+      ['understable', 'Understabil'],
+      ['neutral', 'Nøytral'],
+      ['stable', 'Stabil'],
+      ['overstable', 'Overstabil']
+    ];
+
+    var checks = el('div', 'gkmb3-recochecks');
+    var customMode =
+      (profile.stability_preference_mode || 'auto') === 'custom';
+
+    for (var st = 0; st < stabilityOptions.length; st += 1) {
+      var checkLabel = el(
+        'label',
+        'gkmb3-recocheck' + (customMode ? '' : ' disabled')
+      );
+
+      var check = document.createElement('input');
+      check.type = 'checkbox';
+      check.id = 'gkmb3-reco-stab-' + stabilityOptions[st][0];
+      check.value = stabilityOptions[st][0];
+      check.checked =
+        selectedStabilities.indexOf(stabilityOptions[st][0]) !== -1;
+      check.disabled = !customMode;
+
+      checkLabel.appendChild(check);
+      checkLabel.appendChild(
+        document.createTextNode(stabilityOptions[st][1])
+      );
+      checks.appendChild(checkLabel);
+    }
+
+    stabilityBox.appendChild(checks);
+
+    stabilityBox.appendChild(el(
+      'div',
+      'gkmb3-help',
+      'Velger du selv, regnes andre stabiliteter ikke automatisk som hull i bagen. Du kan for eksempel velge bare understabil + nøytral.'
+    ));
+
+    form.appendChild(stabilityBox);
+
+    brandMode.onchange = function () {
+      brandSelect.disabled =
+        brandMode.value !== 'specific';
+    };
+
+    stabilityMode.onchange = function () {
+      var enabled =
+        stabilityMode.value === 'custom';
+
+      var inputs =
+        checks.querySelectorAll(
+          'input[type="checkbox"]'
+        );
+
+      for (var i = 0; i < inputs.length; i += 1) {
+        inputs[i].disabled = !enabled;
+
+        if (inputs[i].parentNode) {
+          inputs[i].parentNode.className =
+            'gkmb3-recocheck' +
+            (enabled ? '' : ' disabled');
+        }
+      }
+    };
 
     var putterLabel = el('label', 'gkmb3-check');
     var putter = document.createElement('input');
     putter.id = 'gkmb3-reco-putter';
     putter.type = 'checkbox';
-    putter.checked = !!profile.include_putter_recommendations;
+    putter.checked =
+      !!profile.include_putter_recommendations;
+
     putterLabel.appendChild(putter);
-    putterLabel.appendChild(document.createTextNode('Ta med puttere i anbefalingene'));
+    putterLabel.appendChild(
+      document.createTextNode(
+        'Ta med puttere i anbefalingene'
+      )
+    );
+
     form.appendChild(putterLabel);
 
     var actions = el('div', 'gkmb3-toolbar');
@@ -3338,26 +3576,212 @@
     var save = el(
       'button',
       'gkmb3-btn',
-      STATE.recoBusy ? 'Lagrer profil…' : 'Lagre spillerprofil'
+      STATE.recoBusy
+        ? 'Lagrer profil…'
+        : 'Lagre spillerprofil'
     );
+
     save.type = 'button';
     save.disabled = !!STATE.recoBusy;
     save.onclick = saveRecoProfile;
     actions.appendChild(save);
 
     if (STATE.recoProfile) {
-      var cancel = el('button', 'gkmb3-btn secondary', 'Avbryt');
+      var cancel = el(
+        'button',
+        'gkmb3-btn secondary',
+        'Avbryt'
+      );
+
       cancel.type = 'button';
       cancel.disabled = !!STATE.recoBusy;
+
       cancel.onclick = function () {
         STATE.recoProfileOpen = false;
         render();
       };
+
       actions.appendChild(cancel);
     }
 
     form.appendChild(actions);
+
     return form;
+  }
+
+  function renderRecoInsights() {
+    if (!STATE.discs.length) return null;
+
+    var box = el('section', 'gkmb3-insights');
+
+    box.appendChild(
+      el(
+        'h4',
+        '',
+        '🧠 Bagen din forteller oss…'
+      )
+    );
+
+    if (!STATE.recoInsightsLoaded) {
+      box.appendChild(el(
+        'div',
+        'gkmb3-note',
+        'Leser mønsteret i bagen din…'
+      ));
+      return box;
+    }
+
+    var insight = STATE.recoInsights;
+
+    if (!insight) {
+      box.appendChild(el(
+        'div',
+        'gkmb3-insight',
+        'Min Bag bruker fortsatt spillerprofilen din, men har ikke nok data til å beskrive bagmønsteret ennå.'
+      ));
+      return box;
+    }
+
+    var grid = el('div', 'gkmb3-insightgrid');
+    var profile = STATE.recoProfile || {};
+
+    var brandText = '';
+
+    if (
+      profile.brand_preference_mode === 'specific' &&
+      profile.preferred_brand
+    ) {
+      brandText =
+        '<strong>Merke:</strong> ' +
+        safe(profile.preferred_brand) +
+        ' prioriteres når en god match finnes på lager.';
+    } else if (
+      profile.brand_preference_mode === 'any'
+    ) {
+      brandText =
+        '<strong>Merke:</strong> Du har valgt at merke ikke skal påvirke forslagene.';
+    } else if (
+      insight.dominant_brand &&
+      Number(insight.dominant_brand_share || 0) >= 50
+    ) {
+      brandText =
+        '<strong>Merke:</strong> ' +
+        safe(insight.dominant_brand) +
+        ' utgjør ' +
+        Math.round(
+          Number(
+            insight.dominant_brand_share || 0
+          )
+        ) +
+        ' % av bagen og prioriteres når det finnes en god match.';
+    } else {
+      brandText =
+        '<strong>Merke:</strong> Bagen er blandet nok til at Min Bag ikke låser hovedforslagene til ett merke.';
+    }
+
+    var brandItem = el(
+      'div',
+      'gkmb3-insight'
+    );
+    brandItem.innerHTML = brandText;
+    grid.appendChild(brandItem);
+
+    var stabilities =
+      Array.isArray(insight.effective_stabilities)
+        ? insight.effective_stabilities
+        : [];
+
+    var stabilityNames = [];
+
+    for (var i = 0; i < stabilities.length; i += 1) {
+      stabilityNames.push(
+        recoStabilityLabel(
+          stabilities[i]
+        ).toLowerCase()
+      );
+    }
+
+    var stabilityItem = el(
+      'div',
+      'gkmb3-insight'
+    );
+
+    stabilityItem.innerHTML =
+      '<strong>Flights:</strong> ' +
+      (
+        stabilityNames.length
+          ? stabilityNames.join(', ')
+          : 'profilen din'
+      ) +
+      (
+        insight.stability_preference_source ===
+        'lært fra bagen'
+          ? ' – lært av discene du faktisk bruker.'
+          : insight.stability_preference_source ===
+            'valgt av deg'
+              ? ' – valgt av deg.'
+              : '.'
+      );
+
+    grid.appendChild(stabilityItem);
+
+    if (
+      insight.average_speed !== null &&
+      insight.average_speed !== undefined
+    ) {
+      var speedText =
+        '<strong>Speed:</strong> snitt ' +
+        Number(
+          insight.average_speed
+        )
+          .toFixed(1)
+          .replace('.', ',');
+
+      if (
+        insight.max_speed !== null &&
+        insight.max_speed !== undefined
+      ) {
+        speedText +=
+          ' · høyeste ' +
+          safe(insight.max_speed);
+      }
+
+      var speedItem = el(
+        'div',
+        'gkmb3-insight'
+      );
+
+      speedItem.innerHTML =
+        speedText + '.';
+
+      grid.appendChild(speedItem);
+    }
+
+    var goalItem = el(
+      'div',
+      'gkmb3-insight'
+    );
+
+    goalItem.innerHTML =
+      '<strong>Mål:</strong> ' +
+      recoLabel(
+        profile.improvement_goal ||
+        'balanced',
+        'goal'
+      ) +
+      ' · ' +
+      recoLabel(
+        profile.disc_comfort ||
+        'balanced',
+        'comfort'
+      ).toLowerCase() +
+      '.';
+
+    grid.appendChild(goalItem);
+
+    box.appendChild(grid);
+
+    return box;
   }
 
   function recoPriorityLabel(priority) {
@@ -3385,14 +3809,24 @@
   }
 
   function recommendationsForFinding(finding) {
-    if (!finding || finding.finding_type !== 'gap') return [];
+    if (
+      !finding ||
+      finding.finding_type !== 'gap'
+    ) {
+      return [];
+    }
 
     var rows = [];
 
-    for (var i = 0; i < STATE.recoProducts.length; i += 1) {
+    for (
+      var i = 0;
+      i < STATE.recoProducts.length;
+      i += 1
+    ) {
       var row = STATE.recoProducts[i];
 
       if (
+        row.recommendation_group !== 'fun' &&
         row.gap_disc_type === finding.disc_type &&
         row.gap_stability === finding.stability
       ) {
@@ -3401,7 +3835,10 @@
     }
 
     rows.sort(function (a, b) {
-      return Number(a.match_rank || 999) - Number(b.match_rank || 999);
+      return (
+        Number(a.match_rank || 999) -
+        Number(b.match_rank || 999)
+      );
     });
 
     return rows;
@@ -3656,32 +4093,92 @@
   }
 
   function renderFunRecommendations() {
-    var wrap = el('section', 'gkmb3-fun');
+    var wrap = el(
+      'section',
+      'gkmb3-fun'
+    );
 
-    var head = el('div', 'gkmb3-funhead');
+    var head = el(
+      'div',
+      'gkmb3-funhead'
+    );
+
     var textWrap = el('div', '');
 
-    textWrap.appendChild(el('h4', '', '🎲 Gøy å prøve'));
+    textWrap.appendChild(
+      el(
+        'h4',
+        '',
+        '🎲 Gøy å prøve'
+      )
+    );
+
     textWrap.appendChild(el(
       'p',
       '',
-      'Selv en komplett bag kan være morsom å utfordre. Her får du nye discmodeller, litt annerledes flights og små utfordringer bare fordi discgolf skal være gøy.'
+      'Her kan Min Bag være litt friere. Hvis hovedforslagene følger et merke du liker, kan sterke alternativer fra andre merker havne her – sammen med litt annerledes flights og små utfordringer.'
     ));
+
     head.appendChild(textWrap);
 
     var refresh = el(
       'button',
       'gkmb3-btn secondary',
-      STATE.funRecommendationsBusy ? 'Finner nye…' : '🎲 Gi meg 3 nye'
+      STATE.funRecommendationsBusy
+        ? 'Finner nye…'
+        : '🎲 Gi meg 3 nye'
     );
-    refresh.type = 'button';
-    refresh.disabled = !!STATE.funRecommendationsBusy;
-    refresh.onclick = refreshFunRecommendations;
-    head.appendChild(refresh);
 
+    refresh.type = 'button';
+    refresh.disabled =
+      !!STATE.funRecommendationsBusy;
+
+    refresh.onclick =
+      refreshFunRecommendations;
+
+    head.appendChild(refresh);
     wrap.appendChild(head);
 
-    if (!STATE.funRecommendationsLoaded) {
+    var v3Rows = [];
+
+    for (
+      var i = 0;
+      i < STATE.recoProducts.length;
+      i += 1
+    ) {
+      if (
+        STATE.recoProducts[i]
+          .recommendation_group === 'fun'
+      ) {
+        v3Rows.push(
+          STATE.recoProducts[i]
+        );
+      }
+    }
+
+    v3Rows.sort(function (a, b) {
+      if (
+        Number(a.gap_priority || 0) !==
+        Number(b.gap_priority || 0)
+      ) {
+        return (
+          Number(b.gap_priority || 0) -
+          Number(a.gap_priority || 0)
+        );
+      }
+
+      return (
+        Number(a.match_rank || 999) -
+        Number(b.match_rank || 999)
+      );
+    });
+
+    v3Rows = v3Rows.slice(0, 2);
+
+    if (
+      !STATE.funRecommendationsLoaded &&
+      !v3Rows.length
+    ) {
       wrap.appendChild(el(
         'div',
         'gkmb3-note',
@@ -3690,20 +4187,76 @@
       return wrap;
     }
 
-    var rows = STATE.funRecommendations.slice(0, 3);
+    var list = el(
+      'div',
+      'gkmb3-funlist'
+    );
 
-    // Denne kategorien skal aldri stå tom.
-    if (!rows.length) {
-      rows = [localFunChallenge()];
+    for (
+      var v = 0;
+      v < v3Rows.length;
+      v += 1
+    ) {
+      var alt = {};
+
+      for (var key in v3Rows[v]) {
+        if (
+          Object.prototype
+            .hasOwnProperty
+            .call(v3Rows[v], key)
+        ) {
+          alt[key] = v3Rows[v][key];
+        }
+      }
+
+      alt.fun_label =
+        'Alternativt merke';
+
+      alt.fun_reason =
+        v3Rows[v].match_reason ||
+        'En sterk match fra et annet merke enn hovedforslaget.';
+
+      list.appendChild(
+        renderFunRecommendation(
+          alt,
+          v
+        )
+      );
     }
 
-    var list = el('div', 'gkmb3-funlist');
+    var normalLimit =
+      v3Rows.length ? 1 : 3;
 
-    for (var i = 0; i < rows.length; i += 1) {
-      list.appendChild(renderFunRecommendation(rows[i], i));
+    var normalRows =
+      STATE.funRecommendations.slice(
+        0,
+        normalLimit
+      );
+
+    if (
+      !v3Rows.length &&
+      !normalRows.length
+    ) {
+      normalRows = [
+        localFunChallenge()
+      ];
+    }
+
+    for (
+      var n = 0;
+      n < normalRows.length;
+      n += 1
+    ) {
+      list.appendChild(
+        renderFunRecommendation(
+          normalRows[n],
+          v3Rows.length + n
+        )
+      );
     }
 
     wrap.appendChild(list);
+
     return wrap;
   }
 
@@ -4634,145 +5187,479 @@
   }
 
   function renderRecommendationPanel() {
-    var card = el('section', 'gkmb3-card gkmb3-reco gkmb3-section-anchor');
-    card.id = 'gkmb3-section-recommendations';
-    var head = el('div', 'gkmb3-recohead');
+    var card = el(
+      'section',
+      'gkmb3-card gkmb3-reco gkmb3-section-anchor'
+    );
+
+    card.id =
+      'gkmb3-section-recommendations';
+
+    var head = el(
+      'div',
+      'gkmb3-recohead'
+    );
+
     var headText = el('div', '');
 
-    headText.appendChild(el('h3', '', '🎯 Mine anbefalinger'));
+    headText.appendChild(
+      el(
+        'h3',
+        '',
+        '🎯 Mine anbefalinger'
+      )
+    );
+
     headText.appendChild(el(
       'p',
       '',
-      'Min Bag bruker spillerprofilen og discene i denne bagen til å finne manglende roller, unødvendig overlapp og konkrete forslag som passer deg.'
+      'Min Bag kombinerer spillerprofilen med det som faktisk ligger i bagen. Målet er ikke en teoretisk «perfekt» bag, men forslag som passer måten du ønsker å spille på.'
     ));
+
     head.appendChild(headText);
 
     if (STATE.recoProfile) {
       var edit = el(
         'button',
         'gkmb3-btn secondary',
-        STATE.recoProfileOpen ? 'Lukk profil' : '✏ Endre profil'
+        STATE.recoProfileOpen
+          ? 'Lukk profil'
+          : '✏ Endre profil'
       );
+
       edit.type = 'button';
       edit.disabled = !!STATE.recoBusy;
+
       edit.onclick = function () {
-        STATE.recoProfileOpen = !STATE.recoProfileOpen;
+        STATE.recoProfileOpen =
+          !STATE.recoProfileOpen;
+
         render();
       };
+
       head.appendChild(edit);
     }
 
     card.appendChild(head);
 
     if (!STATE.recoProfileLoaded) {
-      card.appendChild(el('div', 'gkmb3-empty', 'Laster spillerprofil…'));
+      card.appendChild(
+        el(
+          'div',
+          'gkmb3-empty',
+          'Laster spillerprofil…'
+        )
+      );
+
       return card;
     }
 
     if (!STATE.recoProfile) {
-      var intro = el('div', 'gkmb3-note');
+      var intro = el(
+        'div',
+        'gkmb3-note'
+      );
+
       intro.textContent =
-        'Svar på seks enkle spørsmål én gang. Profilen kan endres når som helst og brukes til å gjøre anbefalingene relevante for kastelengden og spillestilen din.';
+        'Lag spillerprofilen én gang. I tillegg til nivå og kastelengde kan du velge hvilke stabiliteter du trives med, om Min Bag skal følge merkene i bagen og hva du først og fremst ønsker å forbedre.';
+
       card.appendChild(intro);
-      card.appendChild(renderRecoProfileForm());
+      card.appendChild(
+        renderRecoProfileForm()
+      );
+
       return card;
     }
 
-    var pills = el('div', 'gkmb3-recopills');
-    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.skill_level, 'skill')));
-    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.throw_distance_band, 'distance')));
-    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.handedness, 'hand')));
-    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.throw_style, 'throwStyle')));
-    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.course_style, 'course')));
-    pills.appendChild(el('span', 'gkmb3-recopill', recoLabel(STATE.recoProfile.wind_style, 'wind')));
+    var pills = el(
+      'div',
+      'gkmb3-recopills'
+    );
 
-    if (STATE.recoProfile.include_putter_recommendations) {
-      pills.appendChild(el('span', 'gkmb3-recopill', 'Puttere med'));
+    pills.appendChild(el(
+      'span',
+      'gkmb3-recopill',
+      recoLabel(
+        STATE.recoProfile.skill_level,
+        'skill'
+      )
+    ));
+
+    pills.appendChild(el(
+      'span',
+      'gkmb3-recopill',
+      recoLabel(
+        STATE.recoProfile
+          .throw_distance_band,
+        'distance'
+      )
+    ));
+
+    pills.appendChild(el(
+      'span',
+      'gkmb3-recopill',
+      recoLabel(
+        STATE.recoProfile.handedness,
+        'hand'
+      )
+    ));
+
+    pills.appendChild(el(
+      'span',
+      'gkmb3-recopill',
+      recoLabel(
+        STATE.recoProfile.throw_style,
+        'throwStyle'
+      )
+    ));
+
+    pills.appendChild(el(
+      'span',
+      'gkmb3-recopill',
+      recoLabel(
+        STATE.recoProfile.course_style,
+        'course'
+      )
+    ));
+
+    pills.appendChild(el(
+      'span',
+      'gkmb3-recopill',
+      recoLabel(
+        STATE.recoProfile.wind_style,
+        'wind'
+      )
+    ));
+
+    pills.appendChild(el(
+      'span',
+      'gkmb3-recopill',
+      recoLabel(
+        STATE.recoProfile
+          .improvement_goal ||
+        'balanced',
+        'goal'
+      )
+    ));
+
+    pills.appendChild(el(
+      'span',
+      'gkmb3-recopill',
+      recoLabel(
+        STATE.recoProfile
+          .disc_comfort ||
+        'balanced',
+        'comfort'
+      )
+    ));
+
+    if (
+      STATE.recoProfile
+        .brand_preference_mode ===
+      'specific'
+    ) {
+      pills.appendChild(el(
+        'span',
+        'gkmb3-recopill',
+        'Merke: ' +
+        safe(
+          STATE.recoProfile
+            .preferred_brand ||
+          'valgt merke'
+        )
+      ));
+    } else if (
+      STATE.recoProfile
+        .brand_preference_mode ===
+      'any'
+    ) {
+      pills.appendChild(
+        el(
+          'span',
+          'gkmb3-recopill',
+          'Alle merker'
+        )
+      );
+    } else {
+      pills.appendChild(
+        el(
+          'span',
+          'gkmb3-recopill',
+          'Merke: følger bagen'
+        )
+      );
+    }
+
+    if (
+      STATE.recoProfile
+        .stability_preference_mode ===
+      'custom'
+    ) {
+      var selected =
+        Array.isArray(
+          STATE.recoProfile
+            .preferred_stabilities
+        )
+          ? STATE.recoProfile
+              .preferred_stabilities
+          : [];
+
+      var selectedLabels = [];
+
+      for (
+        var ps = 0;
+        ps < selected.length;
+        ps += 1
+      ) {
+        selectedLabels.push(
+          recoStabilityLabel(
+            selected[ps]
+          )
+        );
+      }
+
+      pills.appendChild(el(
+        'span',
+        'gkmb3-recopill',
+        'Flights: ' +
+        selectedLabels.join(' + ')
+      ));
+    } else if (
+      STATE.recoProfile
+        .stability_preference_mode ===
+      'all'
+    ) {
+      pills.appendChild(
+        el(
+          'span',
+          'gkmb3-recopill',
+          'Alle stabiliteter'
+        )
+      );
+    } else {
+      pills.appendChild(
+        el(
+          'span',
+          'gkmb3-recopill',
+          'Flights: lærer av bagen'
+        )
+      );
+    }
+
+    if (
+      STATE.recoProfile
+        .include_putter_recommendations
+    ) {
+      pills.appendChild(
+        el(
+          'span',
+          'gkmb3-recopill',
+          'Puttere med'
+        )
+      );
     }
 
     card.appendChild(pills);
 
     if (STATE.recoProfileOpen) {
-      card.appendChild(renderRecoProfileForm());
+      card.appendChild(
+        renderRecoProfileForm()
+      );
+
       return card;
     }
 
-    if (STATE.discs.length) {
-      var featureLinks = el('div', 'gkmb3-featurelinks');
+    var insightBox =
+      renderRecoInsights();
 
-      var scoreLink = el('button', 'gkmb3-btn secondary', '🏆 Bag-score');
+    if (insightBox) {
+      card.appendChild(insightBox);
+    }
+
+    if (STATE.discs.length) {
+      var featureLinks = el(
+        'div',
+        'gkmb3-featurelinks'
+      );
+
+      var scoreLink = el(
+        'button',
+        'gkmb3-btn secondary',
+        '🏆 Bag-score'
+      );
+
       scoreLink.type = 'button';
+
       scoreLink.onclick = function () {
         openAppView('score');
       };
-      featureLinks.appendChild(scoreLink);
 
-      var throwLink = el('button', 'gkmb3-btn secondary', '🥏 Hva bør jeg kaste?');
+      featureLinks.appendChild(
+        scoreLink
+      );
+
+      var throwLink = el(
+        'button',
+        'gkmb3-btn secondary',
+        '🥏 Hva bør jeg kaste?'
+      );
+
       throwLink.type = 'button';
+
       throwLink.onclick = function () {
         openAppView('throw');
       };
-      featureLinks.appendChild(throwLink);
 
-      var roundLink = el('button', 'gkmb3-btn secondary', '🧳 Rundebag');
+      featureLinks.appendChild(
+        throwLink
+      );
+
+      var roundLink = el(
+        'button',
+        'gkmb3-btn secondary',
+        '🧳 Rundebag'
+      );
+
       roundLink.type = 'button';
+
       roundLink.onclick = function () {
         openAppView('roundbag');
       };
-      featureLinks.appendChild(roundLink);
+
+      featureLinks.appendChild(
+        roundLink
+      );
 
       card.appendChild(featureLinks);
     }
 
     if (!STATE.discs.length) {
-      var emptyBag = el('div', 'gkmb3-empty');
-      emptyBag.appendChild(el('strong', '', 'Legg noen discer i bagen først'));
+      var emptyBag = el(
+        'div',
+        'gkmb3-empty'
+      );
+
+      emptyBag.appendChild(
+        el(
+          'strong',
+          '',
+          'Legg noen discer i bagen først'
+        )
+      );
+
       emptyBag.appendChild(el(
         'div',
         '',
-        'Når bagen har discer ser Min Bag på hvilke kast og roller du dekker, hvilke speed-områder du har og hvor discer gjør mye av den samme jobben.'
+        'Når bagen har discer lærer Min Bag blant annet hvilke stabiliteter, merker og speed-områder du faktisk bruker.'
       ));
+
       card.appendChild(emptyBag);
-      card.appendChild(renderFunRecommendations());
+      card.appendChild(
+        renderFunRecommendations()
+      );
+
       return card;
     }
 
     if (!STATE.recoLoaded) {
-      card.appendChild(el('div', 'gkmb3-empty', 'Analyserer bagen…'));
+      card.appendChild(
+        el(
+          'div',
+          'gkmb3-empty',
+          'Analyserer bagen…'
+        )
+      );
+
       return card;
     }
 
     if (!STATE.recoFindings.length) {
-      var clean = el('div', 'gkmb3-empty');
-      clean.appendChild(el('strong', '', 'Ingen tydelige hull funnet'));
+      var clean = el(
+        'div',
+        'gkmb3-empty'
+      );
+
+      clean.appendChild(
+        el(
+          'strong',
+          '',
+          'Ingen tydelige hull funnet'
+        )
+      );
+
       clean.appendChild(el(
         'div',
         '',
-        'Analysen finner ingen klare mangler eller kraftig overlapp i denne bagen akkurat nå.'
+        'Bagen dekker de viktigste rollene for spillerprofilen og preferansene dine uten tydelig problematisk overlapp.'
       ));
+
       card.appendChild(clean);
-      card.appendChild(renderFunRecommendations());
+      card.appendChild(
+        renderFunRecommendations()
+      );
+
       return card;
     }
 
-    var list = el('div', 'gkmb3-recolist');
-    var max = Math.min(6, STATE.recoFindings.length);
+    var list = el(
+      'div',
+      'gkmb3-recolist'
+    );
 
-    for (var i = 0; i < max; i += 1) {
-      var finding = STATE.recoFindings[i];
+    var max = Math.min(
+      6,
+      STATE.recoFindings.length
+    );
+
+    for (
+      var i = 0;
+      i < max;
+      i += 1
+    ) {
+      var finding =
+        STATE.recoFindings[i];
+
       var item = el(
         'div',
-        'gkmb3-recofinding ' + (finding.finding_type === 'overlap' ? 'overlap' : 'gap')
+        'gkmb3-recofinding ' +
+        (
+          finding.finding_type ===
+          'overlap'
+            ? 'overlap'
+            : 'gap'
+        )
       );
 
-      var itemHead = el('div', 'gkmb3-recofinding-head');
-      var title = (finding.finding_type === 'overlap' ? '♻️ ' : '🎯 ') + safe(finding.title);
-      itemHead.appendChild(el('div', 'gkmb3-recofinding-title', title));
+      var itemHead = el(
+        'div',
+        'gkmb3-recofinding-head'
+      );
+
+      var title =
+        (
+          finding.finding_type ===
+          'overlap'
+            ? '♻️ '
+            : '🎯 '
+        ) +
+        safe(finding.title);
+
+      itemHead.appendChild(
+        el(
+          'div',
+          'gkmb3-recofinding-title',
+          title
+        )
+      );
+
       itemHead.appendChild(el(
         'div',
         'gkmb3-recofinding-priority',
-        recoPriorityLabel(finding.priority)
+        recoPriorityLabel(
+          finding.priority
+        )
       ));
+
       item.appendChild(itemHead);
 
       item.appendChild(el(
@@ -4782,37 +5669,90 @@
       ));
 
       var meta = [];
-      if (finding.disc_type) meta.push(recoTypeLabel(finding.disc_type));
-      if (finding.stability) meta.push(recoStabilityLabel(finding.stability));
 
-      if (
-        finding.target_speed_min !== null &&
-        finding.target_speed_min !== undefined &&
-        finding.target_speed_max !== null &&
-        finding.target_speed_max !== undefined
-      ) {
-        var minSpeed = Number(finding.target_speed_min);
-        var maxSpeed = Number(finding.target_speed_max);
+      if (finding.disc_type) {
         meta.push(
-          minSpeed === maxSpeed
-            ? 'Speed ' + minSpeed
-            : 'Speed ' + minSpeed + '–' + maxSpeed
+          recoTypeLabel(
+            finding.disc_type
+          )
         );
       }
 
-      if (finding.finding_type === 'overlap' && Number(finding.disc_count) > 0) {
-        meta.push(Number(finding.disc_count) + ' discer');
+      if (finding.stability) {
+        meta.push(
+          recoStabilityLabel(
+            finding.stability
+          )
+        );
+      }
+
+      if (
+        finding.target_speed_min !==
+          null &&
+        finding.target_speed_min !==
+          undefined &&
+        finding.target_speed_max !==
+          null &&
+        finding.target_speed_max !==
+          undefined
+      ) {
+        var minSpeed =
+          Number(
+            finding.target_speed_min
+          );
+
+        var maxSpeed =
+          Number(
+            finding.target_speed_max
+          );
+
+        meta.push(
+          minSpeed === maxSpeed
+            ? 'Speed ' + minSpeed
+            : 'Speed ' +
+              minSpeed +
+              '–' +
+              maxSpeed
+        );
+      }
+
+      if (
+        finding.finding_type ===
+          'overlap' &&
+        Number(
+          finding.disc_count
+        ) > 0
+      ) {
+        meta.push(
+          Number(
+            finding.disc_count
+          ) +
+          ' discer'
+        );
       }
 
       if (meta.length) {
-        item.appendChild(el('div', 'gkmb3-recofinding-meta', meta.join(' · ')));
+        item.appendChild(el(
+          'div',
+          'gkmb3-recofinding-meta',
+          meta.join(' · ')
+        ));
       }
 
-      if (finding.finding_type === 'overlap') {
-        var overlapKey = overlapFindingKey(finding);
-        var overlapOpen = STATE.expandedOverlapKey === overlapKey;
+      if (
+        finding.finding_type ===
+        'overlap'
+      ) {
+        var overlapKey =
+          overlapFindingKey(finding);
 
-        item.className += ' clickable';
+        var overlapOpen =
+          STATE.expandedOverlapKey ===
+          overlapKey;
+
+        item.className +=
+          ' clickable';
+
         item.appendChild(el(
           'div',
           'gkmb3-overlap-toggle',
@@ -4821,59 +5761,87 @@
             : '▼ Trykk for å se hvilke discer'
         ));
 
-        item.onclick = (function (key) {
-          return function (event) {
-            if (
-              event &&
-              event.target &&
-              (
-                event.target.tagName === 'BUTTON' ||
-                event.target.closest &&
-                event.target.closest('button')
-              )
-            ) {
-              return;
-            }
+        item.onclick =
+          (function (key) {
+            return function (event) {
+              if (
+                event &&
+                event.target &&
+                (
+                  event.target.tagName ===
+                    'BUTTON' ||
+                  event.target.closest &&
+                  event.target.closest(
+                    'button'
+                  )
+                )
+              ) {
+                return;
+              }
 
-            STATE.expandedOverlapKey =
-              STATE.expandedOverlapKey === key
-                ? ''
-                : key;
+              STATE.expandedOverlapKey =
+                STATE.expandedOverlapKey ===
+                key
+                  ? ''
+                  : key;
 
-            render();
-          };
-        })(overlapKey);
+              render();
+            };
+          })(overlapKey);
 
         if (overlapOpen) {
           item.appendChild(
-            renderOverlapDetails(finding)
+            renderOverlapDetails(
+              finding
+            )
           );
         }
       }
 
-      if (finding.finding_type === 'gap') {
-        if (!STATE.recoProductsLoaded) {
+      if (
+        finding.finding_type ===
+        'gap'
+      ) {
+        if (
+          !STATE.recoProductsLoaded
+        ) {
           item.appendChild(el(
             'div',
             'gkmb3-note',
             'Finner de beste GolfKongen-matchene…'
           ));
         } else {
-          var matches = recommendationsForFinding(finding);
+          var matches =
+            recommendationsForFinding(
+              finding
+            );
 
           if (matches.length) {
-            var matchList = el('div', 'gkmb3-recomatches');
+            var matchList = el(
+              'div',
+              'gkmb3-recomatches'
+            );
 
-            for (var j = 0; j < matches.length; j += 1) {
-              matchList.appendChild(renderRecommendationMatch(matches[j]));
+            for (
+              var j = 0;
+              j < matches.length;
+              j += 1
+            ) {
+              matchList.appendChild(
+                renderRecommendationMatch(
+                  matches[j]
+                )
+              );
             }
 
-            item.appendChild(matchList);
+            item.appendChild(
+              matchList
+            );
           } else {
             item.appendChild(el(
               'div',
               'gkmb3-note',
-              'Ingen god lagerført GolfKongen-match for akkurat dette gapet nå.'
+              'Ingen god lagerført GolfKongen-match for akkurat denne rollen nå.'
             ));
           }
         }
@@ -4883,7 +5851,10 @@
     }
 
     card.appendChild(list);
-    card.appendChild(renderFunRecommendations());
+    card.appendChild(
+      renderFunRecommendations()
+    );
+
     return card;
   }
 
@@ -5374,6 +6345,7 @@
     return card;
   }
 
+
   function renderCatalogPanel() {
     var wrap = el('div', '');
 
@@ -5416,7 +6388,7 @@
       results.appendChild(el(
         'div',
         'gkmb3-note',
-        'Søk etter discer som finnes hos GolfKongen. Treffene hentes fra nettbutikken vår.'
+        'Søk etter discer GolfKongen har eller tidligere har hatt. Da kan bilde og flight-tall fylles inn automatisk, også for utgåtte modeller.'
       ));
     }
 
@@ -5426,15 +6398,29 @@
   }
 
   function renderCatalogResult(product) {
-    var row = el('article', 'gkmb3-result');
+    var row = el(
+      'article',
+      'gkmb3-result'
+    );
 
-    var image = el('div', 'gkmb3-resultimg');
+    var image = el(
+      'div',
+      'gkmb3-resultimg'
+    );
 
     if (product.image_url) {
-      var img = document.createElement('img');
-      img.src = product.image_url;
-      img.alt = product.product_name || 'Disc';
+      var img =
+        document.createElement('img');
+
+      img.src =
+        product.image_url;
+
+      img.alt =
+        product.product_name ||
+        'Disc';
+
       img.loading = 'lazy';
+
       image.appendChild(img);
     } else {
       image.textContent = 'GK';
@@ -5447,36 +6433,133 @@
     body.appendChild(el(
       'div',
       'gkmb3-resulttitle',
-      product.product_name || 'Ukjent disc'
+      product.product_name ||
+      'Ukjent disc'
     ));
 
     var sub = [];
-    if (product.brand) sub.push(product.brand);
-    if (product.plastic) sub.push(product.plastic);
-    sub.push(discTypeLabel(product.disc_type));
 
-    body.appendChild(el('div', 'gkmb3-resultsub', sub.join(' · ')));
-    body.appendChild(renderFlight(product.speed, product.glide, product.turn, product.fade));
-
-    if (product.price_nok !== null && product.price_nok !== undefined) {
-      body.appendChild(el('div', 'gkmb3-price', product.price_nok + ' kr'));
+    if (product.brand) {
+      sub.push(product.brand);
     }
 
-    var toolbar = el('div', 'gkmb3-toolbar');
-    toolbar.style.marginTop = '8px';
+    if (product.plastic) {
+      sub.push(product.plastic);
+    }
 
-    var add = el('button', 'gkmb3-btn', 'Legg i bag');
+    sub.push(
+      discTypeLabel(
+        product.disc_type
+      )
+    );
+
+    body.appendChild(el(
+      'div',
+      'gkmb3-resultsub',
+      sub.join(' · ')
+    ));
+
+    var availability =
+      product.availability_status ||
+      (
+        product.is_active === false
+          ? 'historical'
+          : product.is_in_stock === false
+            ? 'sold_out'
+            : 'available'
+      );
+
+    if (
+      availability ===
+      'historical'
+    ) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-availability historical',
+        'Tidligere hos GolfKongen'
+      ));
+    } else if (
+      availability ===
+      'sold_out'
+    ) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-availability soldout',
+        'Utsolgt akkurat nå'
+      ));
+    } else {
+      body.appendChild(el(
+        'div',
+        'gkmb3-availability available',
+        'På lager'
+      ));
+    }
+
+    body.appendChild(
+      renderFlight(
+        product.speed,
+        product.glide,
+        product.turn,
+        product.fade
+      )
+    );
+
+    if (
+      availability !==
+        'historical' &&
+      product.price_nok !== null &&
+      product.price_nok !== undefined
+    ) {
+      body.appendChild(el(
+        'div',
+        'gkmb3-price',
+        product.price_nok +
+        ' kr'
+      ));
+    }
+
+    var toolbar = el(
+      'div',
+      'gkmb3-toolbar'
+    );
+
+    toolbar.style.marginTop =
+      '8px';
+
+    var add = el(
+      'button',
+      'gkmb3-btn',
+      'Legg i bag'
+    );
+
     add.type = 'button';
+
     add.onclick = function () {
       addCatalogDisc(product);
     };
+
     toolbar.appendChild(add);
 
-    if (product.product_url) {
-      var open = el('a', 'gkmb3-btn secondary', 'Se produkt');
-      open.href = product.product_url;
-      open.target = '_blank';
-      open.rel = 'noopener';
+    if (
+      availability !==
+        'historical' &&
+      product.product_url
+    ) {
+      var open = el(
+        'a',
+        'gkmb3-btn secondary',
+        'Se produkt'
+      );
+
+      open.href =
+        product.product_url;
+
+      open.target =
+        '_blank';
+
+      open.rel =
+        'noopener';
+
       toolbar.appendChild(open);
     }
 
@@ -5740,6 +6823,8 @@
     STATE.recoProducts = [];
     STATE.recoProductsLoaded = false;
     STATE.recoProductsError = '';
+    STATE.recoInsights = null;
+    STATE.recoInsightsLoaded = false;
     STATE.funRecommendations = [];
     STATE.funRecommendationsLoaded = false;
     STATE.funRecommendationsError = '';
@@ -5877,19 +6962,40 @@
       return Promise.resolve();
     }
 
-    var userContext = captureUserContext();
+    var userContext =
+      captureUserContext();
 
-    return supabaseClient.rpc('minbag_get_reco_profile')
+    return supabaseClient
+      .rpc(
+        'minbag_get_reco_profile_v3'
+      )
       .then(function (res) {
-        if (!isCurrentUserContext(userContext)) return;
-        if (res.error) throw res.error;
+        if (
+          !isCurrentUserContext(
+            userContext
+          )
+        ) {
+          return;
+        }
 
-        var rows = res.data || [];
-        STATE.recoProfile = rows.length ? rows[0] : null;
-        STATE.recoProfileLoaded = true;
+        if (res.error) {
+          throw res.error;
+        }
+
+        var rows =
+          res.data || [];
+
+        STATE.recoProfile =
+          rows.length
+            ? rows[0]
+            : null;
+
+        STATE.recoProfileLoaded =
+          true;
 
         if (!STATE.recoProfile) {
-          STATE.recoProfileOpen = true;
+          STATE.recoProfileOpen =
+            true;
         }
       });
   }
@@ -6823,116 +7929,404 @@
   function loadGapAnalysis() {
     STATE.recoFindings = [];
     STATE.recoLoaded = false;
+
     STATE.recoProducts = [];
     STATE.recoProductsLoaded = false;
     STATE.recoProductsError = '';
+
+    STATE.recoInsights = null;
+    STATE.recoInsightsLoaded = false;
+
     STATE.funRecommendations = [];
     STATE.funRecommendationsLoaded = false;
     STATE.funRecommendationsError = '';
+
     STATE.bagScore = null;
     STATE.bagScoreLoaded = false;
     STATE.bagScoreError = '';
 
-    if (!STATE.user || !STATE.activeBagId || !STATE.recoProfile) {
+    if (
+      !STATE.user ||
+      !STATE.activeBagId ||
+      !STATE.recoProfile
+    ) {
       STATE.recoLoaded = true;
       STATE.recoProductsLoaded = true;
+      STATE.recoInsightsLoaded = true;
       STATE.funRecommendationsLoaded = true;
       STATE.bagScoreLoaded = true;
+
       return Promise.resolve();
     }
 
-    var userContext = captureUserContext();
-    var bagId = STATE.activeBagId;
+    var userContext =
+      captureUserContext();
 
-    var gapPromise = supabaseClient.rpc(
-      'minbag_get_gap_analysis',
-      {
-        p_bag_id: bagId
-      }
-    ).then(function (res) {
-      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
-      if (res.error) throw res.error;
-      STATE.recoFindings = res.data || [];
-      STATE.recoLoaded = true;
-    }).catch(function (err) {
-      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
-      STATE.recoFindings = [];
-      STATE.recoLoaded = true;
-      console.warn('[GK MIN BAG V3] Gap-analyse feilet', err);
-    });
+    var bagId =
+      STATE.activeBagId;
 
-    var productPromise = supabaseClient.rpc(
-      'minbag_get_product_recommendations',
-      {
-        p_bag_id: bagId,
-        p_limit_per_gap: 3
-      }
-    ).then(function (res) {
-      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
-      if (res.error) throw res.error;
-      STATE.recoProducts = res.data || [];
-      STATE.recoProductsLoaded = true;
-    }).catch(function (err) {
-      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
-      STATE.recoProducts = [];
-      STATE.recoProductsLoaded = true;
-      STATE.recoProductsError = errorMessage(err);
-      console.warn(
-        '[GK MIN BAG V3] Produktanbefalinger feilet',
-        err
-      );
-    });
+    var gapPromise =
+      supabaseClient.rpc(
+        'minbag_get_gap_analysis_v3',
+        {
+          p_bag_id: bagId
+        }
+      )
+      .then(function (res) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
 
-    var funPromise = loadFunRecommendations();
+        if (res.error) {
+          throw res.error;
+        }
 
-    var scorePromise = supabaseClient.rpc(
-      'minbag_get_bag_score',
-      {
-        p_bag_id: bagId
-      }
-    ).then(function (res) {
-      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
-      if (res.error) throw res.error;
+        STATE.recoFindings =
+          res.data || [];
 
-      var rows = res.data || [];
-      STATE.bagScore = rows.length ? rows[0] : null;
-      STATE.bagScoreLoaded = true;
-    }).catch(function (err) {
-      if (!isCurrentUserContext(userContext) || STATE.activeBagId !== bagId) return;
-      STATE.bagScore = null;
-      STATE.bagScoreLoaded = true;
-      STATE.bagScoreError = errorMessage(err);
+        STATE.recoLoaded =
+          true;
+      })
+      .catch(function (err) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
 
-      console.warn(
-        '[GK MIN BAG V3] Bag-score feilet',
-        err
-      );
-    });
+        STATE.recoFindings = [];
+        STATE.recoLoaded = true;
+
+        console.warn(
+          '[GK MIN BAG V3] Personlig gap-analyse feilet',
+          err
+        );
+      });
+
+    var productPromise =
+      supabaseClient.rpc(
+        'minbag_get_product_recommendations_v3',
+        {
+          p_bag_id: bagId,
+          p_limit_per_gap: 3
+        }
+      )
+      .then(function (res) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
+
+        if (res.error) {
+          throw res.error;
+        }
+
+        STATE.recoProducts =
+          res.data || [];
+
+        STATE.recoProductsLoaded =
+          true;
+      })
+      .catch(function (err) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
+
+        STATE.recoProducts = [];
+        STATE.recoProductsLoaded =
+          true;
+
+        STATE.recoProductsError =
+          errorMessage(err);
+
+        console.warn(
+          '[GK MIN BAG V3] Personlige produktanbefalinger feilet',
+          err
+        );
+      });
+
+    var insightPromise =
+      supabaseClient.rpc(
+        'minbag_get_recommendation_insights_v3',
+        {
+          p_bag_id: bagId
+        }
+      )
+      .then(function (res) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
+
+        if (res.error) {
+          throw res.error;
+        }
+
+        var rows =
+          res.data || [];
+
+        STATE.recoInsights =
+          rows.length
+            ? rows[0]
+            : null;
+
+        STATE.recoInsightsLoaded =
+          true;
+      })
+      .catch(function (err) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
+
+        STATE.recoInsights = null;
+        STATE.recoInsightsLoaded =
+          true;
+
+        console.warn(
+          '[GK MIN BAG V3] Baginnsikt feilet',
+          err
+        );
+      });
+
+    var funPromise =
+      loadFunRecommendations();
+
+    var scorePromise =
+      supabaseClient.rpc(
+        'minbag_get_bag_score_v2',
+        {
+          p_bag_id: bagId
+        }
+      )
+      .then(function (res) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
+
+        if (res.error) {
+          throw res.error;
+        }
+
+        var rows =
+          res.data || [];
+
+        STATE.bagScore =
+          rows.length
+            ? rows[0]
+            : null;
+
+        STATE.bagScoreLoaded =
+          true;
+      })
+      .catch(function (err) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
+
+        STATE.bagScore = null;
+        STATE.bagScoreLoaded =
+          true;
+
+        STATE.bagScoreError =
+          errorMessage(err);
+
+        console.warn(
+          '[GK MIN BAG V3] Personlig Bag-score feilet',
+          err
+        );
+      });
 
     return Promise.all([
       gapPromise,
       productPromise,
+      insightPromise,
       funPromise,
       scorePromise
     ]);
   }
 
   function saveRecoProfile() {
-    if (!STATE.user || STATE.recoBusy) return;
+    if (
+      !STATE.user ||
+      STATE.recoBusy
+    ) {
+      return;
+    }
 
-    // Les svarene FØR render(), ellers blir skjemaet bygget opp på nytt
-    // og brukerens valgte verdier kan falle tilbake til profil/default.
+    var brandMode =
+      getInputValue(
+        'gkmb3-reco-brand-mode'
+      ) ||
+      'bag';
+
+    var preferredBrand =
+      getInputValue(
+        'gkmb3-reco-brand'
+      );
+
+    var stabilityMode =
+      getInputValue(
+        'gkmb3-reco-stability-mode'
+      ) ||
+      'auto';
+
+    var stabilityKeys = [
+      'understable',
+      'neutral',
+      'stable',
+      'overstable'
+    ];
+
+    var preferredStabilities = [];
+
+    for (
+      var i = 0;
+      i < stabilityKeys.length;
+      i += 1
+    ) {
+      if (
+        getChecked(
+          'gkmb3-reco-stab-' +
+          stabilityKeys[i]
+        )
+      ) {
+        preferredStabilities.push(
+          stabilityKeys[i]
+        );
+      }
+    }
+
+    if (
+      brandMode === 'specific' &&
+      !preferredBrand
+    ) {
+      status(
+        'Velg hvilket merke du vil prioritere.',
+        'err'
+      );
+      return;
+    }
+
+    if (
+      stabilityMode === 'custom' &&
+      !preferredStabilities.length
+    ) {
+      status(
+        'Velg minst én stabilitet du trives med.',
+        'err'
+      );
+      return;
+    }
+
     var payload = {
-      p_skill_level: getInputValue('gkmb3-reco-skill'),
-      p_throw_distance_band: getInputValue('gkmb3-reco-distance'),
-      p_handedness: getInputValue('gkmb3-reco-hand'),
-      p_throw_style: getInputValue('gkmb3-reco-throw-style'),
-      p_course_style: getInputValue('gkmb3-reco-course'),
-      p_wind_style: getInputValue('gkmb3-reco-wind'),
-      p_include_putter_recommendations: getChecked('gkmb3-reco-putter')
+      p_skill_level:
+        getInputValue(
+          'gkmb3-reco-skill'
+        ),
+
+      p_throw_distance_band:
+        getInputValue(
+          'gkmb3-reco-distance'
+        ),
+
+      p_handedness:
+        getInputValue(
+          'gkmb3-reco-hand'
+        ),
+
+      p_throw_style:
+        getInputValue(
+          'gkmb3-reco-throw-style'
+        ),
+
+      p_course_style:
+        getInputValue(
+          'gkmb3-reco-course'
+        ),
+
+      p_wind_style:
+        getInputValue(
+          'gkmb3-reco-wind'
+        ),
+
+      p_include_putter_recommendations:
+        getChecked(
+          'gkmb3-reco-putter'
+        ),
+
+      p_brand_preference_mode:
+        brandMode,
+
+      p_preferred_brand:
+        brandMode === 'specific'
+          ? preferredBrand
+          : null,
+
+      p_stability_preference_mode:
+        stabilityMode,
+
+      p_preferred_stabilities:
+        preferredStabilities,
+
+      p_disc_comfort:
+        getInputValue(
+          'gkmb3-reco-comfort'
+        ) ||
+        'balanced',
+
+      p_improvement_goal:
+        getInputValue(
+          'gkmb3-reco-goal'
+        ) ||
+        'balanced'
     };
 
     STATE.recoBusy = true;
+
     STATE.roundBagCourseStyle = '';
     STATE.roundBagWindStyle = '';
     STATE.roundBagFocus = '';
@@ -6940,28 +8334,51 @@
     STATE.roundBagHasBuilt = false;
     STATE.roundBagBusy = false;
     STATE.roundBagError = '';
-    render();
-    status('Lagrer spillerprofil…');
 
-    supabaseClient.rpc('minbag_set_reco_profile', payload)
+    render();
+
+    status(
+      'Lagrer spillerprofil…'
+    );
+
+    supabaseClient
+      .rpc(
+        'minbag_set_reco_profile_v3',
+        payload
+      )
       .then(function (res) {
-        if (res.error) throw res.error;
+        if (res.error) {
+          throw res.error;
+        }
 
         return loadRecoProfile();
       })
       .then(function () {
-        STATE.recoProfileOpen = false;
+        STATE.recoProfileOpen =
+          false;
+
         return loadGapAnalysis();
       })
       .then(function () {
         STATE.recoBusy = false;
+
         render();
-        status('Spillerprofil lagret og bagen analysert.', 'ok');
+
+        status(
+          'Spillerprofil lagret og bagen analysert på nytt.',
+          'ok'
+        );
       })
       .catch(function (err) {
         STATE.recoBusy = false;
+
         render();
-        status('Kunne ikke lagre spillerprofil: ' + errorMessage(err), 'err');
+
+        status(
+          'Kunne ikke lagre spillerprofil: ' +
+          errorMessage(err),
+          'err'
+        );
       });
   }
 
@@ -7469,6 +8886,8 @@
       STATE.recoProducts = [];
       STATE.recoProductsLoaded = true;
       STATE.recoProductsError = '';
+      STATE.recoInsights = null;
+      STATE.recoInsightsLoaded = true;
       STATE.funRecommendations = [];
       STATE.funRecommendationsLoaded = true;
       STATE.funRecommendationsError = '';
@@ -7537,6 +8956,8 @@
     STATE.recoProducts = [];
     STATE.recoProductsLoaded = false;
     STATE.recoProductsError = '';
+    STATE.recoInsights = null;
+    STATE.recoInsightsLoaded = false;
     STATE.funRecommendations = [];
     STATE.funRecommendationsLoaded = false;
     STATE.funRecommendationsError = '';
@@ -7935,42 +9356,91 @@
 
   function searchCatalog() {
     if (!STATE.activeBagId) {
-      status('Mangler aktiv bag.', 'err');
+      status(
+        'Mangler aktiv bag.',
+        'err'
+      );
       return;
     }
 
-    var query = getInputValue('gkmb3-catalog-query');
-    var type = getInputValue('gkmb3-catalog-type');
+    var query =
+      getInputValue(
+        'gkmb3-catalog-query'
+      );
+
+    var type =
+      getInputValue(
+        'gkmb3-catalog-type'
+      );
 
     STATE.catalogQuery = query;
     STATE.catalogType = type;
+    STATE.addDiscOpen = true;
 
-    setLoading(true, 'Søker i GolfKongen-katalogen…');
+    setLoading(
+      true,
+      'Søker blant GolfKongen-discer…'
+    );
 
-    supabaseClient.rpc('minbag_search_catalog', {
-      p_query: query || null,
-      p_disc_type: type || null,
-      p_limit: CONFIG.CATALOG_LIMIT
-    }).then(function (res) {
-      setLoading(false);
+    supabaseClient
+      .rpc(
+        'minbag_search_catalog_for_bag',
+        {
+          p_query:
+            query || null,
 
-      if (res.error) {
-        status('Kunne ikke søke etter discer akkurat nå: ' + errorMessage(res.error), 'err');
-        return;
-      }
+          p_disc_type:
+            type || null,
 
-      STATE.catalogResults = res.data || [];
-      render();
+          p_limit:
+            CONFIG.CATALOG_LIMIT
+        }
+      )
+      .then(function (res) {
+        setLoading(false);
 
-      if (STATE.catalogResults.length) {
-        status('Fant ' + STATE.catalogResults.length + ' treff.', 'ok');
-      } else {
-        status('Fant ingen treff.', '');
-      }
-    }).catch(function (err) {
-      setLoading(false);
-      status('Kunne ikke søke etter discer akkurat nå: ' + errorMessage(err), 'err');
-    });
+        if (res.error) {
+          status(
+            'Kunne ikke søke etter discer akkurat nå: ' +
+            errorMessage(
+              res.error
+            ),
+            'err'
+          );
+
+          return;
+        }
+
+        STATE.catalogResults =
+          res.data || [];
+
+        render();
+
+        if (
+          STATE.catalogResults.length
+        ) {
+          status(
+            'Fant ' +
+            STATE.catalogResults.length +
+            ' treff.',
+            'ok'
+          );
+        } else {
+          status(
+            'Fant ingen treff.',
+            ''
+          );
+        }
+      })
+      .catch(function (err) {
+        setLoading(false);
+
+        status(
+          'Kunne ikke søke etter discer akkurat nå: ' +
+          errorMessage(err),
+          'err'
+        );
+      });
   }
 
   function addCatalogDisc(product) {
@@ -8037,7 +9507,7 @@
 
         status('Legger disc i ' + targetName + '…');
 
-        return supabaseClient.rpc('minbag_add_catalog_disc', {
+        return supabaseClient.rpc('minbag_add_catalog_disc_v2', {
           p_bag_id: targetBagId,
           p_catalog_id: product.id,
           p_weight_grams: null,
