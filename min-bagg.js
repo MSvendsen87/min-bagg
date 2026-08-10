@@ -1,6 +1,6 @@
 /* ============================================================================
    GOLFKONGEN – MIN BAG V3 APP
-   Build: 2026-08-09.20.5
+   Build: 2026-08-10.20.7
 
    V3-prinsipper:
    - Supabase Auth / magic link
@@ -31,6 +31,7 @@
    - v19.5: Sticky seksjonsnavigasjon med smooth-scroll og aktiv markering
    - v20.4: Personlige anbefalinger, Bag-score V2 og historisk GolfKongen-katalog
    - v20.5: Tilbakemelding lagres i Supabase og varsles server-side via Resend
+   - v20.7: Visual Polish – premium dashboard, sterkere tall/grafer og mobilfinish
 
    Denne filen forutsetter at Quickbutik-loaderen har opprettet:
    <div id="min-bag-root"></div>
@@ -42,7 +43,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-10.20.6';
+  var VERSION = '2026-08-10.20.7';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -791,7 +792,8 @@
         '.gkmb3-moresheet-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}' +
         '.gkmb3-moresheet-grid button{min-height:58px;display:flex;align-items:center;gap:9px;padding:9px;border-radius:13px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.045);color:#fff;font:inherit;font-size:10px;font-weight:900;text-align:left;}' +
       '}' +
-      '@media(max-width:420px){.gkmb3-launch-grid{grid-template-columns:1fr 1fr;}.gkmb3-launch{min-height:116px;}.gkmb3-homebagvisual{min-height:160px;}.gkmb3-mobilebar span{font-size:7.5px;}}';
+      '@media(max-width:420px){.gkmb3-launch-grid{grid-template-columns:1fr 1fr;}.gkmb3-launch{min-height:116px;}.gkmb3-homebagvisual{min-height:160px;}.gkmb3-mobilebar span{font-size:7.5px;}}' +
+      '/* ======================================================================= V20.7 – VISUAL POLISH / PREMIUM DASHBOARD Kun presentasjon. Ingen Supabase-/forretningslogikk endres. ======================================================================= */ #min-bag-root{max-width:1320px;} .gkmb3-appframe{grid-template-columns:236px minmax(0,1fr);gap:20px;} .gkmb3-appmain{gap:16px;} .gkmb3-sidebar{padding:13px;border-color:rgba(255,255,255,.075);background:linear-gradient(180deg,rgba(8,18,12,.985),rgba(3,9,6,.985));box-shadow:0 22px 70px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.035);} .gkmb3-sidebrand{padding:7px 7px 14px;border-bottom-color:rgba(255,255,255,.065);} .gkmb3-sidebrand strong{font-size:18px;letter-spacing:-.03em;} .gkmb3-sidebrand span{margin-top:5px;color:rgba(255,255,255,.38);} .gkmb3-sidenav{gap:4px;} .gkmb3-sidenav button{position:relative;min-height:46px;padding:9px 10px;border-radius:12px;color:rgba(255,255,255,.55);font-size:11px;overflow:hidden;} .gkmb3-sidenav button:before{content:"";position:absolute;left:0;top:11px;bottom:11px;width:3px;border-radius:0 4px 4px 0;background:transparent;box-shadow:none;} .gkmb3-sidenav button:hover{background:rgba(255,255,255,.038);color:rgba(255,255,255,.88);} .gkmb3-sidenav button.active{border-color:rgba(34,197,94,.18);background:linear-gradient(90deg,rgba(34,197,94,.135),rgba(34,197,94,.035));color:#f0fdf4;box-shadow:inset 0 1px 0 rgba(255,255,255,.025);} .gkmb3-sidenav button.active:before{background:linear-gradient(180deg,#f6c85f,#22c55e);box-shadow:0 0 16px rgba(34,197,94,.55);} .gkmb3-sidenav-icon{width:28px;height:28px;border-radius:9px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.05);filter:saturate(.88);} .gkmb3-sidenav button.active .gkmb3-sidenav-icon{background:rgba(34,197,94,.10);border-color:rgba(34,197,94,.16);} .gkmb3-sidefooter{border-top-color:rgba(255,255,255,.065);} .gkmb3-appbar{padding:11px 13px;border-color:rgba(255,255,255,.065);background:linear-gradient(180deg,rgba(8,16,11,.91),rgba(4,10,7,.91));box-shadow:0 14px 36px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.025);backdrop-filter:blur(14px);} .gkmb3-appbar-title{font-size:15px;letter-spacing:-.015em;} .gkmb3-appbar-sub{color:rgba(255,255,255,.35);} .gkmb3-home{gap:18px;} .gkmb3-homehero{grid-template-columns:minmax(0,1fr) 300px;gap:20px;padding:24px;border-radius:28px;border-color:rgba(255,255,255,.075);background:radial-gradient(circle at 88% 8%,rgba(34,197,94,.12),transparent 34%),radial-gradient(circle at 6% 96%,rgba(245,158,11,.07),transparent 38%),linear-gradient(135deg,#07100b 0%,#0a1710 54%,#06100a 100%);box-shadow:0 28px 90px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.04);} .gkmb3-homehero:before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(246,200,95,.45),rgba(34,197,94,.38),transparent);opacity:.7;} .gkmb3-homehero-copy{min-width:0;position:relative;z-index:1;} .gkmb3-homeeyebrow{padding:6px 10px;border-color:rgba(246,200,95,.24);background:rgba(246,200,95,.065);color:#f8dda1;font-size:9px;letter-spacing:.095em;} .gkmb3-homehero h2{margin:12px 0 7px;font-size:clamp(34px,4.4vw,54px);letter-spacing:-.055em;text-wrap:balance;} .gkmb3-homelead{color:rgba(255,255,255,.48);font-size:11px;} .gkmb3-homestats{gap:9px;margin-top:18px;} .gkmb3-homestat{position:relative;overflow:hidden;min-height:84px;padding:12px 13px;border-radius:16px;border-color:rgba(255,255,255,.065);background:linear-gradient(180deg,rgba(255,255,255,.044),rgba(255,255,255,.018));box-shadow:inset 0 1px 0 rgba(255,255,255,.025);} .gkmb3-homestat:before{content:"";position:absolute;left:12px;right:12px;top:0;height:1px;background:var(--stat-accent,#22c55e);opacity:.72;} .gkmb3-homestat:after{content:"";position:absolute;right:-28px;bottom:-40px;width:86px;height:86px;border-radius:50%;background:var(--stat-glow,rgba(34,197,94,.10));filter:blur(2px);} .gkmb3-homestat strong{position:relative;z-index:1;font-size:31px;line-height:.95;letter-spacing:-.045em;font-variant-numeric:tabular-nums;animation:gkmb3-number-pop .34s cubic-bezier(.2,.8,.2,1) both;} .gkmb3-homestat span{position:relative;z-index:1;margin-top:9px;color:rgba(255,255,255,.38);font-size:8px;letter-spacing:.075em;} .gkmb3-homestat.stat-0{--stat-accent:#22c55e;--stat-glow:rgba(34,197,94,.11);} .gkmb3-homestat.stat-1{--stat-accent:#60a5fa;--stat-glow:rgba(59,130,246,.11);} .gkmb3-homestat.stat-2{--stat-accent:#f6c85f;--stat-glow:rgba(245,158,11,.11);} .gkmb3-homestat.stat-3{--stat-accent:#a78bfa;--stat-glow:rgba(139,92,246,.11);} .gkmb3-homeflight{display:block;margin-top:10px;padding:11px 12px;border-radius:15px;border:1px solid rgba(255,255,255,.055);background:rgba(0,0,0,.135);} .gkmb3-homeflight-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;} .gkmb3-homeflight-title{color:rgba(255,255,255,.72);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.075em;} .gkmb3-homeflight-total{color:rgba(255,255,255,.32);font-size:8px;font-weight:850;} .gkmb3-flightbar{display:flex;width:100%;height:7px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.055);box-shadow:inset 0 1px 2px rgba(0,0,0,.28);} .gkmb3-flightbar i{display:block;min-width:0;height:100%;transform-origin:left center;animation:gkmb3-bar-in .48s ease both;} .gkmb3-flightbar i:nth-child(1){background:#a78bfa;} .gkmb3-flightbar i:nth-child(2){background:#60a5fa;} .gkmb3-flightbar i:nth-child(3){background:#22c55e;} .gkmb3-flightbar i:nth-child(4){background:#f6c85f;} .gkmb3-flightlegend{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px;} .gkmb3-flightlegend span{display:flex;align-items:center;gap:5px;padding:0;border:0;background:transparent;color:rgba(255,255,255,.43);font-size:8px;font-weight:800;white-space:nowrap;} .gkmb3-flightlegend b{color:rgba(255,255,255,.72);font-size:9px;font-variant-numeric:tabular-nums;} .gkmb3-flightdot{width:6px;height:6px;flex:0 0 auto;border-radius:50%;background:var(--dot,#22c55e);box-shadow:0 0 10px color-mix(in srgb,var(--dot) 45%,transparent);} .gkmb3-flightlegend span:nth-child(1){--dot:#a78bfa;} .gkmb3-flightlegend span:nth-child(2){--dot:#60a5fa;} .gkmb3-flightlegend span:nth-child(3){--dot:#22c55e;} .gkmb3-flightlegend span:nth-child(4){--dot:#f6c85f;} .gkmb3-homeinsight{margin-top:11px;padding:11px 12px;border-color:rgba(246,200,95,.14);background:linear-gradient(90deg,rgba(246,200,95,.055),rgba(255,255,255,.018));color:#f6dfa9;font-size:9.5px;} .gkmb3-homeactions{margin-top:12px;} .gkmb3-homeactions .gkmb3-btn{min-height:40px;padding:9px 12px;font-size:10px;} .gkmb3-homevisualstack{min-width:0;display:grid;grid-template-rows:minmax(190px,1fr) auto;gap:10px;} .gkmb3-homebagvisual{min-height:210px;border-radius:21px;border-color:rgba(255,255,255,.065);background:radial-gradient(circle at 50% 28%,rgba(34,197,94,.14),rgba(0,0,0,.20) 60%),linear-gradient(180deg,rgba(255,255,255,.025),rgba(255,255,255,.01));box-shadow:inset 0 1px 0 rgba(255,255,255,.025);} .gkmb3-homebagvisual:after{content:"";position:absolute;left:13%;right:13%;bottom:7%;height:16%;border-radius:50%;background:rgba(0,0,0,.28);filter:blur(13px);z-index:0;} .gkmb3-homebagvisual img,.gkmb3-homebagfallback{position:relative;z-index:1;} .gkmb3-homebagvisual img{padding:15px;filter:drop-shadow(0 17px 20px rgba(0,0,0,.30));} .gkmb3-homebagfallback{font-size:78px;} .gkmb3-home-scorepanel{display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px;align-items:center;padding:11px;border-radius:18px;border:1px solid rgba(246,200,95,.16);background:linear-gradient(135deg,rgba(246,200,95,.055),rgba(255,255,255,.018));box-shadow:inset 0 1px 0 rgba(255,255,255,.025);} .gkmb3-home-scorering{--gk-score-angle:0deg;position:relative;width:88px;height:88px;display:grid;place-items:center;border-radius:50%;background:conic-gradient(#f6c85f 0deg var(--gk-score-angle),rgba(255,255,255,.055) var(--gk-score-angle) 360deg);box-shadow:0 0 28px rgba(246,200,95,.07);} .gkmb3-home-scorering:before{content:"";position:absolute;inset:7px;border-radius:50%;background:linear-gradient(145deg,#07100b,#0a1510);border:1px solid rgba(255,255,255,.055);} .gkmb3-home-scorevalue{position:relative;z-index:1;text-align:center;} .gkmb3-home-scorevalue strong{display:block;color:#fff;font-size:28px;line-height:.9;font-weight:1000;letter-spacing:-.055em;font-variant-numeric:tabular-nums;animation:gkmb3-number-pop .38s cubic-bezier(.2,.8,.2,1) both;} .gkmb3-home-scorevalue span{display:block;margin-top:4px;color:rgba(255,255,255,.34);font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;} .gkmb3-home-scorebody{min-width:0;} .gkmb3-home-scoretitle{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;} .gkmb3-home-scoretitle strong{color:#fff;font-size:10px;font-weight:1000;} .gkmb3-home-scoretitle span{max-width:105px;color:#f6d98d;font-size:7.5px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .gkmb3-home-scoremetrics{display:grid;gap:5px;} .gkmb3-home-scoremetric{display:grid;grid-template-columns:64px minmax(0,1fr) 24px;gap:6px;align-items:center;} .gkmb3-home-scoremetric label{color:rgba(255,255,255,.40);font-size:7.5px;font-weight:850;} .gkmb3-home-scoremetric em{color:rgba(255,255,255,.72);font-style:normal;font-size:8px;font-weight:950;text-align:right;font-variant-numeric:tabular-nums;} .gkmb3-home-scoretrack{height:4px;border-radius:999px;background:rgba(255,255,255,.055);overflow:hidden;} .gkmb3-home-scoretrack i{display:block;height:100%;border-radius:999px;background:var(--metric-color,#22c55e);animation:gkmb3-bar-in .52s ease both;} .gkmb3-home-scoreempty{grid-column:1/-1;padding:7px 2px;color:rgba(255,255,255,.40);font-size:9px;line-height:1.45;} .gkmb3-reward{border-color:rgba(246,200,95,.23);background:radial-gradient(circle at 90% 8%,rgba(246,200,95,.13),transparent 31%),linear-gradient(135deg,rgba(23,17,5,.98),rgba(10,20,11,.98));box-shadow:0 20px 65px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.025);} .gkmb3-reward:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#f6c85f,#22c55e);} .gkmb3-reward-progress{height:6px;} .gkmb3-launch-head{padding:2px 2px 0;} .gkmb3-launch-head h3{font-size:20px;letter-spacing:-.025em;} .gkmb3-launch-head p{color:rgba(255,255,255,.37);} .gkmb3-launch-grid{gap:11px;} .gkmb3-launch{min-height:142px;padding:15px;border-radius:19px;border-color:rgba(255,255,255,.065);background:linear-gradient(145deg,rgba(255,255,255,.038),rgba(255,255,255,.012));box-shadow:inset 0 1px 0 rgba(255,255,255,.025);} .gkmb3-launch:before{right:-32px;bottom:-42px;width:122px;height:122px;background:var(--gk-accent);filter:blur(7px);opacity:.68;} .gkmb3-launch:after{content:"→";position:absolute;right:13px;bottom:12px;color:rgba(255,255,255,.18);font-size:15px;font-weight:1000;transition:.16s ease;} .gkmb3-launch:hover{transform:translateY(-3px);border-color:rgba(255,255,255,.13);background:linear-gradient(145deg,rgba(255,255,255,.055),rgba(255,255,255,.018));box-shadow:0 15px 34px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.035);} .gkmb3-launch:hover:after{transform:translateX(2px);color:rgba(255,255,255,.52);} .gkmb3-launch-icon{width:42px;height:42px;border-radius:13px;background:var(--gk-accent);border-color:rgba(255,255,255,.055);box-shadow:inset 0 1px 0 rgba(255,255,255,.06);} .gkmb3-launch-stat{padding:5px 8px;background:rgba(0,0,0,.20);border-color:rgba(255,255,255,.055);color:rgba(255,255,255,.50);font-size:7.5px;letter-spacing:.02em;} .gkmb3-launch-title{font-size:14px;letter-spacing:-.01em;} .gkmb3-launch-desc{max-width:88%;margin-top:5px;color:rgba(255,255,255,.39);font-size:9px;line-height:1.45;} .gkmb3-featurecard{border-color:rgba(255,255,255,.065);background:linear-gradient(180deg,rgba(255,255,255,.038),rgba(255,255,255,.015));box-shadow:inset 0 1px 0 rgba(255,255,255,.022);} .gkmb3-pagehead h2{font-size:29px;} .gkmb3-bagscore{position:relative;overflow:hidden;margin-top:0;padding:18px;border-radius:22px;border-color:rgba(246,200,95,.16);background:radial-gradient(circle at 8% 0%,rgba(246,200,95,.07),transparent 30%),linear-gradient(145deg,rgba(8,18,12,.96),rgba(3,9,6,.96));box-shadow:inset 0 1px 0 rgba(255,255,255,.025);} .gkmb3-bagscore:before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(246,200,95,.45),rgba(34,197,94,.35),transparent);} .gkmb3-bagscore-top{grid-template-columns:132px minmax(0,1fr);gap:18px;} .gkmb3-bagscore-number{--gk-score-angle:0deg;position:relative;width:126px;height:126px;min-width:126px;padding:0;display:grid;place-items:center;border:0;border-radius:50%;background:conic-gradient(#f6c85f 0deg var(--gk-score-angle),rgba(255,255,255,.06) var(--gk-score-angle) 360deg);box-shadow:0 0 36px rgba(246,200,95,.07);} .gkmb3-bagscore-number:before{content:"";position:absolute;inset:9px;border-radius:50%;background:linear-gradient(145deg,#08110c,#050c08);border:1px solid rgba(255,255,255,.055);} .gkmb3-bagscore-ringinner{position:relative;z-index:1;text-align:center;} .gkmb3-bagscore-number strong{font-size:40px;letter-spacing:-.065em;font-variant-numeric:tabular-nums;animation:gkmb3-number-pop .38s cubic-bezier(.2,.8,.2,1) both;} .gkmb3-bagscore-number em{display:block;margin-top:3px;color:rgba(255,255,255,.31);font-size:8px;font-style:normal;font-weight:900;letter-spacing:.08em;text-transform:uppercase;} .gkmb3-bagscore-label{position:relative;z-index:1;margin-top:6px;color:#f4d78d;font-size:8px;font-weight:950;letter-spacing:.035em;text-transform:uppercase;text-align:center;} .gkmb3-bagscore-copy h4{font-size:16px;letter-spacing:-.015em;} .gkmb3-bagscore-copy p{max-width:720px;margin-top:7px;color:rgba(255,255,255,.49);font-size:10px;line-height:1.55;} .gkmb3-bagscore-grid{gap:9px;margin-top:16px;} .gkmb3-scoremetric{position:relative;overflow:hidden;min-height:82px;padding:11px 12px;border-radius:15px;border-color:rgba(255,255,255,.055);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012));} .gkmb3-scoremetric:before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--metric-color,#22c55e);opacity:.8;} .gkmb3-scoremetric-top{align-items:flex-end;color:rgba(255,255,255,.43);font-size:8px;letter-spacing:.04em;text-transform:uppercase;} .gkmb3-scoremetric-top b{font-size:24px;line-height:.9;letter-spacing:-.04em;font-variant-numeric:tabular-nums;} .gkmb3-scorebar{height:6px;margin-top:12px;background:rgba(255,255,255,.055);} .gkmb3-scorebar span{background:var(--metric-color,#22c55e);box-shadow:0 0 14px color-mix(in srgb,var(--metric-color) 30%,transparent);animation:gkmb3-bar-in .55s ease both;} .gkmb3-scoremetric.metric-coverage{--metric-color:#22c55e;} .gkmb3-scoremetric.metric-versatility{--metric-color:#60a5fa;} .gkmb3-scoremetric.metric-wind{--metric-color:#f6c85f;} .gkmb3-scoremetric.metric-overlap{--metric-color:#a78bfa;} .gkmb3-bagscore-meta{gap:7px;margin-top:12px;} .gkmb3-bagscore-meta span{padding:6px 8px;border-color:rgba(255,255,255,.055);background:rgba(255,255,255,.025);color:rgba(255,255,255,.53);font-size:8.5px;} .gkmb3-bagscore-next{margin-top:12px;padding:11px 12px;border-radius:13px;border-color:rgba(34,197,94,.13);background:linear-gradient(90deg,rgba(34,197,94,.07),rgba(255,255,255,.015));color:#c8f7d8;font-size:9.5px;} .gkmb3-btn{transition:transform .15s ease,filter .15s ease,border-color .15s ease,background .15s ease;} .gkmb3-btn:not(:disabled):active{transform:translateY(1px) scale(.99);} .gkmb3-card,.gkmb3-featurecard,.gkmb3-reward,.gkmb3-homehero{backface-visibility:hidden;} @keyframes gkmb3-number-pop{0%{opacity:.35;transform:translateY(4px) scale(.96)}100%{opacity:1;transform:none}} @keyframes gkmb3-bar-in{0%{transform:scaleX(0);opacity:.55}100%{transform:scaleX(1);opacity:1}} @media(max-width:1100px){ .gkmb3-appframe{grid-template-columns:210px minmax(0,1fr);gap:14px;} .gkmb3-homehero{grid-template-columns:minmax(0,1fr) 260px;padding:20px;} .gkmb3-home-scorepanel{grid-template-columns:86px minmax(0,1fr);} .gkmb3-home-scorering{width:80px;height:80px;} .gkmb3-home-scorevalue strong{font-size:25px;} } @media(max-width:760px){ #min-bag-root{margin-top:6px;padding:0;} .gkmb3-appmain{gap:12px;} .gkmb3-appbar{position:sticky;top:6px;z-index:80;padding:9px 10px;border-radius:14px;background:rgba(5,12,8,.94);} .gkmb3-home{gap:13px;} .gkmb3-homehero{grid-template-columns:1fr;gap:14px;padding:15px;border-radius:21px;} .gkmb3-homehero h2{margin-top:10px;font-size:35px;} .gkmb3-homelead{font-size:10px;} .gkmb3-homestats{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:14px;} .gkmb3-homestat{min-height:75px;padding:10px 11px;border-radius:14px;} .gkmb3-homestat strong{font-size:27px;} .gkmb3-homestat span{margin-top:7px;font-size:7.5px;} .gkmb3-homeflight{padding:10px;margin-top:8px;} .gkmb3-flightlegend{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 10px;} .gkmb3-homevisualstack{grid-template-rows:auto auto;gap:8px;} .gkmb3-homebagvisual{min-height:170px;max-height:215px;border-radius:17px;} .gkmb3-homebagvisual img{padding:10px;} .gkmb3-home-scorepanel{grid-template-columns:92px minmax(0,1fr);gap:10px;padding:10px;border-radius:16px;} .gkmb3-home-scorering{width:84px;height:84px;} .gkmb3-home-scoremetric{grid-template-columns:58px minmax(0,1fr) 22px;gap:5px;} .gkmb3-home-scoremetric label{font-size:7px;} .gkmb3-homeinsight{font-size:9px;} .gkmb3-homeactions{display:grid;grid-template-columns:1fr 1fr;gap:7px;} .gkmb3-homeactions .gkmb3-btn{width:100%;min-height:42px;padding:8px 7px;font-size:9.5px;} .gkmb3-launch-head h3{font-size:18px;} .gkmb3-launch-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;} .gkmb3-launch{min-height:128px;padding:12px;border-radius:16px;} .gkmb3-launch-icon{width:38px;height:38px;font-size:18px;} .gkmb3-launch-title{font-size:12px;} .gkmb3-launch-desc{max-width:92%;font-size:8.5px;} .gkmb3-featurecard{padding:12px;border-radius:18px;} .gkmb3-bagscore{padding:13px;border-radius:18px;} .gkmb3-bagscore-top{grid-template-columns:104px minmax(0,1fr);gap:12px;align-items:center;} .gkmb3-bagscore-number{width:100px;height:100px;min-width:100px;} .gkmb3-bagscore-number strong{font-size:31px;} .gkmb3-bagscore-copy h4{font-size:14px;} .gkmb3-bagscore-copy p{font-size:9px;} .gkmb3-bagscore-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:12px;} .gkmb3-scoremetric{min-height:72px;padding:9px 10px;} .gkmb3-scoremetric-top b{font-size:20px;} .gkmb3-scorebar{margin-top:10px;} .gkmb3-mobilebar{border-color:rgba(255,255,255,.085);background:rgba(4,10,7,.975);box-shadow:0 -12px 34px rgba(0,0,0,.52),inset 0 1px 0 rgba(255,255,255,.025);} .gkmb3-mobilebar button.active{border-color:rgba(34,197,94,.18);background:linear-gradient(180deg,rgba(34,197,94,.13),rgba(34,197,94,.055));box-shadow:inset 0 1px 0 rgba(255,255,255,.025);} } @media(max-width:460px){ .gkmb3-homehero{padding:13px;} .gkmb3-homehero h2{font-size:32px;} .gkmb3-homeeyebrow{font-size:8px;} .gkmb3-home-scorepanel{grid-template-columns:82px minmax(0,1fr);} .gkmb3-home-scorering{width:76px;height:76px;} .gkmb3-home-scorevalue strong{font-size:23px;} .gkmb3-home-scoretitle{margin-bottom:5px;} .gkmb3-home-scoremetric{grid-template-columns:53px minmax(0,1fr) 21px;} .gkmb3-launch{min-height:122px;padding:11px;} .gkmb3-launch-stat{font-size:7px;} .gkmb3-bagscore-top{grid-template-columns:1fr;text-align:center;} .gkmb3-bagscore-number{margin:0 auto;} .gkmb3-bagscore-copy{text-align:left;} } @media(max-width:365px){ .gkmb3-homestats{grid-template-columns:1fr 1fr;} .gkmb3-home-scorepanel{grid-template-columns:1fr;} .gkmb3-home-scorering{margin:0 auto;} .gkmb3-home-scoretitle{justify-content:center;} .gkmb3-launch-grid{grid-template-columns:1fr;} .gkmb3-launch{min-height:110px;} .gkmb3-homeactions{grid-template-columns:1fr;} } @media(prefers-reduced-motion:reduce){ .gkmb3-homestat strong,.gkmb3-home-scorevalue strong,.gkmb3-bagscore-number strong,.gkmb3-scorebar span,.gkmb3-flightbar i,.gkmb3-home-scoretrack i{animation:none!important;transition:none!important;} .gkmb3-launch,.gkmb3-btn{transition:none!important;} }';
 
     document.head.appendChild(style);
   }
@@ -1406,13 +1408,100 @@
     return null;
   }
 
+  function clampScoreValue(value) {
+    return Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(Number(value) || 0)
+      )
+    );
+  }
+
+  function renderHomeScorePanel() {
+    var panel = el('section', 'gkmb3-home-scorepanel');
+
+    if (!STATE.bagScoreLoaded) {
+      panel.appendChild(el(
+        'div',
+        'gkmb3-home-scoreempty',
+        'Beregner Bag-score…'
+      ));
+      return panel;
+    }
+
+    if (!STATE.bagScore) {
+      panel.appendChild(el(
+        'div',
+        'gkmb3-home-scoreempty',
+        STATE.recoProfile
+          ? 'Bag-score blir tilgjengelig når analysen er klar.'
+          : 'Lag spillerprofilen din for å aktivere Bag-score.'
+      ));
+      return panel;
+    }
+
+    var score = STATE.bagScore;
+    var overall = clampScoreValue(score.overall_score);
+
+    var ring = el('div', 'gkmb3-home-scorering');
+    ring.style.setProperty(
+      '--gk-score-angle',
+      (overall * 3.6) + 'deg'
+    );
+
+    var ringValue = el('div', 'gkmb3-home-scorevalue');
+    ringValue.appendChild(el('strong', '', String(overall)));
+    ringValue.appendChild(el('span', '', 'av 100'));
+    ring.appendChild(ringValue);
+    panel.appendChild(ring);
+
+    var body = el('div', 'gkmb3-home-scorebody');
+    var title = el('div', 'gkmb3-home-scoretitle');
+    title.appendChild(el('strong', '', '🏆 Bag-score'));
+    title.appendChild(el(
+      'span',
+      '',
+      safe(score.score_label || 'Bag-score')
+    ));
+    body.appendChild(title);
+
+    var metrics = el('div', 'gkmb3-home-scoremetrics');
+    var rows = [
+      ['Dekning', score.coverage_score, '#22c55e'],
+      ['Allsidighet', score.versatility_score, '#60a5fa'],
+      ['Vind', score.wind_score, '#f6c85f'],
+      ['Lite overlapp', score.overlap_score, '#a78bfa']
+    ];
+
+    for (var i = 0; i < rows.length; i += 1) {
+      var metricValue = clampScoreValue(rows[i][1]);
+      var metric = el('div', 'gkmb3-home-scoremetric');
+      metric.appendChild(el('label', '', rows[i][0]));
+
+      var track = el('div', 'gkmb3-home-scoretrack');
+      var fill = document.createElement('i');
+      fill.style.width = metricValue + '%';
+      fill.style.setProperty('--metric-color', rows[i][2]);
+      track.appendChild(fill);
+      metric.appendChild(track);
+
+      metric.appendChild(el('em', '', String(metricValue)));
+      metrics.appendChild(metric);
+    }
+
+    body.appendChild(metrics);
+    panel.appendChild(body);
+    return panel;
+  }
+
   function renderHomeDashboard() {
     var wrap = el('div', 'gkmb3-home');
     var bag = activeBag();
     var counts = bagSummaryCounts();
 
     var hero = el('section', 'gkmb3-homehero');
-    var copy = el('div', '');
+    var copy = el('div', 'gkmb3-homehero-copy');
 
     copy.appendChild(el(
       'div',
@@ -1444,7 +1533,10 @@
     ];
 
     for (var i = 0; i < statRows.length; i += 1) {
-      var stat = el('div', 'gkmb3-homestat');
+      var stat = el(
+        'div',
+        'gkmb3-homestat stat-' + i
+      );
       stat.appendChild(el('strong', '', statRows[i][0]));
       stat.appendChild(el('span', '', statRows[i][1]));
       stats.appendChild(stat);
@@ -1453,10 +1545,60 @@
     copy.appendChild(stats);
 
     var flight = el('div', 'gkmb3-homeflight');
-    flight.appendChild(el('span', '', 'Putter ' + counts.putter));
-    flight.appendChild(el('span', '', 'Midrange ' + counts.midrange));
-    flight.appendChild(el('span', '', 'Fairway ' + counts.fairway));
-    flight.appendChild(el('span', '', 'Distance ' + counts.distance));
+    var flightHead = el('div', 'gkmb3-homeflight-head');
+    flightHead.appendChild(el(
+      'div',
+      'gkmb3-homeflight-title',
+      'Bagprofil'
+    ));
+    flightHead.appendChild(el(
+      'div',
+      'gkmb3-homeflight-total',
+      counts.total
+        ? counts.total + ' discer fordelt på type'
+        : 'Legg til første disc for å bygge profilen'
+    ));
+    flight.appendChild(flightHead);
+
+    var flightBar = el('div', 'gkmb3-flightbar');
+    var flightCounts = [
+      Number(counts.putter || 0),
+      Number(counts.midrange || 0),
+      Number(counts.fairway || 0),
+      Number(counts.distance || 0)
+    ];
+    var flightTotal = Math.max(1, Number(counts.total || 0));
+
+    for (var f = 0; f < flightCounts.length; f += 1) {
+      var segment = document.createElement('i');
+      segment.style.width =
+        ((flightCounts[f] / flightTotal) * 100) + '%';
+      flightBar.appendChild(segment);
+    }
+    flight.appendChild(flightBar);
+
+    var legend = el('div', 'gkmb3-flightlegend');
+    var flightLabels = [
+      ['Putter', counts.putter],
+      ['Midrange', counts.midrange],
+      ['Fairway', counts.fairway],
+      ['Distance', counts.distance]
+    ];
+
+    for (var l = 0; l < flightLabels.length; l += 1) {
+      var legendItem = el('span', '');
+      legendItem.appendChild(el('i', 'gkmb3-flightdot', ''));
+      legendItem.appendChild(document.createTextNode(
+        flightLabels[l][0] + ' '
+      ));
+      legendItem.appendChild(el(
+        'b',
+        '',
+        String(Number(flightLabels[l][1] || 0))
+      ));
+      legend.appendChild(legendItem);
+    }
+    flight.appendChild(legend);
     copy.appendChild(flight);
 
     copy.appendChild(el(
@@ -1465,8 +1607,7 @@
       dashboardInsight()
     ));
 
-    var quick = el('div', 'gkmb3-toolbar');
-    quick.style.marginTop = '12px';
+    var quick = el('div', 'gkmb3-toolbar gkmb3-homeactions');
 
     var addDisc = el('button', 'gkmb3-btn', '+ Legg til disc');
     addDisc.type = 'button';
@@ -1486,6 +1627,7 @@
     copy.appendChild(quick);
     hero.appendChild(copy);
 
+    var visualStack = el('div', 'gkmb3-homevisualstack');
     var visual = el('div', 'gkmb3-homebagvisual');
     var bagImage = dashboardBagImageUrl(bag);
 
@@ -1499,22 +1641,9 @@
       visual.appendChild(el('div', 'gkmb3-homebagfallback', '🎒'));
     }
 
-    if (STATE.bagScoreLoaded && STATE.bagScore) {
-      var score = el('div', 'gkmb3-home-score');
-      score.appendChild(el(
-        'strong',
-        '',
-        Math.round(Number(STATE.bagScore.overall_score) || 0) + '/100'
-      ));
-      score.appendChild(el(
-        'span',
-        '',
-        safe(STATE.bagScore.score_label || 'Bag-score')
-      ));
-      visual.appendChild(score);
-    }
-
-    hero.appendChild(visual);
+    visualStack.appendChild(visual);
+    visualStack.appendChild(renderHomeScorePanel());
+    hero.appendChild(visualStack);
     wrap.appendChild(hero);
 
     var rewardCard = renderRewardCard();
@@ -4733,14 +4862,17 @@
     return wrap;
   }
 
-  function renderBagScoreMetric(label, score) {
-    score = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
+  function renderBagScoreMetric(label, score, metricClass) {
+    score = clampScoreValue(score);
 
-    var metric = el('div', 'gkmb3-scoremetric');
+    var metric = el(
+      'div',
+      'gkmb3-scoremetric ' + (metricClass || '')
+    );
     var top = el('div', 'gkmb3-scoremetric-top');
 
     top.appendChild(el('span', '', label));
-    top.appendChild(el('b', '', score));
+    top.appendChild(el('b', '', String(score)));
 
     metric.appendChild(top);
 
@@ -4774,20 +4906,27 @@
     }
 
     var score = STATE.bagScore;
+    var overall = clampScoreValue(score.overall_score);
     var top = el('div', 'gkmb3-bagscore-top');
 
+    var scoreColumn = el('div', '');
     var number = el('div', 'gkmb3-bagscore-number');
-    number.appendChild(el(
-      'strong',
-      '',
-      Math.round(Number(score.overall_score) || 0) + '/100'
-    ));
-    number.appendChild(el(
-      'span',
-      '',
+    number.style.setProperty(
+      '--gk-score-angle',
+      (overall * 3.6) + 'deg'
+    );
+
+    var ringInner = el('div', 'gkmb3-bagscore-ringinner');
+    ringInner.appendChild(el('strong', '', String(overall)));
+    ringInner.appendChild(el('em', '', 'av 100'));
+    number.appendChild(ringInner);
+    scoreColumn.appendChild(number);
+    scoreColumn.appendChild(el(
+      'div',
+      'gkmb3-bagscore-label',
       safe(score.score_label || 'Bag-score')
     ));
-    top.appendChild(number);
+    top.appendChild(scoreColumn);
 
     var copy = el('div', 'gkmb3-bagscore-copy');
     copy.appendChild(el('h4', '', '🏆 Bag-score'));
@@ -4808,19 +4947,23 @@
     var grid = el('div', 'gkmb3-bagscore-grid');
     grid.appendChild(renderBagScoreMetric(
       'Dekning',
-      score.coverage_score
+      score.coverage_score,
+      'metric-coverage'
     ));
     grid.appendChild(renderBagScoreMetric(
       'Allsidighet',
-      score.versatility_score
+      score.versatility_score,
+      'metric-versatility'
     ));
     grid.appendChild(renderBagScoreMetric(
       'Vind',
-      score.wind_score
+      score.wind_score,
+      'metric-wind'
     ));
     grid.appendChild(renderBagScoreMetric(
       'Lite overlapp',
-      score.overlap_score
+      score.overlap_score,
+      'metric-overlap'
     ));
     wrap.appendChild(grid);
 
