@@ -42,7 +42,7 @@
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-09.20.5';
+  var VERSION = '2026-08-10.20.6';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -109,6 +109,10 @@
     recoProductsError: '',
     recoInsights: null,
     recoInsightsLoaded: false,
+    reward: null,
+    rewardLoaded: false,
+    rewardBusy: false,
+    rewardError: '',
     funRecommendations: [],
     funRecommendationsLoaded: false,
     funRecommendationsError: '',
@@ -703,6 +707,22 @@
       '.gkmb3-homeflight{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}' +
       '.gkmb3-homeflight span{padding:5px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.035);color:rgba(255,255,255,.58);font-size:9px;font-weight:850;}' +
 
+      '.gkmb3-reward{position:relative;overflow:hidden;padding:18px;border-radius:22px;border:1px solid rgba(245,158,11,.34);background:radial-gradient(circle at 88% 12%,rgba(250,204,21,.20),transparent 32%),linear-gradient(135deg,rgba(24,17,3,.98),rgba(22,33,12,.97));box-shadow:0 18px 50px rgba(0,0,0,.22);}' +
+      '.gkmb3-reward:after{content:"";position:absolute;right:-55px;bottom:-80px;width:190px;height:190px;border-radius:50%;background:rgba(34,197,94,.12);}' +
+      '.gkmb3-reward-head{position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;}' +
+      '.gkmb3-reward-kicker{color:#fde68a;font-size:9px;font-weight:1000;letter-spacing:.08em;text-transform:uppercase;}' +
+      '.gkmb3-reward h3{margin:5px 0 3px;color:#fff;font-size:22px;font-weight:1000;letter-spacing:-.02em;}' +
+      '.gkmb3-reward p{margin:0;color:rgba(255,255,255,.62);font-size:10px;line-height:1.5;}' +
+      '.gkmb3-reward-close{position:relative;z-index:2;min-width:34px;height:34px;padding:0;border-radius:10px;border:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.05);color:rgba(255,255,255,.70);font:inherit;font-size:17px;font-weight:900;cursor:pointer;}' +
+      '.gkmb3-reward-codewrap{position:relative;z-index:1;display:flex;align-items:stretch;gap:8px;margin-top:14px;}' +
+      '.gkmb3-reward-code{min-width:0;flex:1;display:flex;align-items:center;padding:12px 14px;border-radius:14px;border:1px dashed rgba(250,204,21,.42);background:rgba(0,0,0,.27);color:#fef3c7;font-size:clamp(16px,3vw,23px);font-weight:1000;letter-spacing:.055em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+      '.gkmb3-reward-actions{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}' +
+      '.gkmb3-reward-terms{position:relative;z-index:1;margin-top:11px;color:rgba(255,255,255,.46);font-size:8.5px;line-height:1.45;}' +
+      '.gkmb3-reward-progress{position:relative;z-index:1;margin-top:12px;height:7px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;}' +
+      '.gkmb3-reward-progress span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#22c55e,#facc15);}' +
+      '.gkmb3-reward-compact{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border-radius:16px;border:1px solid rgba(245,158,11,.20);background:rgba(245,158,11,.055);}' +
+      '.gkmb3-reward-compact span{color:#fde68a;font-size:10px;font-weight:900;}' +
+
       '.gkmb3-launch-head{display:flex;align-items:end;justify-content:space-between;gap:12px;}' +
       '.gkmb3-launch-head h3{margin:0;color:#fff;font-size:19px;font-weight:1000;}' +
       '.gkmb3-launch-head p{margin:4px 0 0;color:rgba(255,255,255,.48);font-size:10px;}' +
@@ -750,6 +770,10 @@
         '.gkmb3-homehero{grid-template-columns:1fr;padding:16px;border-radius:21px;}' +
         '.gkmb3-homebagvisual{min-height:180px;max-height:220px;}' +
         '.gkmb3-homehero h2{font-size:34px;}' +
+        '.gkmb3-reward{padding:14px;border-radius:18px;}' +
+        '.gkmb3-reward h3{font-size:18px;}' +
+        '.gkmb3-reward-codewrap{display:grid;grid-template-columns:1fr;}' +
+        '.gkmb3-reward-code{font-size:17px;}' +
         '.gkmb3-homestats{grid-template-columns:repeat(2,minmax(0,1fr));}' +
         '.gkmb3-launch-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}' +
         '.gkmb3-launch{min-height:124px;padding:12px;border-radius:16px;}' +
@@ -1225,6 +1249,163 @@
     return '🥏 ' + STATE.discs.length + ' discer er klare i den aktive bagen.';
   }
 
+  function rewardTermsText() {
+    return 'Én gangs bruk. Gyldig til 31.12.2026. Gjelder ikke permanente kurver eller Custom Print-discer og kan ikke kombineres med andre rabattkoder.';
+  }
+
+  function copyRewardCode(code) {
+    code = trim(code);
+    if (!code) return;
+
+    function done() {
+      status('Rabattkoden er kopiert.', 'ok');
+    }
+
+    function fallback() {
+      var area = document.createElement('textarea');
+      area.value = code;
+      area.setAttribute('readonly', 'readonly');
+      area.style.position = 'fixed';
+      area.style.left = '-9999px';
+      document.body.appendChild(area);
+      area.select();
+
+      try {
+        document.execCommand('copy');
+        done();
+      } catch (err) {
+        status('Kunne ikke kopiere automatisk. Marker koden og kopier den manuelt.', 'err');
+      }
+
+      document.body.removeChild(area);
+    }
+
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(code)
+        .then(done)
+        .catch(fallback);
+      return;
+    }
+
+    fallback();
+  }
+
+  function renderRewardCard() {
+    if (!STATE.rewardLoaded) return null;
+
+    if (STATE.rewardError) {
+      var errorCard = el('section', 'gkmb3-reward-compact');
+      errorCard.appendChild(el(
+        'span',
+        '',
+        '🎁 Min Bag-rabatten kunne ikke lastes akkurat nå.'
+      ));
+      return errorCard;
+    }
+
+    var reward = STATE.reward || {};
+    var code = trim(reward.reward_code);
+    var maxDiscs = Math.max(0, Number(reward.max_discs_in_one_bag) || 0);
+
+    if (code && reward.card_hidden) {
+      var compact = el('section', 'gkmb3-reward-compact');
+      compact.appendChild(el('span', '', '🎁 Du har en personlig 15 % rabattkode klar.'));
+
+      var show = el('button', 'gkmb3-btn secondary', 'Vis min rabattkode');
+      show.type = 'button';
+      show.disabled = !!STATE.rewardBusy;
+      show.onclick = function () {
+        setRewardCardHidden(false);
+      };
+      compact.appendChild(show);
+      return compact;
+    }
+
+    var card = el('section', 'gkmb3-reward');
+    var head = el('div', 'gkmb3-reward-head');
+    var copy = el('div', '');
+
+    if (code) {
+      copy.appendChild(el('div', 'gkmb3-reward-kicker', '🎁 Min Bag-belønning låst opp'));
+      copy.appendChild(el('h3', '', 'Du har fått 15 % rabatt på ett kjøp'));
+      copy.appendChild(el(
+        'p',
+        '',
+        'Du har bygget en bag med minst 3 discer. Denne koden er personlig tildelt Min Bag-brukeren din.'
+      ));
+      head.appendChild(copy);
+
+      var close = el('button', 'gkmb3-reward-close', '×');
+      close.type = 'button';
+      close.title = 'Skjul rabattkoden';
+      close.setAttribute('aria-label', 'Skjul rabattkoden');
+      close.disabled = !!STATE.rewardBusy;
+      close.onclick = function () {
+        setRewardCardHidden(true);
+      };
+      head.appendChild(close);
+      card.appendChild(head);
+
+      var codeWrap = el('div', 'gkmb3-reward-codewrap');
+      codeWrap.appendChild(el('div', 'gkmb3-reward-code', code));
+
+      var copyBtn = el('button', 'gkmb3-btn', 'Kopier kode');
+      copyBtn.type = 'button';
+      copyBtn.onclick = function () {
+        copyRewardCode(code);
+      };
+      codeWrap.appendChild(copyBtn);
+      card.appendChild(codeWrap);
+
+      var actions = el('div', 'gkmb3-reward-actions');
+      var shop = el('button', 'gkmb3-btn', '🛒 Handle nå');
+      shop.type = 'button';
+      shop.onclick = function () {
+        window.location.href = 'https://golfkongen.no/';
+      };
+      actions.appendChild(shop);
+
+      var hide = el('button', 'gkmb3-btn secondary', 'Skjul for nå');
+      hide.type = 'button';
+      hide.disabled = !!STATE.rewardBusy;
+      hide.onclick = function () {
+        setRewardCardHidden(true);
+      };
+      actions.appendChild(hide);
+      card.appendChild(actions);
+
+      card.appendChild(el('div', 'gkmb3-reward-terms', rewardTermsText()));
+      return card;
+    }
+
+    if (maxDiscs < 3) {
+      copy.appendChild(el('div', 'gkmb3-reward-kicker', '🎁 Belønning for å bygge Min Bag'));
+      copy.appendChild(el('h3', '', 'Bygg bagen – få 15 % rabatt'));
+      copy.appendChild(el(
+        'p',
+        '',
+        'Legg minst 3 discer i én bag, så låser du automatisk opp en personlig rabattkode på 15 % til ett kjøp.'
+      ));
+      head.appendChild(copy);
+      card.appendChild(head);
+
+      var progress = el('div', 'gkmb3-reward-progress');
+      var fill = el('span', '');
+      fill.style.width = Math.min(100, (maxDiscs / 3) * 100) + '%';
+      progress.appendChild(fill);
+      card.appendChild(progress);
+
+      card.appendChild(el(
+        'div',
+        'gkmb3-reward-terms',
+        maxDiscs + ' av 3 discer i din mest fylte bag. ' + rewardTermsText()
+      ));
+      return card;
+    }
+
+    return null;
+  }
+
   function renderHomeDashboard() {
     var wrap = el('div', 'gkmb3-home');
     var bag = activeBag();
@@ -1335,6 +1516,9 @@
 
     hero.appendChild(visual);
     wrap.appendChild(hero);
+
+    var rewardCard = renderRewardCard();
+    if (rewardCard) wrap.appendChild(rewardCard);
 
     var launchHead = el('div', 'gkmb3-launch-head');
     var launchCopy = el('div', '');
@@ -7114,6 +7298,10 @@
     STATE.recoProductsError = '';
     STATE.recoInsights = null;
     STATE.recoInsightsLoaded = false;
+    STATE.reward = null;
+    STATE.rewardLoaded = false;
+    STATE.rewardBusy = false;
+    STATE.rewardError = '';
     STATE.funRecommendations = [];
     STATE.funRecommendationsLoaded = false;
     STATE.funRecommendationsError = '';
@@ -9109,6 +9297,70 @@
       });
   }
 
+  function loadReward() {
+    if (!STATE.user) {
+      STATE.reward = null;
+      STATE.rewardLoaded = true;
+      STATE.rewardBusy = false;
+      STATE.rewardError = '';
+      return Promise.resolve();
+    }
+
+    var userContext = captureUserContext();
+
+    return supabaseClient
+      .rpc('minbag_get_or_claim_reward_code')
+      .then(function (res) {
+        if (!isCurrentUserContext(userContext)) return;
+        if (res.error) throw res.error;
+
+        var rows = res.data || [];
+        STATE.reward = rows.length ? rows[0] : null;
+        STATE.rewardLoaded = true;
+        STATE.rewardBusy = false;
+        STATE.rewardError = '';
+      })
+      .catch(function (err) {
+        if (!isCurrentUserContext(userContext)) return;
+        STATE.reward = null;
+        STATE.rewardLoaded = true;
+        STATE.rewardBusy = false;
+        STATE.rewardError = errorMessage(err);
+        console.warn('Min Bag reward:', err);
+      });
+  }
+
+  function setRewardCardHidden(hidden) {
+    if (!STATE.user || !STATE.reward || !STATE.reward.reward_code || STATE.rewardBusy) return;
+
+    STATE.rewardBusy = true;
+    render();
+
+    supabaseClient
+      .rpc('minbag_set_reward_card_hidden', {
+        p_hidden: !!hidden
+      })
+      .then(function (res) {
+        if (res.error) throw res.error;
+        return loadReward();
+      })
+      .then(function () {
+        STATE.rewardBusy = false;
+        render();
+        status(
+          hidden
+            ? 'Rabattkoden er skjult. Du kan vise den igjen når som helst.'
+            : 'Rabattkoden vises igjen.',
+          'ok'
+        );
+      })
+      .catch(function (err) {
+        STATE.rewardBusy = false;
+        render();
+        status('Kunne ikke endre visningen av rabattkoden: ' + errorMessage(err), 'err');
+      });
+  }
+
   function loadBags(preferredBagId) {
     var userContext = captureUserContext();
 
@@ -9195,7 +9447,7 @@
       STATE.roundBagError = '';
       STATE.roundBagSourceName = '';
       STATE.expandedOverlapKey = '';
-      return Promise.resolve();
+      return loadReward();
     }
 
     var userContext = captureUserContext();
@@ -9225,7 +9477,10 @@
         STATE.roundBagError = '';
         STATE.roundBagSourceName = '';
         STATE.expandedOverlapKey = '';
-        return loadGapAnalysis();
+        return Promise.all([
+          loadGapAnalysis(),
+          loadReward()
+        ]);
       });
   }
 
