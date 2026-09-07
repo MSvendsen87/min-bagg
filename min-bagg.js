@@ -1,6 +1,6 @@
 /* ============================================================================
    GOLFKONGEN – MIN BAG V3 APP
-   Build: 2026-08-10.20.8
+   Build: 2026-08-13.app.1
 
    V3-prinsipper:
    - Supabase Auth / magic link
@@ -34,17 +34,16 @@
    - v20.7: Visual Polish – premium dashboard, sterkere tall/grafer og mobilfinish
    - v20.8: Finpolering – større mobiltypografi, tydeligere grafer/score og premium reward/insight
 
-   Denne filen forutsetter at Quickbutik-loaderen har opprettet:
+   GolfKongen nettside-versjon. Quickbutik-loaderen oppretter:
    <div id="min-bag-root"></div>
 
-   Leveres som .txt fra ChatGPT. Når den senere legges i GitHub som kjørbar app,
-   brukes innholdet som JavaScript.
+   Bruker samme Supabase-data og sikre RPC-er som standalone-appen.
    ============================================================================ */
 
 (function () {
   'use strict';
 
-  var VERSION = '2026-08-10.20.8';
+  var VERSION = '2026-09-07.web.7';
 
   var CONFIG = {
     ROOT_ID: 'min-bag-root',
@@ -93,6 +92,15 @@
     storeBagImageLoading: {},
     storeBagPickerOpen: false,
     storeBagBusy: false,
+    carryWeight: {
+      bagWeightGrams: 0,
+      accessoryWeightGrams: 0,
+      accessoryItems: []
+    },
+    carryWeightLoaded: false,
+    carryWeightPromise: null,
+    carryWeightOpen: false,
+    carryWeightBusy: false,
     newBagOpen: false,
     renameBagOpen: false,
     bagActionBusy: false,
@@ -228,7 +236,8 @@
   }
 
   function onMinBagPage() {
-    return currentPath() === CONFIG.PAGE_PATH;
+    // Standalone PWA: appen kan bo på rotadressen eller en Vercel preview-URL.
+    return !!document.getElementById(CONFIG.ROOT_ID);
   }
 
   function el(tag, className, text) {
@@ -330,6 +339,1843 @@
     return raw;
   }
 
+
+  function normalizeCarryGrams(value, maxValue) {
+    var n = Number(value);
+
+    if (!isFinite(n) || n < 0) n = 0;
+    if (maxValue && n > maxValue) n = maxValue;
+
+    return Math.round(n);
+  }
+
+  function formatCarryKg(grams) {
+    var kg =
+      normalizeCarryGrams(
+        grams,
+        50000
+      ) / 1000;
+
+    return kg.toLocaleString(
+      'no-NO',
+      {
+        minimumFractionDigits:
+          kg < 10 ? 2 : 1,
+        maximumFractionDigits:
+          kg < 10 ? 2 : 1
+      }
+    ) + ' kg';
+  }
+
+  function carryAccessoryPresets() {
+    return [
+      {
+        key: 'water-05',
+        icon: '💧',
+        label: 'Vann 0,5 L',
+        grams: 550
+      },
+      {
+        key: 'water-10',
+        icon: '💧',
+        label: 'Vann 1 L',
+        grams: 1050
+      },
+      {
+        key: 'retriever',
+        icon: '🦯',
+        label: 'Retriever',
+        grams: 300
+      },
+      {
+        key: 'towel',
+        icon: '🧻',
+        label: 'Håndkle',
+        grams: 100
+      },
+      {
+        key: 'umbrella',
+        icon: '☂️',
+        label: 'Paraply',
+        grams: 450
+      },
+      {
+        key: 'rain-jacket',
+        icon: '🧥',
+        label: 'Regnjakke',
+        grams: 350
+      },
+      {
+        key: 'snacks',
+        icon: '🍫',
+        label: 'Snacks',
+        grams: 300
+      },
+      {
+        key: 'powerbank',
+        icon: '🔋',
+        label: 'Powerbank',
+        grams: 200
+      },
+      {
+        key: 'mini',
+        icon: '⭕',
+        label: 'Mini / markør',
+        grams: 30
+      }
+    ];
+  }
+
+  function sanitizeCarryAccessoryItems(rawItems) {
+    var result = [];
+
+    if (!Array.isArray(rawItems)) {
+      return result;
+    }
+
+    for (
+      var i = 0;
+      i < rawItems.length &&
+      result.length < 30;
+      i += 1
+    ) {
+      var raw = rawItems[i] || {};
+      var label = trim(raw.label);
+      var grams =
+        normalizeCarryGrams(
+          raw.grams,
+          5000
+        );
+
+      if (!label || grams <= 0) {
+        continue;
+      }
+
+      result.push({
+        key:
+          trim(raw.key) ||
+          (
+            'item-' +
+            String(i) +
+            '-' +
+            String(grams)
+          ),
+        label: label.slice(0, 80),
+        grams: grams,
+        custom: !!raw.custom
+      });
+    }
+
+    return result;
+  }
+
+  function carryAccessoryItems() {
+    if (
+      !STATE.carryWeight ||
+      !Array.isArray(
+        STATE.carryWeight
+          .accessoryItems
+      )
+    ) {
+      return [];
+    }
+
+    return STATE.carryWeight
+      .accessoryItems;
+  }
+
+  function accessoryItemsTotalGrams(items) {
+    var rows =
+      Array.isArray(items)
+        ? items
+        : [];
+
+    var total = 0;
+
+    for (
+      var i = 0;
+      i < rows.length;
+      i += 1
+    ) {
+      total +=
+        normalizeCarryGrams(
+          rows[i] &&
+            rows[i].grams,
+          5000
+        );
+    }
+
+    return Math.round(total);
+  }
+
+  function syncCarryAccessoryTotal() {
+    STATE.carryWeight
+      .accessoryWeightGrams =
+        accessoryItemsTotalGrams(
+          carryAccessoryItems()
+        );
+  }
+
+  function discCarryWeightSummary() {
+    var grams = 0;
+    var actualCount = 0;
+    var estimatedCount = 0;
+
+    for (
+      var i = 0;
+      i < STATE.discs.length;
+      i += 1
+    ) {
+      var raw =
+        Number(
+          STATE.discs[i]
+            .weight_grams
+        );
+
+      if (
+        isFinite(raw) &&
+        raw > 0 &&
+        raw < 300
+      ) {
+        grams += raw;
+        actualCount += 1;
+      } else {
+        grams += 175;
+        estimatedCount += 1;
+      }
+    }
+
+    return {
+      grams: Math.round(grams),
+      count: STATE.discs.length,
+      actualCount: actualCount,
+      estimatedCount:
+        estimatedCount
+    };
+  }
+
+  function carryWeightTotalGrams() {
+    var accessoryTotal =
+      carryAccessoryItems().length
+        ? accessoryItemsTotalGrams(
+            carryAccessoryItems()
+          )
+        : normalizeCarryGrams(
+            STATE.carryWeight
+              .accessoryWeightGrams,
+            30000
+          );
+
+    return (
+      discCarryWeightSummary().grams +
+      normalizeCarryGrams(
+        STATE.carryWeight
+          .bagWeightGrams,
+        10000
+      ) +
+      accessoryTotal
+    );
+  }
+
+  function updateCarryWeightPillDom() {
+    var value =
+      document.getElementById(
+        'gkmb3-carrypill-value'
+      );
+
+    if (value) {
+      value.textContent =
+        formatCarryKg(
+          carryWeightTotalGrams()
+        );
+    }
+  }
+
+  function updateCarryEditorTotalsDom() {
+    var discs =
+      discCarryWeightSummary();
+
+    var accessoryTotal =
+      carryAccessoryItems().length
+        ? accessoryItemsTotalGrams(
+            carryAccessoryItems()
+          )
+        : normalizeCarryGrams(
+            STATE.carryWeight
+              .accessoryWeightGrams,
+            30000
+          );
+
+    var map = {
+      'gkmb3-carry-summary-discs':
+        formatCarryKg(discs.grams),
+      'gkmb3-carry-summary-bag':
+        formatCarryKg(
+          STATE.carryWeight
+            .bagWeightGrams
+        ),
+      'gkmb3-carry-summary-accessories':
+        formatCarryKg(
+          accessoryTotal
+        ),
+      'gkmb3-carry-summary-total':
+        formatCarryKg(
+          carryWeightTotalGrams()
+        ),
+      'gkmb3-carry-accessory-total':
+        formatCarryKg(
+          accessoryTotal
+        )
+    };
+
+    Object.keys(map).forEach(
+      function (id) {
+        var node =
+          document.getElementById(id);
+
+        if (node) {
+          node.textContent = map[id];
+        }
+      }
+    );
+
+    updateCarryWeightPillDom();
+  }
+
+  function loadCarryWeightSettings() {
+    if (
+      !STATE.user ||
+      !STATE.activeBagId
+    ) {
+      STATE.carryWeight = {
+        bagWeightGrams: 0,
+        accessoryWeightGrams: 0,
+        accessoryItems: []
+      };
+
+      STATE.carryWeightLoaded = true;
+      STATE.carryWeightPromise = null;
+
+      updateCarryWeightPillDom();
+      return Promise.resolve();
+    }
+
+    if (STATE.carryWeightLoaded) {
+      updateCarryWeightPillDom();
+      return Promise.resolve();
+    }
+
+    if (STATE.carryWeightPromise) {
+      return STATE.carryWeightPromise;
+    }
+
+    var userContext =
+      captureUserContext();
+
+    var bagId =
+      STATE.activeBagId;
+
+    STATE.carryWeightPromise =
+      supabaseClient.rpc(
+        'minbag_get_bag_carry_settings',
+        {
+          p_bag_id: bagId
+        }
+      ).then(function (res) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
+
+        if (res.error) {
+          throw res.error;
+        }
+
+        var rows =
+          res.data || [];
+
+        var row =
+          rows.length
+            ? rows[0]
+            : null;
+
+        var bagGrams =
+          normalizeCarryGrams(
+            row
+              ? row.bag_weight_grams
+              : 0,
+            10000
+          );
+
+        var legacyAccessoryGrams =
+          normalizeCarryGrams(
+            row
+              ? row
+                  .accessory_weight_grams
+              : 0,
+            30000
+          );
+
+        var items =
+          sanitizeCarryAccessoryItems(
+            row
+              ? row.accessory_items
+              : []
+          );
+
+        /*
+          If somebody saved an accessory total
+          in the earlier v5 version, keep that
+          value instead of silently losing it.
+        */
+        if (
+          !items.length &&
+          legacyAccessoryGrams > 0
+        ) {
+          items.push({
+            key: 'legacy-accessories',
+            label:
+              'Tidligere lagret tilbehør',
+            grams:
+              legacyAccessoryGrams,
+            custom: true
+          });
+        }
+
+        STATE.carryWeight = {
+          bagWeightGrams:
+            bagGrams,
+          accessoryWeightGrams:
+            items.length
+              ? accessoryItemsTotalGrams(
+                  items
+                )
+              : legacyAccessoryGrams,
+          accessoryItems: items
+        };
+
+        STATE.carryWeightLoaded = true;
+
+        updateCarryWeightPillDom();
+      }).catch(function (err) {
+        if (
+          !isCurrentUserContext(
+            userContext
+          ) ||
+          STATE.activeBagId !==
+            bagId
+        ) {
+          return;
+        }
+
+        STATE.carryWeight = {
+          bagWeightGrams: 0,
+          accessoryWeightGrams: 0,
+          accessoryItems: []
+        };
+
+        STATE.carryWeightLoaded = true;
+        updateCarryWeightPillDom();
+
+        console.warn(
+          '[GK MIN BAG] Kunne ikke hente vektinnstillinger',
+          err
+        );
+      }).finally(function () {
+        if (
+          isCurrentUserContext(
+            userContext
+          ) &&
+          STATE.activeBagId ===
+            bagId
+        ) {
+          STATE.carryWeightPromise =
+            null;
+        }
+      });
+
+    return STATE.carryWeightPromise;
+  }
+
+  function scheduleCarryWeightLoad() {
+    if (
+      !STATE.user ||
+      !STATE.activeBagId ||
+      STATE.carryWeightLoaded ||
+      STATE.carryWeightPromise
+    ) {
+      return;
+    }
+
+    window.setTimeout(
+      function () {
+        loadCarryWeightSettings();
+      },
+      0
+    );
+  }
+
+  function scrollCarryEditorIntoView(
+    smooth
+  ) {
+    window.setTimeout(
+      function () {
+        var editor =
+          document.getElementById(
+            'gkmb3-carry-editor'
+          );
+
+        if (
+          !editor ||
+          !editor.scrollIntoView
+        ) {
+          return;
+        }
+
+        editor.scrollIntoView({
+          behavior:
+            smooth
+              ? 'smooth'
+              : 'auto',
+          block: 'start'
+        });
+      },
+      40
+    );
+  }
+
+  function openCarryWeightEditor() {
+    if (
+      !STATE.user ||
+      !STATE.activeBagId
+    ) {
+      return;
+    }
+
+    loadCarryWeightSettings()
+      .then(function () {
+        STATE.carryWeightOpen = true;
+        render();
+
+        /*
+          The user explicitly clicked the
+          small weight pill, so take them
+          straight to the editor.
+        */
+        scrollCarryEditorIntoView(true);
+
+        status('Klar.', 'ok');
+      });
+  }
+
+  function renderCarryWeightPill() {
+    /*
+      Deliberately not a <button>.
+      setLoading() disables every button
+      inside #min-bag-root, so this control
+      must remain independently clickable.
+    */
+    var pill =
+      el(
+        'div',
+        'gkmb3-carrypill'
+      );
+
+    pill.id =
+      'gkmb3-carrypill';
+
+    pill.setAttribute(
+      'role',
+      'button'
+    );
+
+    pill.setAttribute(
+      'tabindex',
+      '0'
+    );
+
+    pill.setAttribute(
+      'aria-label',
+      'Vis eller rediger vekt i sekken'
+    );
+
+    pill.title =
+      'Trykk for å redigere sekk og tilbehør';
+
+    pill.appendChild(
+      el(
+        'span',
+        'gkmb3-carrypill-label',
+        '⚖️ Ca. vekt'
+      )
+    );
+
+    var value =
+      el(
+        'strong',
+        'gkmb3-carrypill-value',
+        formatCarryKg(
+          carryWeightTotalGrams()
+        )
+      );
+
+    value.id =
+      'gkmb3-carrypill-value';
+
+    pill.appendChild(value);
+
+    pill.appendChild(
+      el(
+        'span',
+        'gkmb3-carrypill-arrow',
+        '›'
+      )
+    );
+
+    function activate(event) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      openCarryWeightEditor();
+    }
+
+    pill.onclick = activate;
+
+    pill.onkeydown =
+      function (event) {
+        if (
+          event.key === 'Enter' ||
+          event.key === ' '
+        ) {
+          activate(event);
+        }
+      };
+
+    scheduleCarryWeightLoad();
+
+    return pill;
+  }
+
+  function setCarryBagWeightKg(
+    kgValue
+  ) {
+    var kg = Number(kgValue);
+
+    if (
+      !isFinite(kg) ||
+      kg < 0
+    ) {
+      kg = 0;
+    }
+
+    STATE.carryWeight
+      .bagWeightGrams =
+        normalizeCarryGrams(
+          kg * 1000,
+          10000
+        );
+
+    var input =
+      document.getElementById(
+        'gkmb3-carry-bag-kg'
+      );
+
+    if (input) {
+      input.value =
+        String(
+          STATE.carryWeight
+            .bagWeightGrams /
+          1000
+        );
+    }
+
+    updateCarryEditorTotalsDom();
+  }
+
+  function renderBagWeightPreset(
+    title,
+    weightKg,
+    description
+  ) {
+    var button =
+      el(
+        'button',
+        'gkmb3-bagweight-option'
+      );
+
+    button.type = 'button';
+
+    button.appendChild(
+      el(
+        'strong',
+        '',
+        title
+      )
+    );
+
+    button.appendChild(
+      el(
+        'span',
+        '',
+        'ca. ' +
+          String(weightKg)
+            .replace('.', ',') +
+          ' kg'
+      )
+    );
+
+    button.appendChild(
+      el(
+        'small',
+        '',
+        description
+      )
+    );
+
+    button.onclick =
+      function () {
+        setCarryBagWeightKg(
+          weightKg
+        );
+      };
+
+    return button;
+  }
+
+  function carryAccessoryIndexByKey(
+    key
+  ) {
+    var rows =
+      carryAccessoryItems();
+
+    for (
+      var i = 0;
+      i < rows.length;
+      i += 1
+    ) {
+      if (
+        safe(rows[i].key) ===
+        safe(key)
+      ) {
+        return i;
+      }
+    }
+
+    return -1;
+  }
+
+  function toggleCarryAccessoryPreset(
+    preset
+  ) {
+    var rows =
+      carryAccessoryItems()
+        .slice();
+
+    var index =
+      carryAccessoryIndexByKey(
+        preset.key
+      );
+
+    if (index >= 0) {
+      rows.splice(index, 1);
+    } else {
+      rows.push({
+        key: preset.key,
+        label: preset.label,
+        grams: preset.grams,
+        custom: false
+      });
+    }
+
+    STATE.carryWeight
+      .accessoryItems = rows;
+
+    syncCarryAccessoryTotal();
+
+    render();
+    scrollCarryEditorIntoView(false);
+  }
+
+  function removeCarryAccessory(
+    key
+  ) {
+    var rows =
+      carryAccessoryItems();
+
+    STATE.carryWeight
+      .accessoryItems =
+        rows.filter(
+          function (item) {
+            return (
+              safe(item.key) !==
+              safe(key)
+            );
+          }
+        );
+
+    syncCarryAccessoryTotal();
+
+    render();
+    scrollCarryEditorIntoView(false);
+  }
+
+  function addCustomCarryAccessory() {
+    var name =
+      trim(
+        getInputValue(
+          'gkmb3-carry-custom-name'
+        )
+      );
+
+    var kg =
+      numOrNull(
+        getInputValue(
+          'gkmb3-carry-custom-kg'
+        )
+      );
+
+    if (!name) {
+      status(
+        'Skriv inn navn på tilbehøret.',
+        'err'
+      );
+      return;
+    }
+
+    if (
+      kg === null ||
+      kg <= 0 ||
+      kg > 5
+    ) {
+      status(
+        'Tilbehørsvekten må være mellom 0 og 5 kg.',
+        'err'
+      );
+      return;
+    }
+
+    var rows =
+      carryAccessoryItems()
+        .slice();
+
+    rows.push({
+      key:
+        'custom-' +
+        String(Date.now()) +
+        '-' +
+        String(
+          Math.floor(
+            Math.random() * 10000
+          )
+        ),
+      label:
+        name.slice(0, 80),
+      grams:
+        Math.round(
+          kg * 1000
+        ),
+      custom: true
+    });
+
+    STATE.carryWeight
+      .accessoryItems = rows;
+
+    syncCarryAccessoryTotal();
+
+    render();
+    scrollCarryEditorIntoView(false);
+    status('Tilbehør lagt til.', 'ok');
+  }
+
+  function renderCarryAccessoryPreset(
+    preset
+  ) {
+    var selected =
+      carryAccessoryIndexByKey(
+        preset.key
+      ) >= 0;
+
+    var button =
+      el(
+        'button',
+        'gkmb3-accessory-option' +
+        (
+          selected
+            ? ' selected'
+            : ''
+        )
+      );
+
+    button.type = 'button';
+
+    button.appendChild(
+      el(
+        'span',
+        'gkmb3-accessory-icon',
+        preset.icon
+      )
+    );
+
+    var copy =
+      el(
+        'span',
+        'gkmb3-accessory-copy'
+      );
+
+    copy.appendChild(
+      el(
+        'strong',
+        '',
+        preset.label
+      )
+    );
+
+    copy.appendChild(
+      el(
+        'small',
+        '',
+        formatCarryKg(
+          preset.grams
+        )
+      )
+    );
+
+    button.appendChild(copy);
+
+    button.appendChild(
+      el(
+        'span',
+        'gkmb3-accessory-check',
+        selected
+          ? '✓'
+          : '+'
+      )
+    );
+
+    button.onclick =
+      function () {
+        toggleCarryAccessoryPreset(
+          preset
+        );
+      };
+
+    return button;
+  }
+
+  function renderSelectedCarryAccessories() {
+    var rows =
+      carryAccessoryItems();
+
+    var wrap =
+      el(
+        'div',
+        'gkmb3-selected-accessories'
+      );
+
+    if (!rows.length) {
+      wrap.appendChild(
+        el(
+          'div',
+          'gkmb3-carryempty',
+          'Ingen tilbehør valgt ennå.'
+        )
+      );
+
+      return wrap;
+    }
+
+    for (
+      var i = 0;
+      i < rows.length;
+      i += 1
+    ) {
+      (function (item) {
+        var row =
+          el(
+            'div',
+            'gkmb3-selected-accessory'
+          );
+
+        var copy =
+          el('div', '');
+
+        copy.appendChild(
+          el(
+            'strong',
+            '',
+            safe(item.label)
+          )
+        );
+
+        copy.appendChild(
+          el(
+            'span',
+            '',
+            formatCarryKg(
+              item.grams
+            )
+          )
+        );
+
+        row.appendChild(copy);
+
+        var remove =
+          el(
+            'button',
+            'gkmb3-accessory-remove',
+            'Fjern'
+          );
+
+        remove.type = 'button';
+
+        remove.onclick =
+          function () {
+            removeCarryAccessory(
+              item.key
+            );
+          };
+
+        row.appendChild(remove);
+        wrap.appendChild(row);
+      })(rows[i]);
+    }
+
+    return wrap;
+  }
+
+  function renderCarryWeightEditor() {
+    if (!STATE.carryWeightOpen) {
+      return null;
+    }
+
+    var panel =
+      el(
+        'section',
+        'gkmb3-carryeditor'
+      );
+
+    panel.id =
+      'gkmb3-carry-editor';
+
+    var head =
+      el(
+        'div',
+        'gkmb3-carryeditor-head'
+      );
+
+    var copy =
+      el('div', '');
+
+    copy.appendChild(
+      el(
+        'strong',
+        '',
+        '⚖️ Vekt i sekken'
+      )
+    );
+
+    copy.appendChild(
+      el(
+        'span',
+        '',
+        'Discer regnes automatisk. Velg omtrent hvor mye sekken og utstyret ditt veier.'
+      )
+    );
+
+    head.appendChild(copy);
+
+    var close =
+      el(
+        'button',
+        'gkmb3-carryclose',
+        '×'
+      );
+
+    close.type = 'button';
+
+    close.setAttribute(
+      'aria-label',
+      'Lukk vektredigering'
+    );
+
+    close.onclick =
+      function () {
+        STATE.carryWeightOpen =
+          false;
+
+        render();
+      };
+
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    var discSummary =
+      discCarryWeightSummary();
+
+    var summary =
+      el(
+        'div',
+        'gkmb3-carrysummary'
+      );
+
+    function summaryItem(
+      label,
+      value,
+      id
+    ) {
+      var item =
+        el('div', '');
+
+      item.appendChild(
+        el('span', '', label)
+      );
+
+      var strong =
+        el('b', '', value);
+
+      if (id) strong.id = id;
+
+      item.appendChild(strong);
+      return item;
+    }
+
+    summary.appendChild(
+      summaryItem(
+        'Discer',
+        formatCarryKg(
+          discSummary.grams
+        ),
+        'gkmb3-carry-summary-discs'
+      )
+    );
+
+    summary.appendChild(
+      summaryItem(
+        'Tom sekk',
+        formatCarryKg(
+          STATE.carryWeight
+            .bagWeightGrams
+        ),
+        'gkmb3-carry-summary-bag'
+      )
+    );
+
+    summary.appendChild(
+      summaryItem(
+        'Tilbehør',
+        formatCarryKg(
+          accessoryItemsTotalGrams(
+            carryAccessoryItems()
+          )
+        ),
+        'gkmb3-carry-summary-accessories'
+      )
+    );
+
+    summary.appendChild(
+      summaryItem(
+        'Total',
+        formatCarryKg(
+          carryWeightTotalGrams()
+        ),
+        'gkmb3-carry-summary-total'
+      )
+    );
+
+    panel.appendChild(summary);
+
+    /*
+      BAG / BACKPACK
+    */
+    var bagSection =
+      el(
+        'div',
+        'gkmb3-carrysection'
+      );
+
+    var bagHeading =
+      el(
+        'div',
+        'gkmb3-carrysection-head'
+      );
+
+    bagHeading.appendChild(
+      el(
+        'strong',
+        '',
+        '1. Tom bag / sekk'
+      )
+    );
+
+    bagHeading.appendChild(
+      el(
+        'span',
+        '',
+        'Typiske omtrentlige tomvekter – modellen din kan naturligvis avvike.'
+      )
+    );
+
+    bagSection.appendChild(
+      bagHeading
+    );
+
+    var bagOptions =
+      el(
+        'div',
+        'gkmb3-bagweight-grid'
+      );
+
+    bagOptions.appendChild(
+      renderBagWeightPreset(
+        'Liten bag',
+        0.4,
+        'Enkel skulderbag, ofte rundt 6–10 discer.'
+      )
+    );
+
+    bagOptions.appendChild(
+      renderBagWeightPreset(
+        'Liten sekk',
+        0.8,
+        'Kompakt ryggsekk, ofte rundt 10–15 discer.'
+      )
+    );
+
+    bagOptions.appendChild(
+      renderBagWeightPreset(
+        'Medium sekk',
+        1.5,
+        'Vanlig discgolfsekk med plass til omtrent 15–25 discer.'
+      )
+    );
+
+    bagOptions.appendChild(
+      renderBagWeightPreset(
+        'Stor sekk',
+        2.0,
+        'Stor/premium sekk med mye lagringsplass og ekstra lommer.'
+      )
+    );
+
+    bagSection.appendChild(
+      bagOptions
+    );
+
+    var exactBag =
+      el(
+        'label',
+        'gkmb3-carryfield gkmb3-carry-exact'
+      );
+
+    exactBag.appendChild(
+      el(
+        'span',
+        '',
+        'Eller skriv inn faktisk tomvekt (kg)'
+      )
+    );
+
+    var bagInput =
+      el(
+        'input',
+        'gkmb3-input'
+      );
+
+    bagInput.id =
+      'gkmb3-carry-bag-kg';
+
+    bagInput.type = 'number';
+    bagInput.inputMode =
+      'decimal';
+    bagInput.min = '0';
+    bagInput.max = '10';
+    bagInput.step = '0.01';
+    bagInput.placeholder =
+      'F.eks. 1,7';
+
+    bagInput.value =
+      STATE.carryWeight
+        .bagWeightGrams
+        ? String(
+            STATE.carryWeight
+              .bagWeightGrams /
+            1000
+          )
+        : '';
+
+    bagInput.oninput =
+      function () {
+        var kg =
+          numOrNull(
+            bagInput.value
+          );
+
+        if (
+          kg === null ||
+          kg < 0
+        ) {
+          kg = 0;
+        }
+
+        STATE.carryWeight
+          .bagWeightGrams =
+            normalizeCarryGrams(
+              kg * 1000,
+              10000
+            );
+
+        updateCarryEditorTotalsDom();
+      };
+
+    exactBag.appendChild(
+      bagInput
+    );
+
+    bagSection.appendChild(
+      exactBag
+    );
+
+    panel.appendChild(
+      bagSection
+    );
+
+    /*
+      ACCESSORIES
+    */
+    var accessorySection =
+      el(
+        'div',
+        'gkmb3-carrysection'
+      );
+
+    var accessoryHeading =
+      el(
+        'div',
+        'gkmb3-carrysection-head'
+      );
+
+    accessoryHeading.appendChild(
+      el(
+        'strong',
+        '',
+        '2. Tilbehør'
+      )
+    );
+
+    accessoryHeading.appendChild(
+      el(
+        'span',
+        '',
+        'Trykk på det du vanligvis har med. Min Bag summerer vekten for deg.'
+      )
+    );
+
+    accessorySection.appendChild(
+      accessoryHeading
+    );
+
+    var accessoryTotal =
+      el(
+        'div',
+        'gkmb3-accessory-total'
+      );
+
+    accessoryTotal.appendChild(
+      el(
+        'span',
+        '',
+        'Valgt tilbehør'
+      )
+    );
+
+    var accessoryTotalValue =
+      el(
+        'strong',
+        '',
+        formatCarryKg(
+          accessoryItemsTotalGrams(
+            carryAccessoryItems()
+          )
+        )
+      );
+
+    accessoryTotalValue.id =
+      'gkmb3-carry-accessory-total';
+
+    accessoryTotal.appendChild(
+      accessoryTotalValue
+    );
+
+    accessorySection.appendChild(
+      accessoryTotal
+    );
+
+    var accessoryGrid =
+      el(
+        'div',
+        'gkmb3-accessory-grid'
+      );
+
+    var presets =
+      carryAccessoryPresets();
+
+    for (
+      var i = 0;
+      i < presets.length;
+      i += 1
+    ) {
+      accessoryGrid.appendChild(
+        renderCarryAccessoryPreset(
+          presets[i]
+        )
+      );
+    }
+
+    accessorySection.appendChild(
+      accessoryGrid
+    );
+
+    var custom =
+      el(
+        'div',
+        'gkmb3-custom-accessory'
+      );
+
+    custom.appendChild(
+      el(
+        'strong',
+        '',
+        '+ Eget tilbehør'
+      )
+    );
+
+    custom.appendChild(
+      el(
+        'span',
+        '',
+        'Har du noe annet i sekken, legg det inn her.'
+      )
+    );
+
+    var customGrid =
+      el(
+        'div',
+        'gkmb3-custom-accessory-grid'
+      );
+
+    var customName =
+      el(
+        'input',
+        'gkmb3-input'
+      );
+
+    customName.id =
+      'gkmb3-carry-custom-name';
+
+    customName.placeholder =
+      'F.eks. ekstra klær';
+
+    var customKg =
+      el(
+        'input',
+        'gkmb3-input'
+      );
+
+    customKg.id =
+      'gkmb3-carry-custom-kg';
+
+    customKg.type = 'number';
+    customKg.inputMode =
+      'decimal';
+    customKg.min = '0.01';
+    customKg.max = '5';
+    customKg.step = '0.01';
+    customKg.placeholder =
+      'Vekt i kg';
+
+    var customAdd =
+      el(
+        'button',
+        'gkmb3-btn secondary',
+        '+ Legg til'
+      );
+
+    customAdd.type = 'button';
+
+    customAdd.onclick =
+      addCustomCarryAccessory;
+
+    customGrid.appendChild(
+      customName
+    );
+
+    customGrid.appendChild(
+      customKg
+    );
+
+    customGrid.appendChild(
+      customAdd
+    );
+
+    custom.appendChild(
+      customGrid
+    );
+
+    accessorySection.appendChild(
+      custom
+    );
+
+    var selectedTitle =
+      el(
+        'div',
+        'gkmb3-selected-title',
+        'Dette er med i tilbehørsvekten'
+      );
+
+    accessorySection.appendChild(
+      selectedTitle
+    );
+
+    accessorySection.appendChild(
+      renderSelectedCarryAccessories()
+    );
+
+    panel.appendChild(
+      accessorySection
+    );
+
+    panel.appendChild(
+      el(
+        'div',
+        'gkmb3-carryhint',
+        'Discer uten registrert vekt beregnes som 175 g. Alle bag- og tilbehørsvekter er omtrentlige til du legger inn faktisk vekt.'
+      )
+    );
+
+    var actions =
+      el(
+        'div',
+        'gkmb3-carryactions'
+      );
+
+    var cancel =
+      el(
+        'button',
+        'gkmb3-btn secondary',
+        'Lukk'
+      );
+
+    cancel.type = 'button';
+
+    cancel.onclick =
+      function () {
+        STATE.carryWeightOpen =
+          false;
+
+        render();
+      };
+
+    actions.appendChild(cancel);
+
+    var save =
+      el(
+        'button',
+        'gkmb3-btn',
+        STATE.carryWeightBusy
+          ? 'Lagrer…'
+          : 'Lagre vekt'
+      );
+
+    save.type = 'button';
+
+    save.disabled =
+      !!STATE.carryWeightBusy;
+
+    save.onclick =
+      saveCarryWeightSettings;
+
+    actions.appendChild(save);
+    panel.appendChild(actions);
+
+    return panel;
+  }
+
+  function saveCarryWeightSettings() {
+    if (
+      !STATE.user ||
+      !STATE.activeBagId ||
+      STATE.carryWeightBusy
+    ) {
+      return;
+    }
+
+    var bagKg =
+      numOrNull(
+        getInputValue(
+          'gkmb3-carry-bag-kg'
+        )
+      );
+
+    if (bagKg === null) {
+      bagKg =
+        normalizeCarryGrams(
+          STATE.carryWeight
+            .bagWeightGrams,
+          10000
+        ) / 1000;
+    }
+
+    if (
+      bagKg < 0 ||
+      bagKg > 10
+    ) {
+      status(
+        'Tom sekk må være mellom 0 og 10 kg.',
+        'err'
+      );
+      return;
+    }
+
+    syncCarryAccessoryTotal();
+
+    var accessoryGrams =
+      normalizeCarryGrams(
+        STATE.carryWeight
+          .accessoryWeightGrams,
+        30000
+      );
+
+    if (
+      accessoryGrams < 0 ||
+      accessoryGrams > 30000
+    ) {
+      status(
+        'Tilbehør må være mellom 0 og 30 kg totalt.',
+        'err'
+      );
+      return;
+    }
+
+    var userContext =
+      captureUserContext();
+
+    var bagId =
+      STATE.activeBagId;
+
+    STATE.carryWeightBusy = true;
+
+    render();
+    status('Lagrer vekt…');
+
+    supabaseClient.rpc(
+      'minbag_save_bag_carry_settings',
+      {
+        p_bag_id: bagId,
+        p_bag_weight_grams:
+          Math.round(
+            bagKg * 1000
+          ),
+        p_accessory_weight_grams:
+          accessoryGrams,
+        p_accessory_items:
+          carryAccessoryItems()
+            .map(
+              function (item) {
+                return {
+                  key:
+                    safe(item.key),
+                  label:
+                    safe(item.label),
+                  grams:
+                    normalizeCarryGrams(
+                      item.grams,
+                      5000
+                    ),
+                  qty: 1,
+                  custom:
+                    !!item.custom
+                };
+              }
+            )
+      }
+    ).then(function (res) {
+      if (
+        !isCurrentUserContext(
+          userContext
+        ) ||
+        STATE.activeBagId !==
+          bagId
+      ) {
+        return;
+      }
+
+      if (res.error) {
+        throw res.error;
+      }
+
+      STATE.carryWeight
+        .bagWeightGrams =
+          Math.round(
+            bagKg * 1000
+          );
+
+      syncCarryAccessoryTotal();
+
+      STATE.carryWeightLoaded =
+        true;
+
+      STATE.carryWeightBusy =
+        false;
+
+      STATE.carryWeightOpen =
+        false;
+
+      render();
+
+      status(
+        'Vekten er lagret.',
+        'ok'
+      );
+    }).catch(function (err) {
+      if (
+        !isCurrentUserContext(
+          userContext
+        ) ||
+        STATE.activeBagId !==
+          bagId
+      ) {
+        return;
+      }
+
+      STATE.carryWeightBusy =
+        false;
+
+      render();
+
+      status(
+        'Kunne ikke lagre vekt: ' +
+        errorMessage(err),
+        'err'
+      );
+    });
+  }
+
+  function injectCarryWeightCss() {
+    if (
+      document.getElementById(
+        'gk-minbag-carry-css'
+      )
+    ) {
+      return;
+    }
+
+    var style =
+      document.createElement('style');
+
+    style.id =
+      'gk-minbag-carry-css';
+
+    style.textContent =
+      '.gkmb3-homebagvisual{position:relative;}' +
+      '.gkmb3-carrypill{position:absolute!important;z-index:50!important;top:8px;left:8px;display:inline-flex;align-items:center;gap:6px;min-height:30px;max-width:calc(100% - 16px);padding:5px 8px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(3,12,7,.90);box-shadow:0 7px 18px rgba(0,0,0,.24);backdrop-filter:blur(8px);color:#fff;cursor:pointer;pointer-events:auto!important;touch-action:manipulation;user-select:none;}' +
+      '.gkmb3-carrypill:focus{outline:2px solid rgba(34,197,94,.55);outline-offset:2px;}' +
+      '.gkmb3-carrypill-label{font-size:8.5px;font-weight:900;color:rgba(255,255,255,.62);white-space:nowrap;}' +
+      '.gkmb3-carrypill-value{font-size:10.5px;font-weight:1000;color:#fff;white-space:nowrap;font-variant-numeric:tabular-nums;}' +
+      '.gkmb3-carrypill-arrow{font-size:15px;line-height:1;color:#86efac;}' +
+
+      '.gkmb3-carryeditor{display:grid;gap:12px;padding:14px;border:1px solid rgba(255,255,255,.09);border-radius:18px;background:linear-gradient(180deg,rgba(8,18,12,.99),rgba(4,11,7,.99));box-shadow:0 18px 44px rgba(0,0,0,.22);scroll-margin-top:86px;}' +
+      '.gkmb3-carryeditor-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}' +
+      '.gkmb3-carryeditor-head>div{display:grid;gap:3px;}' +
+      '.gkmb3-carryeditor-head strong{font-size:14px;color:#fff;}' +
+      '.gkmb3-carryeditor-head span{font-size:10px;line-height:1.45;color:rgba(255,255,255,.48);}' +
+      '.gkmb3-carryclose{width:30px;height:30px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(255,255,255,.04);color:#fff;font:inherit;font-size:17px;cursor:pointer;}' +
+
+      '.gkmb3-carrysummary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;}' +
+      '.gkmb3-carrysummary>div{display:grid;gap:3px;padding:8px 9px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(255,255,255,.025);}' +
+      '.gkmb3-carrysummary span{font-size:8.5px;color:rgba(255,255,255,.40);}' +
+      '.gkmb3-carrysummary b{font-size:11px;color:#fff;font-variant-numeric:tabular-nums;}' +
+
+      '.gkmb3-carrysection{display:grid;gap:10px;padding:12px;border:1px solid rgba(255,255,255,.065);border-radius:14px;background:rgba(255,255,255,.018);}' +
+      '.gkmb3-carrysection-head{display:grid;gap:3px;}' +
+      '.gkmb3-carrysection-head strong{font-size:12px;color:#fff;}' +
+      '.gkmb3-carrysection-head span{font-size:9.5px;line-height:1.45;color:rgba(255,255,255,.43);}' +
+
+      '.gkmb3-bagweight-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;}' +
+      '.gkmb3-bagweight-option{display:grid;gap:3px;min-height:84px;padding:9px 10px;border:1px solid rgba(255,255,255,.08);border-radius:11px;background:rgba(255,255,255,.028);color:#fff;font:inherit;text-align:left;cursor:pointer;}' +
+      '.gkmb3-bagweight-option:hover{border-color:rgba(34,197,94,.32);background:rgba(34,197,94,.055);}' +
+      '.gkmb3-bagweight-option strong{font-size:10px;}' +
+      '.gkmb3-bagweight-option span{font-size:10px;font-weight:950;color:#bbf7d0;}' +
+      '.gkmb3-bagweight-option small{font-size:8.5px;line-height:1.35;color:rgba(255,255,255,.43);}' +
+      '.gkmb3-carry-exact{max-width:360px;}' +
+
+      '.gkmb3-carryfield{display:grid;gap:6px;font-size:10px;font-weight:850;color:rgba(255,255,255,.68);}' +
+      '.gkmb3-carryfield>.gkmb3-input{min-height:40px;font-size:13px;}' +
+
+      '.gkmb3-accessory-total{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border:1px solid rgba(34,197,94,.16);border-radius:11px;background:rgba(34,197,94,.055);}' +
+      '.gkmb3-accessory-total span{font-size:9.5px;color:#bbf7d0;}' +
+      '.gkmb3-accessory-total strong{font-size:14px;color:#fff;font-variant-numeric:tabular-nums;}' +
+
+      '.gkmb3-accessory-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;}' +
+      '.gkmb3-accessory-option{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:7px;min-height:48px;padding:8px;border:1px solid rgba(255,255,255,.075);border-radius:10px;background:rgba(255,255,255,.025);color:#fff;font:inherit;text-align:left;cursor:pointer;}' +
+      '.gkmb3-accessory-option.selected{border-color:rgba(34,197,94,.38);background:rgba(34,197,94,.09);}' +
+      '.gkmb3-accessory-icon{font-size:17px;}' +
+      '.gkmb3-accessory-copy{display:grid;gap:2px;min-width:0;}' +
+      '.gkmb3-accessory-copy strong{font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+      '.gkmb3-accessory-copy small{font-size:8.5px;color:rgba(255,255,255,.45);}' +
+      '.gkmb3-accessory-check{display:grid;place-items:center;width:22px;height:22px;border-radius:999px;background:rgba(255,255,255,.055);color:#86efac;font-size:11px;font-weight:1000;}' +
+      '.gkmb3-accessory-option.selected .gkmb3-accessory-check{background:#15803d;color:#fff;}' +
+
+      '.gkmb3-custom-accessory{display:grid;gap:6px;padding-top:2px;}' +
+      '.gkmb3-custom-accessory>strong{font-size:10px;color:#fff;}' +
+      '.gkmb3-custom-accessory>span{font-size:9px;color:rgba(255,255,255,.42);}' +
+      '.gkmb3-custom-accessory-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(100px,.7fr) auto;gap:7px;}' +
+
+      '.gkmb3-selected-title{font-size:9px;font-weight:900;color:rgba(255,255,255,.62);}' +
+      '.gkmb3-selected-accessories{display:grid;gap:5px;}' +
+      '.gkmb3-selected-accessory{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 8px;border:1px solid rgba(255,255,255,.06);border-radius:9px;background:rgba(0,0,0,.12);}' +
+      '.gkmb3-selected-accessory>div{display:flex;align-items:center;gap:8px;min-width:0;}' +
+      '.gkmb3-selected-accessory strong{font-size:9px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+      '.gkmb3-selected-accessory span{font-size:8.5px;color:rgba(255,255,255,.45);white-space:nowrap;}' +
+      '.gkmb3-accessory-remove{min-height:26px;padding:4px 7px;border:1px solid rgba(239,68,68,.18);border-radius:7px;background:rgba(239,68,68,.06);color:#fecaca;font:inherit;font-size:8px;font-weight:900;cursor:pointer;}' +
+      '.gkmb3-carryempty{padding:8px;border:1px dashed rgba(255,255,255,.08);border-radius:9px;color:rgba(255,255,255,.35);font-size:9px;}' +
+
+      '.gkmb3-carryhint{font-size:9px;line-height:1.45;color:rgba(255,255,255,.40);}' +
+      '.gkmb3-carryactions{display:flex;justify-content:flex-end;gap:7px;}' +
+      '.gkmb3-carryactions .gkmb3-btn{width:auto;min-width:105px;}' +
+
+      '@media(max-width:760px){' +
+        '.gkmb3-carrypill{top:7px;left:7px;min-height:29px;padding:5px 7px;}' +
+        '.gkmb3-carrypill-label{font-size:8.5px;}' +
+        '.gkmb3-carrypill-value{font-size:10px;}' +
+        '.gkmb3-carryeditor{padding:11px;scroll-margin-top:76px;}' +
+        '.gkmb3-carrysummary{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-bagweight-grid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-accessory-grid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
+        '.gkmb3-custom-accessory-grid{grid-template-columns:1fr 110px;}' +
+        '.gkmb3-custom-accessory-grid .gkmb3-btn{grid-column:1/-1;width:100%;}' +
+        '.gkmb3-carryactions{display:grid;grid-template-columns:1fr 1fr;}' +
+        '.gkmb3-carryactions .gkmb3-btn{width:100%;min-width:0;}' +
+      '}' +
+
+      '@media(max-width:390px){' +
+        '.gkmb3-carrypill-label{display:none;}' +
+        '.gkmb3-carrypill{gap:4px;}' +
+        '.gkmb3-bagweight-option{min-height:78px;}' +
+        '.gkmb3-accessory-grid{grid-template-columns:1fr;}' +
+      '}';
+
+    document.head.appendChild(
+      style
+    );
+  }
+
   function injectCss() {
     if (document.getElementById('gk-minbag-v3-css')) return;
 
@@ -348,6 +2194,8 @@
       '.gkmb3-status{margin-top:14px;padding:11px 13px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.07);color:rgba(255,255,255,.82);font-size:13px;font-weight:800;}' +
       '.gkmb3-status.ok{border-color:rgba(34,197,94,.36);background:rgba(34,197,94,.12);color:#d1fae5;}' +
       '.gkmb3-status.err{border-color:rgba(239,68,68,.42);background:rgba(239,68,68,.12);color:#fee2e2;}' +
+      '.gkmb3-web-app-link{display:inline-flex;align-items:center;margin-top:10px;padding:8px 10px;border:1px solid rgba(34,197,94,.20);border-radius:10px;background:rgba(34,197,94,.055);color:#bbf7d0!important;font-size:11px;font-weight:850;text-decoration:none!important;}' +
+      '.gkmb3-web-app-link:hover{background:rgba(34,197,94,.10);border-color:rgba(34,197,94,.34);}' +
 
       '.gkmb3-pills{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px;}' +
       '.gkmb3-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.07);font-size:12px;font-weight:800;color:rgba(255,255,255,.82);}' +
@@ -888,7 +2736,7 @@
     card.appendChild(el(
       'p',
       '',
-      'De mest brukte discmodellene blant Min Bag-brukerne. Hver bruker teller én gang per modell, og bare modeller som finnes i GolfKongen-nettbutikken vises.'
+      'De mest brukte discmodellene blant Min Bag-brukerne. Hver bruker teller én gang per modell.'
     ));
 
     var grid = el('div', 'gkmb3-top3grid');
@@ -1177,24 +3025,36 @@
   function dashboardBagImageUrl(bag) {
     if (!bag) return '';
 
-    // Hjem-siden skal bruke nøyaktig samme bildeprioritet som "Bagen min":
-    // Har bagen en valgt GolfKongen-sekk, er det DEN som representerer bagen.
-    // Eget opplastet bilde brukes bare når ingen GolfKongen-sekk er valgt.
     var selection = currentStoreBagSelection(bag.id);
 
     if (selection && selection.quickbutik_product_id) {
       var productId = safe(selection.quickbutik_product_id);
-      var storeUrl = STATE.storeBagImageUrls[productId] || '';
 
-      if (storeUrl) return storeUrl;
+      // The RPC now returns the product image directly when available.
+      var directStoreUrl = safe(selection.product_image_url);
+      if (directStoreUrl) {
+        STATE.storeBagImageUrls[productId] = directStoreUrl;
+        return directStoreUrl;
+      }
 
-      // Normalt er bildet allerede prelastet av loadStoreBagSelections().
-      // Denne fallbacken gjør dashboardet robust dersom bildet kommer litt senere.
+      // If an image lookup has already completed, also respect an empty result.
+      // This is important: the old code started a new lookup + render forever
+      // when the result was empty, which made the dashboard blink and swallowed clicks.
+      if (
+        Object.prototype.hasOwnProperty.call(
+          STATE.storeBagImageUrls,
+          productId
+        )
+      ) {
+        return STATE.storeBagImageUrls[productId] || '';
+      }
+
       if (!STATE.storeBagImageLoading[productId]) {
         window.setTimeout(function () {
           ensureStoreBagImage(productId)
-            .then(function () {
-              render();
+            .then(function (imageUrl) {
+              // Re-render only if we actually found a new image.
+              if (imageUrl) render();
             })
             .catch(function () {});
         }, 0);
@@ -1642,10 +3502,17 @@
       visual.appendChild(el('div', 'gkmb3-homebagfallback', '🎒'));
     }
 
+    visual.appendChild(renderCarryWeightPill());
+
     visualStack.appendChild(visual);
     visualStack.appendChild(renderHomeScorePanel());
     hero.appendChild(visualStack);
     wrap.appendChild(hero);
+
+    var carryEditor = renderCarryWeightEditor();
+    if (carryEditor) {
+      wrap.appendChild(carryEditor);
+    }
 
     var rewardCard = renderRewardCard();
     if (rewardCard) wrap.appendChild(rewardCard);
@@ -2307,7 +4174,7 @@
       hero.appendChild(el(
         'p',
         '',
-        'Logg inn med e-post for å bygge og lagre discgolf-bagen din. Du får en sikker innloggingslenke på e-post.'
+        'Bruk Min Bag direkte her i nettleseren – du trenger ikke installere noen app. Vil du ha Min Bag som ikon på mobilen, kan du installere den som app senere. Logg inn med e-post og kode.'
       ));
       hero.appendChild(renderLogin());
 
@@ -3200,21 +5067,62 @@
     input.autocomplete = 'email';
     input.placeholder = 'din@epost.no';
 
+    try {
+      input.value = localStorage.getItem('gkmb3_pending_login_email') || '';
+    } catch (_) {}
+
     input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') sendMagicLink();
+      if (e.key === 'Enter') sendLoginCode();
     });
 
-    var btn = el('button', 'gkmb3-btn', 'Send innloggingslenke');
-    btn.type = 'button';
-    btn.onclick = sendMagicLink;
+    var sendBtn = el('button', 'gkmb3-btn', 'Send innloggingskode');
+    sendBtn.type = 'button';
+    sendBtn.onclick = sendLoginCode;
+
+    var code = el('input', 'gkmb3-input');
+    code.id = 'gkmb3-login-code';
+    code.type = 'text';
+    code.inputMode = 'numeric';
+    code.autocomplete = 'one-time-code';
+    code.maxLength = 12;
+    code.placeholder = 'Kode fra e-posten';
+    code.style.marginTop = '8px';
+    code.style.letterSpacing = '.18em';
+    code.style.fontWeight = '900';
+    code.style.textAlign = 'center';
+
+    code.addEventListener('input', function () {
+      code.value = safe(code.value).replace(/\D/g, '').slice(0, 12);
+    });
+
+    code.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') verifyLoginCode();
+    });
+
+    var verifyBtn = el('button', 'gkmb3-btn secondary', 'Logg inn med kode');
+    verifyBtn.type = 'button';
+    verifyBtn.style.marginTop = '7px';
+    verifyBtn.onclick = verifyLoginCode;
 
     wrap.appendChild(input);
-    wrap.appendChild(btn);
+    wrap.appendChild(sendBtn);
+    wrap.appendChild(code);
+    wrap.appendChild(verifyBtn);
     wrap.appendChild(el(
       'div',
       'gkmb3-note',
-      'Ingen passord nødvendig. Åpne lenken i e-posten, så kommer du tilbake hit ferdig innlogget.'
+      'Ingen passord nødvendig. Trykk «Send innloggingskode», sjekk e-posten og skriv inn hele koden her. Min Bag fungerer fullt direkte i nettleseren.'
     ));
+
+    var appLink = el(
+      'a',
+      'gkmb3-web-app-link',
+      '📱 Vil du heller ha Min Bag som app? Åpne app-versjonen'
+    );
+    appLink.href = 'https://app.golfkongen.no/';
+    appLink.target = '_blank';
+    appLink.rel = 'noopener';
+    wrap.appendChild(appLink);
 
     return wrap;
   }
@@ -7357,7 +9265,7 @@
     return !!(node && node.checked);
   }
 
-  function sendMagicLink() {
+  function sendLoginCode() {
     var email = getInputValue('gkmb3-email').toLowerCase();
 
     if (!email || email.indexOf('@') === -1) {
@@ -7365,25 +9273,75 @@
       return;
     }
 
-    setLoading(true, 'Sender innloggingslenke…');
+    try {
+      localStorage.setItem('gkmb3_pending_login_email', email);
+    } catch (_) {}
+
+    setLoading(true, 'Sender innloggingskode…');
 
     supabaseClient.auth.signInWithOtp({
-      email: email,
-      options: {
-        emailRedirectTo: CONFIG.MAGIC_LINK_REDIRECT
-      }
+      email: email
     }).then(function (res) {
       setLoading(false);
 
       if (res.error) {
-        status('Kunne ikke sende innloggingslenke: ' + errorMessage(res.error), 'err');
+        status('Kunne ikke sende innloggingskode: ' + errorMessage(res.error), 'err');
         return;
       }
 
-      status('Innloggingslenke sendt. Sjekk e-posten din.', 'ok');
+      status('Kode sendt. Sjekk e-posten og skriv inn hele koden.', 'ok');
+
+      var code = document.getElementById('gkmb3-login-code');
+      if (code) code.focus();
     }).catch(function (err) {
       setLoading(false);
-      status('Kunne ikke sende innloggingslenke: ' + errorMessage(err), 'err');
+      status('Kunne ikke sende innloggingskode: ' + errorMessage(err), 'err');
+    });
+  }
+
+  function verifyLoginCode() {
+    var email = getInputValue('gkmb3-email').toLowerCase();
+    var token = getInputValue('gkmb3-login-code').replace(/\D/g, '');
+
+    if (!email) {
+      try {
+        email = (localStorage.getItem('gkmb3_pending_login_email') || '').toLowerCase();
+      } catch (_) {}
+    }
+
+    if (!email || email.indexOf('@') === -1) {
+      status('Skriv inn e-postadressen koden ble sendt til.', 'err');
+      return;
+    }
+
+    if (!token || token.length < 6 || token.length > 12) {
+      status('Skriv inn hele koden fra e-posten.', 'err');
+      return;
+    }
+
+    setLoading(true, 'Logger inn…');
+
+    supabaseClient.auth.verifyOtp({
+      email: email,
+      token: token,
+      type: 'email'
+    }).then(function (res) {
+      setLoading(false);
+
+      if (res.error) {
+        status('Koden kunne ikke bekreftes: ' + errorMessage(res.error), 'err');
+        return;
+      }
+
+      try {
+        localStorage.removeItem('gkmb3_pending_login_email');
+      } catch (_) {}
+
+      status('Innlogging godkjent. Laster Min Bag…', 'ok');
+      return refreshAuthState();
+    }).catch(function (err) {
+      setLoading(false);
+      status('Koden kunne ikke bekreftes: ' + errorMessage(err), 'err');
     });
   }
 
@@ -7426,6 +9384,15 @@
     STATE.storeBagImageLoading = {};
     STATE.storeBagPickerOpen = false;
     STATE.storeBagBusy = false;
+    STATE.carryWeight = {
+      bagWeightGrams: 0,
+      accessoryWeightGrams: 0,
+      accessoryItems: []
+    };
+    STATE.carryWeightLoaded = false;
+    STATE.carryWeightPromise = null;
+    STATE.carryWeightOpen = false;
+    STATE.carryWeightBusy = false;
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
     STATE.bagActionBusy = false;
@@ -7493,12 +9460,153 @@
     STATE.recoBusy = false;
   }
 
+  var PUBLIC_TOP3_CACHE_KEY = 'gkmb3_public_top3_v1';
+
+  function bundledPublicTop3() {
+    return [{"disc_type":"putter","name":"Envy","brand":"Axiom","product_url":"https://golfkongen.no/discgolf/disc-putter/axiom-envy","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a32f6cbdd585.webp","count":5},{"disc_type":"putter","name":"Pixel","brand":"Axiom","product_url":"https://golfkongen.no/discgolf/disc-putter/pixel-electron-simon-line-new-stock-stamp","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a48d23b235f7.webp","count":5},{"disc_type":"putter","name":"Proxy","brand":"Axiom","product_url":"https://golfkongen.no/discgolf/disc-putter/proton-soft-proxy-otb-open-2026","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a286172d0aca.webp","count":4},{"disc_type":"midrange","name":"Hex","brand":"Axiom","product_url":"https://golfkongen.no/discgolf/glow-disc/axiom-particle-eclipse-hex-2025-halloween-special-edition","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a32f4ca39310.webp","count":10},{"disc_type":"midrange","name":"Detour","brand":"MVP","product_url":"https://golfkongen.no/discgolf/detour-neutron","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a2ed545438bb.webp","count":6},{"disc_type":"midrange","name":"Buzzz","brand":"Discraft","product_url":"https://golfkongen.no/discgolf/midrange/esp-buzzz-ledgestone-2025","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a2eb8d062056.webp","count":5},{"disc_type":"fairway","name":"Crave","brand":"Axiom","product_url":"https://golfkongen.no/discgolf/fairway-driver/fission-crave","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a32f43aec0e6.webp","count":7},{"disc_type":"fairway","name":"Firebird","brand":"Innova","product_url":"https://golfkongen.no/discgolf/fairway-driver/champion-driver-firebird-innova","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a2c831f6061b.webp","count":6},{"disc_type":"fairway","name":"Teebird","brand":"Innova","product_url":"https://golfkongen.no/discgolf/fairway-driver/champion-driver-teebird-innova","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a2c8227c16f6.webp","count":5},{"disc_type":"distance","name":"Trail","brand":"MVP","product_url":"https://golfkongen.no/discgolf/driver/fission-trail-james-conrad-team-series","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a2edbcef1bbd.webp","count":7},{"disc_type":"distance","name":"DD1","brand":"Discmania","product_url":"https://golfkongen.no/discgolf/driver/q-line-premier-dd1","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a285b3225c15.webp","count":5},{"disc_type":"distance","name":"DD3","brand":"Discmania","product_url":"https://golfkongen.no/discgolf/driver/c-line-driver-dd3-discmania","image_url":"https://s3-eu-west-1.amazonaws.com/storage.quickbutik.com/stores/52923d/products/6a2ea2306494d.webp","count":3}];
+  }
+
+  function validPublicTop3Rows(rows) {
+    if (!Array.isArray(rows) || !rows.length) return [];
+
+    var allowed = {
+      putter: true,
+      midrange: true,
+      fairway: true,
+      distance: true
+    };
+
+    return rows.filter(function (row) {
+      return !!(
+        row &&
+        allowed[safe(row.disc_type)] &&
+        safe(row.name) &&
+        safe(row.product_url)
+      );
+    });
+  }
+
+  function readCachedPublicTop3() {
+    try {
+      var raw = localStorage.getItem(PUBLIC_TOP3_CACHE_KEY);
+      if (!raw) return [];
+
+      var parsed = JSON.parse(raw);
+      return validPublicTop3Rows(parsed);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function cachePublicTop3(rows) {
+    try {
+      localStorage.setItem(
+        PUBLIC_TOP3_CACHE_KEY,
+        JSON.stringify(rows)
+      );
+    } catch (_) {}
+  }
+
+  function primePublicTop3() {
+    var cached = readCachedPublicTop3();
+    var initial = cached.length
+      ? cached
+      : bundledPublicTop3();
+
+    STATE.top3 = initial;
+    STATE.top3Loaded = true;
+  }
+
+  function fetchPublicTop3Direct() {
+    if (!window.fetch) {
+      return Promise.reject(new Error('Fetch støttes ikke.'));
+    }
+
+    return fetch(
+      CONFIG.SUPABASE_URL + '/rest/v1/rpc/minbag_get_top3',
+      {
+        method: 'POST',
+        headers: {
+          apikey: CONFIG.SUPABASE_ANON_KEY,
+          Authorization: 'Bearer ' + CONFIG.SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: '{}',
+        cache: 'no-store'
+      }
+    ).then(function (response) {
+      if (!response.ok) {
+        throw new Error('Top 3 HTTP ' + response.status);
+      }
+
+      return response.json();
+    });
+  }
+
   function loadPublicTop3() {
-    return supabaseClient.rpc('minbag_get_top3')
+    function applyRows(rows, source) {
+      var valid = validPublicTop3Rows(rows);
+
+      if (!valid.length) {
+        throw new Error(
+          'Top 3 ga ingen gyldige rader fra ' + source + '.'
+        );
+      }
+
+      STATE.top3 = valid;
+      STATE.top3Loaded = true;
+      cachePublicTop3(valid);
+
+      /*
+        Top 3 is public and can finish loading after an auth-state render.
+        Re-render explicitly so anonymous visitors never remain on an empty list.
+      */
+      if (root) render();
+
+      return valid;
+    }
+
+    return supabaseClient
+      .rpc('minbag_get_top3')
       .then(function (res) {
         if (res.error) throw res.error;
-        STATE.top3 = res.data || [];
-        STATE.top3Loaded = true;
+
+        return applyRows(
+          res.data || [],
+          'Supabase RPC'
+        );
+      })
+      .catch(function (rpcError) {
+        console.warn(
+          '[GK MIN BAG] Top 3 RPC feilet, prøver direkte REST.',
+          rpcError
+        );
+
+        return fetchPublicTop3Direct()
+          .then(function (rows) {
+            return applyRows(
+              rows,
+              'direkte REST'
+            );
+          })
+          .catch(function (restError) {
+            console.warn(
+              '[GK MIN BAG] Direkte Top 3 feilet, bruker lokal fallback.',
+              restError
+            );
+
+            var cached = readCachedPublicTop3();
+            var fallback = cached.length
+              ? cached
+              : bundledPublicTop3();
+
+            STATE.top3 = fallback;
+            STATE.top3Loaded = true;
+
+            if (root) render();
+
+            return fallback;
+          });
       });
   }
 
@@ -9056,10 +11164,16 @@
           if (!row.quickbutik_product_id) continue;
 
           STATE.storeBagSelections[row.bag_id] = row;
-          preloads.push(
-            ensureStoreBagImage(row.quickbutik_product_id)
-              .catch(function () {})
-          );
+
+          if (row.product_image_url) {
+            STATE.storeBagImageUrls[safe(row.quickbutik_product_id)] =
+              safe(row.product_image_url);
+          } else {
+            preloads.push(
+              ensureStoreBagImage(row.quickbutik_product_id)
+                .catch(function () {})
+            );
+          }
         }
 
         return Promise.all(preloads);
@@ -9664,6 +11778,15 @@
     STATE.roundBagError = '';
     STATE.roundBagSourceName = '';
     STATE.expandedOverlapKey = '';
+    STATE.carryWeight = {
+      bagWeightGrams: 0,
+      accessoryWeightGrams: 0,
+      accessoryItems: []
+    };
+    STATE.carryWeightLoaded = false;
+    STATE.carryWeightPromise = null;
+    STATE.carryWeightOpen = false;
+    STATE.carryWeightBusy = false;
     STATE.newBagOpen = false;
     STATE.renameBagOpen = false;
 
@@ -10439,6 +12562,8 @@
     }
 
     injectCss();
+    injectCarryWeightCss();
+    primePublicTop3();
 
     clear(root);
 
@@ -10469,9 +12594,9 @@
 
         return loadPublicTop3()
           .catch(function (err) {
-            STATE.top3 = [];
+            if (!STATE.top3.length) primePublicTop3();
             STATE.top3Loaded = true;
-            console.warn('[GK MIN BAG V3] Kunne ikke laste offentlig Top 3', err);
+            console.warn('[GK MIN BAG V3] Kunne ikke oppdatere offentlig Top 3', err);
           })
           .then(function () {
             return refreshAuthState();
